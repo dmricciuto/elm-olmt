@@ -61,7 +61,7 @@ def create_ensemble_script(self, walltime=6):
     if (self.queue == 'debug'):
         walltime=2
     myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
-    myfile.write('#SBATCH -J ens_'+self.casename+'\n')
+    myfile.write('#SBATCH -J '+self.casename+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')  
     if (self.project != ''):
         myfile.write('#SBATCH -A '+self.project+'\n')
@@ -96,7 +96,7 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
     if (self.queue == 'debug'):
         walltime=2
     myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
-    myfile.write('#SBATCH -J ens_'+self.casename.replace('_'+self.site,'')+'\n')
+    myfile.write('#SBATCH -J '+self.casename.replace('_'+self.site,'')+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')
     if (self.project != ''):
         myfile.write('#SBATCH -A '+self.project+'\n')
@@ -123,9 +123,10 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
                 myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
                     self.finidat+' --var '+var+' --val '+value+'\n')
       if (self.noslurm):
-        myfile.write(self.exeroot+'/e3sm.exe &\n\n')
+        myfile.write(self.exeroot+'/e3sm.exe > '+self.rundir+'/e3sm_log.txt &\n\n')
       else:
-        myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe &\n\n')
+        myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
+                self.rundir+'/e3sm_log.txt &\n\n')
     myfile.write('wait\n')
     myfile.close()
     os.system('chmod u+x '+fname)

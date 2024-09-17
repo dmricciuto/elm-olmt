@@ -1,4 +1,4 @@
-import socket, os, sys
+import socket, os, sys, re
 import subprocess
 import numpy as np
 
@@ -76,6 +76,7 @@ def get_point_list(fname):
     for s in myfile:
         if snum == 0:
             header=s.split(',')
+            #header=re.split(r'[,\s\t]+', s)
             hnum=0
             for h in header:
                 if ('lat' in h):
@@ -84,8 +85,8 @@ def get_point_list(fname):
                     loncol=hnum
                 hnum=hnum+1
         else:
-            points.append((float(s.split(',')[latcol]), \
-                float(s.split(',')[loncol])))
+            line=s.split(',') #line=re.split(r'[,\s\t]+', s)
+            points.append((float(line[latcol]),float(line[loncol])))
         snum=snum+1
     return points
 #TODO:  Function to return met data path for various options

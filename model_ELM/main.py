@@ -127,6 +127,7 @@ class ELMcase():
     self.queue='batch'
     if ('baseline' in self.machine):
         self.project='CLI185'
+        self.queue='batch'
     elif ('chrysalis' in self.machine):
         self.project='e3sm'
         self.queue='debug'
@@ -298,7 +299,7 @@ class ELMcase():
         self.dobuild = True
         self.exeroot = self.runroot+'/'+self.casename+'/bld'
 
-  def setup_domain_surfdata(self,makedomain=False,makesurfdat=False,makepftdyn=False):
+  def setup_domain_surfdata(self,makedomain=False,makesurfdat=False,makepftdyn=False, pft=-1):
      #------Make domain, surface data and pftdyn files ------------------
     os.chdir(self.OLMTdir)
     mysimyr=1850
@@ -314,9 +315,9 @@ class ELMcase():
     if (domainfile == '' and makedomain):
       self.makepointdata(self.domain_global)
     if (surffile == '' and makesurfdat):
-      self.makepointdata(self.surfdata_global)
+      self.makepointdata(self.surfdata_global, pft=pft)
     if (pftdynfile == '' and makepftdyn and not (self.nopftdyn)):
-      self.makepointdata(self.pftdyn_global)
+      self.makepointdata(self.pftdyn_global, pft=pft)
     if (domainfile != ''):
       print('\nDomain file:             '+ domainfile)
     if (surffile != ''):
@@ -553,7 +554,11 @@ class ELMcase():
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
-            self.customize_namelist(variable=key,value=str(self.case_options[key]))
+            if (isinstance(self.case_options[key], str) and not ('hist_' in key) \
+                    and not '.true.' in self.case_options[key] and not '.false.' in self.case_options[key]):
+                self.customize_namelist(variable=key,value="'"+self.case_options[key]+"'")
+            else:
+                self.customize_namelist(variable=key,value=str(self.case_options[key]))
         elif ('humhol' in key):
             self.humhol=True
 
@@ -644,7 +649,7 @@ class ELMcase():
       if (not self.is_bypass()):
           self.modify_datm_streamfiles()
       #Copy customized parameter, surface and domain files to run directory
-      os.system('mkdir -p temp')
+      os.system('mkdir -p '+self.OLMTdir+'/temp')
       os.system('cp '+self.OLMTdir+'/temp/*param*.nc '+self.rundir)
       if (not 'domainfile' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)

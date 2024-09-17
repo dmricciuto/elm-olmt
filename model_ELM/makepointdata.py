@@ -68,37 +68,60 @@ def get_pointindices_bbox(self, lat_bounds, lon_bounds, lat_grid, lon_grid, mask
     return index_out
 
 
-def subset_netcdf(self, index, input_file, output_file):
+def subset_netcdf(self, index, input_file, output_file, keep2d=False):
     # Load the input NetCDF file
     original_ds = xr.open_dataset(input_file, mode='r')
-    subset_ds = xr.Dataset()
-
+    #subset_ds = xr.Dataset()
+    print(index, input_file)
     # Select the variable and apply subsetting if specified
     for var_name, var_data in original_ds.data_vars.items():
         if ('lsmlat' in var_data.dims and 'lsmlon' in var_data.dims):
-            #Extract from 2D surface data to 1D
-            var_subset = var_data.isel(lsmlat=xr.DataArray([lat for lat, lon in index],dims='gridcell'), \
-                 lsmlon=xr.DataArray([lon for lat, lon in index],dims='gridcell'))
+            if keep2d:
+                lat_indices = [lat for lat, lon in index]
+                lon_indices = [lon for lat, lon in index]
+                var_subset = var_data.isel(lsmlat=slice(min(lat_indices), max(lat_indices)),
+                                           lsmlon=slice(min(lon_indices), max(lon_indices)))
+            else:
+                var_subset = var_data.isel(lsmlat=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
+                                           lsmlon=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
         elif ('ni' in var_data.dims and 'nj' in var_data.dims):
             #Domain file
-            var_subset = var_data.isel(nj=xr.DataArray([lat for lat, lon in index],dims='gridcell'), \
-                 ni=xr.DataArray([lon for lat, lon in index],dims='gridcell'))
-            var_subset = var_subset.expand_dims(dim={'dummy_dim': [1]})
-            var_subset = var_subset.rename({'gridcell': 'ni', 'dummy_dim': 'nj'})
+            if keep2d:
+                # Use original 2D indexing
+                lat_indices = [lat for lat, lon in index]
+                lon_indices = [lon for lat, lon in index]
+                var_subset = var_data.isel(nj=slice(min(lat_indices), max(lat_indices)),
+                                           ni=slice(min(lon_indices), max(lon_indices)))
+            else:
+                # Flatten to 1D
+                var_subset = var_data.isel(nj=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
+                                           ni=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
+                var_subset = var_subset.rename({'gridcell': 'ni'})
+                var_subset = var_subset.expand_dims(dim={'nj': [1]})
+                var_subset = var_subset.transpose('nj', ...)
         elif ('gridcell' in var_data.dims):
             #Source dataset is 1D, simply extract
             var_subset = var_data.isel({gridcell: index})
         else:
             var_subset = var_data
-        subset_ds[var_name] = var_subset
-
-    # Save the new Dataset to the output file
-    subset_ds.to_netcdf(output_file)
-    subset_ds.close()
+        var_subset.to_netcdf(output_file,mode='a' if var_name != list(original_ds.data_vars)[0] else 'w')
     original_ds.close()
 
+def setpfts(self, ds, pct_pft, zerootherlandunits=True):
+    #Set the PFTs as desired, zero out other landunits
+    #Assign PCT_NAT_PFT (should work whether 2, 3 or 4 dimensions)
+    ds['PCT_NAT_PFT'] = ds['PCT_NAT_PFT'] * 0 + pct_pft.broadcast_like(ds['PCT_NAT_PFT'])
+    #Assume we want to zero the other land units
+    if (zerootherlandunits):
+        ds['PCT_NATVEG'][:] = 100.0
+        print('Zeroing out other landunits')
+        nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_CROP','PCT_GLACIER']
+        for v in nonveg:
+            ds[v][:] = 0.0
+    return ds
 
-def makepointdata(self, filename, mylat=[], mylon=[]):
+            
+def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
     #Extract surface, domain, or pftdyn data from a given regional or global file.
     #If mylat and mylon are empty, it will use self.lat_bounds and self.lon_bounds to extract.
     mydata = Dataset(filename,'r')
@@ -140,26 +163,26 @@ def makepointdata(self, filename, mylat=[], mylon=[]):
         self.subset_netcdf(index, infile,  outfile)
         ds = xr.open_dataset(outfile, mode='r+')
         if (not isdomain):
-            #Set the site PFT and soil texture
+            #Set site PFT and soil texture
             if (sum(self.siteinfo['PCT_NAT_PFT']) > 0):
-                print('Setting PFT_NAT_PFT to: ', self.siteinfo['PCT_NAT_PFT'])
-                #Assign PCT_NAT_PFT (should work whether 2, 3 or 4 dimensions)
                 pct_nat_pft = xr.DataArray(self.siteinfo['PCT_NAT_PFT'], dims=['natpft'])
-                ds['PCT_NAT_PFT'] = ds['PCT_NAT_PFT'] * 0 + pct_nat_pft.broadcast_like(ds['PCT_NAT_PFT'])
-                #Assume we want to zero the other land units
-                ds['PCT_NATVEG'][:] = 100.0
-                print('Zeroing out other landunits')
-                nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_CROP','PCT_GLACIER']
-                for v in nonveg:
-                    ds[v][:] = 0.0
-                if (not ispftdyn):
-                    if (self.siteinfo['PCT_SAND'] >= 0):
-                        ds['PCT_SAND'][:] = self.siteinfo['PCT_SAND']
-                        print('Setting %SAND to ',self.siteinfo['PCT_SAND'])
-                    if (self.siteinfo['PCT_CLAY'] >= 0):
-                        ds['PCT_CLAY'][:] = self.siteinfo['PCT_CLAY']
-                        print('Setting $CLAY to ',self.siteinfo['PCT_CLAY'])
-                #else:  TODO - handle land use transitions
+                ds = self.setpfts(ds, pct_nat_pft);
+            if (pft >=0):
+                npfts = ds['PCT_NAT_PFT'].sizes['natpft']
+                #Overrite site info
+                pct_pft = np.zeros(npfts, float)
+                pct_pft[pft] = 100.0
+                pct_nat_pft = xr.DataArray(pct_pft, dims=['natpft'])
+                ds = self.setpfts(ds, pct_nat_pft);
+            print('Setting PFT_NAT_PFT to: ', self.siteinfo['PCT_NAT_PFT'])
+            if (not ispftdyn):
+                if (self.siteinfo['PCT_SAND'] >= 0):
+                    ds['PCT_SAND'][:] = self.siteinfo['PCT_SAND']
+                    print('Setting %SAND to ',self.siteinfo['PCT_SAND'])
+                if (self.siteinfo['PCT_CLAY'] >= 0):
+                    ds['PCT_CLAY'][:] = self.siteinfo['PCT_CLAY']
+                    print('Setting $CLAY to ',self.siteinfo['PCT_CLAY'])
+            #else:  TODO - handle land use transitions
         #else:
         #    for p in range(0,len(mylat)):
         #        #Recenter on gridcell lat/lons
@@ -180,6 +203,14 @@ def makepointdata(self, filename, mylat=[], mylon=[]):
                 mydata[lonvar][:], mask_grid=self.mask_grid)
         self.subset_netcdf(index, infile,  outfile)
         ds = xr.open_dataset(outfile, mode='r+')
+        if (not isdomain):
+            if (pft >=0):
+                npfts = ds['PCT_NAT_PFT'].sizes['natpft']
+                #Overrite site info
+                pct_pft = np.zeros(npfts, float)
+                pct_pft[pft] = 100.0
+                pct_nat_pft = xr.DataArray(pct_pft, dims=['natpft'])
+                ds = self.setpfts(ds, pct_nat_pft);
         #if (isdomain):
         #    for p in range(0,len(mylat)):
         #        #Recenter on gridcell lat/lons
@@ -196,7 +227,8 @@ def makepointdata(self, filename, mylat=[], mylon=[]):
         if (self.lat_bounds[1]-self.lat_bounds[0] < 180 and self.lon_bounds[1]-self.lon_bounds[0] < 360):
             index = self.get_pointindices_bbox(self.lat_bounds, self.lon_bounds, mydata[latvar][:], mydata[lonvar][:], \
                 mask_grid=self.mask_grid)
-            self.subset_netcdf(index, infile,  outfile)
+            self.subset_netcdf(index, infile,  outfile, keep2d=True)
         else:
             print('Global simulation requested.  Using original file.')
+            self.mask_grid=[]
             os.system('cp '+infile+' '+outfile)
