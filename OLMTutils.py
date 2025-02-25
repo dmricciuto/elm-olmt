@@ -16,6 +16,8 @@ def get_machine_info(machine_name=''):
         machine = 'cades-baseline'
     elif  ('chrlogin' in machine_name or 'chrysalis' in machine_name):
         rootdir = '/lcrc/group/e3sm/'+os.environ['USER']+'/scratch'
+        inputdata = '/lcrc/group/e3sm/ccsm-data/inputdata'
+        machine = 'chrysalis'
     elif ('pm-cpu' in machine_name or 'login' in machine_name):
         rootdir = os.environ['SCRATCH']
         inputdata = '/global/cfs/cdirs/e3sm/inputdata'

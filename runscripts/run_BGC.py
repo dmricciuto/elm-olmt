@@ -15,38 +15,40 @@ runroot = rootdir+'/e3sm_run'
 #TODO:  add option to clone repository
 modelroot = os.environ['HOME']+'/models/E3SM'  #Existing E3SM code directory
 
-#We are going to use a pre-built executable. Set exeroot='' to build 
-exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20240804_US-MOz_ICB1850CNRDCTCBC_ad_spinup/bld'
+#Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
+#exeroot = '/lcrc/group/e3sm/ac.ricciuto/scratch/e3sm_run/20250225_US-UMB_ICB1850CNRDCTCBC_ad_spinup/bld/'
+exeroot = ''
 
 #----------------------Required inputs---------------------------------------------
 
-runtype = 'latlon_bbox'        #site,latlon_list,latlon_bbox
+runtype = 'site'               #site,latlon_list,latlon_bbox
 mettype = 'gswp3'              #Site or reanalysis product to use (site, gswp3, crujra)
 case_suffix = ''               #Identifier for cases (leave blank if none)
 
 if (runtype == 'site'):
-    sites = 'all'           #Site name, list of site names, or 'all' for all sites in site group
-    sitegroup = 'ERW'       #Sites defined in <inputdata>/lnd/clm2/PTCLM/<sitegroup>_sitedata.txt
+    sites = 'US-UMB'           #Site name, list of site names, or 'all' for all sites in site group
+    sitegroup = 'AmeriFlux'       #Sites defined in <inputdata>/lnd/clm2/PTCLM/<sitegroup>_sitedata.txt
+    numproc = 1
 else:
-    region_name = 'region'  #Set the name of the region/point list to be simulated
+    region_name = 'region'   #Set the name of the region/point list to be simulated
     numproc = 384            #Number of processors, must be <= the number of active gridcells
     if (runtype == 'latlon_list'):
-        point_list_file = '/ccsopen/home/zdr/models/OLMT/point_lists/ERW_sitedata.txt'   #List of lat lons
+        point_list_file = ''   #file with a list of lat lons
 #If neither point_list or site is defined, it will use the bounds below.
 lat_bounds = [-90,90]
 lon_bounds = [-180,180]
-res = 'f19_f19'          #Resolution of global files to extract from
+res = 'hcru_hcru'          #Resolution of global files to extract from
 
 use_cpl_bypass = True      #Coupler bypass for meteorology
-use_SP         = True     #Use Satellite phenolgy mode (doesn't yet work with FATES-SP)
+use_SP         = False     #Use Satellite phenolgy mode (doesn't yet work with FATES-SP)
 use_fates      = False     #Use FATES compsets
-fates_nutrient = True      #Use FATES nutrient (parteh_mode = 2)
+fates_nutrient = False      #Use FATES nutrient (parteh_mode = 2)
 
-nyears_ad      =    0      #number of years for ad spinup
-nyears_final   =   35      #number of years for final spinup OR for SP run
-nyears_trans   =    0      #number of years for transient run 
+nyears_ad      =   40      #number of years for ad spinup
+nyears_final   =   40      #number of years for final spinup OR for SP run
+nyears_trans   =  164      #number of years for transient run 
                            #  If -1, the final year will be the last year of forcing data.
-run_startyear  = 1980      #Starting year for transient run OR for SP run
+run_startyear  = 1850      #Starting year for transient run OR for SP run
 
 
 #---------------------Optional inputs via namelist variables------------------------
@@ -55,19 +57,19 @@ run_startyear  = 1980      #Starting year for transient run OR for SP run
 #case_options['option'] = value or [value1, value2, value3] if applying different options to different compsets
 case_options={} 
 #case_options['fates_paramfile'] = inputdata+'/lnd/clm2/paramdata/fates_params_api.32.0.0_pft1_c231215.nc'
-case_options['hist_mfilt']  = '1'
-case_options['hist_nhtfrq'] = '0'
+#case_options['hist_mfilt']  = '1'
+#case_options['hist_nhtfrq'] = '0'
 
 
 #--------------------ensemble options------------------------------------------------
 
-parm_list      = '' #'parm_list_test_bgc' #'parm_list_fatesUQ' #'parm_list_example' #'parm_list_FATES'    #Set parameter list (leave blank for no ensemble)
+parm_list      = ''  #'parm_list_example' #Set parameter list (leave blank for no ensemble)
 nsamples       =  1000    #number of samples to run
 np_ensemble    =  384    #number of ensemble numbers to run in parallel (MUST be <= nsamples)
 ensemble_file  = ''     #File containing samples (if blank, OLMT will generate one)
 postproc_vars  = ['GPP','ER','NPP','NEE','TLAI','FSH','EFLX_LH_TOT']  #Variables to automatically post-process
-postproc_startyear = 2000
-postproc_endyear   = 2007
+postproc_startyear = 2007
+postproc_endyear   = 2008
 postproc_freq      = 'monthly'   #Can be daily, monthly, annual
 
 #----------------------Define treatment cases ----------------------------------------
@@ -224,7 +226,7 @@ for site in sites:
     cases[c] = model_ELM.ELMcase(caseid='',compset=compsets[c], site=site, \
         caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
         machine=machine, exeroot=exeroot, suffix=mysuffix,  \
-        res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name \
+        res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
         lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list)
 
     #Create the case
