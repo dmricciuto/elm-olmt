@@ -60,7 +60,11 @@ def create_ensemble_script(self, walltime=6):
     myfile.write('#!/bin/bash -e\n\n')
     if (self.queue == 'debug'):
         walltime=2
-    myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+    if ('pm-cpu' in self.machine):
+        myfile.write('#SBATCH -t '+str(walltime)+'\n')
+        myfile.write('#SBATCH --constraint=cpu\n')
+    else:
+        myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
     myfile.write('#SBATCH -J '+self.casename+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')  
     if (self.project != ''):
@@ -95,7 +99,11 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
     myfile.write('#!/bin/bash -e\n\n')
     if (self.queue == 'debug'):
         walltime=2
-    myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+    if ('pm-cpu' in self.machine):
+        myfile.write('#SBATCH -t '+str(walltime)+'\n')
+        myfile.write('#SBATCH --constraint=cpu\n')
+    else:
+        myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
     myfile.write('#SBATCH -J '+self.casename.replace('_'+self.site,'')+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')
     if (self.project != ''):

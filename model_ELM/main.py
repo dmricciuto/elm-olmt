@@ -131,6 +131,9 @@ class ELMcase():
     elif ('chrysalis' in self.machine):
         self.project='e3sm'
         self.queue='debug'
+    elif ('pm-cpu' in self.machine):
+        self.project='e3sm'
+        self.queue='regular'
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
