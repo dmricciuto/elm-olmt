@@ -416,6 +416,7 @@ class ELMcase():
     self.xmlchange('EXEROOT',value=self.exeroot)
     self.xmlchange('PIO_VERSION',value=str(self.pio_version))
     self.xmlchange('MOSART_MODE',value='NULL')
+    self.xmlchange('ROF_GRID',value='null')
     #if (self.debug):
     #  self.xmlchange('DEBUG',value='TRUE')
     #-------------- env_run.xml modifications -------------------------
@@ -433,7 +434,7 @@ class ELMcase():
     #turn off archiving
     self.xmlchange('DOUT_S',value='FALSE')
     #datm options
-    if (not self.is_bypass()):
+    if (not self.is_bypass() and not 'default' in self.forcing):
       if (not 'site' in self.forcing):
         self.datm_mode = 'CLMGSWP3v1'   #CLMCRUNCEP
         self.xmlchange('DATM_MODE',value=self.datm_mode)
@@ -565,6 +566,8 @@ class ELMcase():
                 self.customize_namelist(variable=key,value=str(self.case_options[key]))
         elif ('humhol' in key):
             self.humhol=True
+    if ('ad_spinup' in self.casename):    #Turn on supplemental P for ad spinup
+        self.customize_namelist(variable='suplphos',value="'ALL'")
 
     #set domain file information
     if (domainfile == ''):
@@ -650,7 +653,7 @@ class ELMcase():
       else:
         self.xmlchange('BUILD_COMPLETE',value='TRUE')
       #If using DATM, customize the stream files
-      if (not self.is_bypass()):
+      if (not self.is_bypass() and not 'default' in self.forcing):
           self.modify_datm_streamfiles()
       #Copy customized parameter, surface and domain files to run directory
       os.system('mkdir -p '+self.OLMTdir+'/temp')
