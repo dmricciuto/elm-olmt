@@ -144,12 +144,13 @@ class ELMcase():
     self.noslurm=False
     if ('linux' in self.machine or 'ubuntu' in self.machine or 'docker' in self.machine):
         self.noslurm=True
-    if(self.machine == 'pm-cpu'):
-        if self.queue == '':
-            self.queue='regular'
-    else:
-        if self.queue == '':
-            self.queue='batch'
+    if ('pm-cpu' in self.machine):
+        self.project='e3sm'
+        self.queue='regular'
+    if ('chrysalis' in self.machine):
+        self.queue='compute'
+    if self.queue == '':
+        self.queue='batch'
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -797,6 +798,8 @@ class ELMcase():
       self.xmlchange('NTASKS_'+c,value=str(self.np))
       self.xmlchange('NTHRDS_'+c,value='1')
 
+    if ('pm-cpu' in self.machine):
+        self.xmlchange('MAX_TASKS_PER_NODE',value='128')
     self.xmlchange('STOP_OPTION',value='nyears')
     self.xmlchange('STOP_N',value=str(self.run_n))
     self.xmlchange('REST_N',value=str(self.run_n))
