@@ -14,6 +14,10 @@ parser = OptionParser()
 
 parser.add_option("--case", dest="case", default="", \
                   help="Case name")
+parser.add_option("--postproc_only", dest="postproc_only", default=False, \
+                  action="store_true")
+parser.add_option("--UQ_only", dest="UQ_only", default=False, \
+                  action="store_true")
 (options, args) = parser.parse_args()
 
 #Load case object
@@ -120,50 +124,64 @@ def postprocess_ensemble(n):
 
 workdir = os.getcwd()
 
-processes=[]
-process_jobnum=[]
-process_hang=[]    #Keep track of how long process has been hanging
-mycase.postprocessed=np.zeros([mycase.nsamples],int)
-n_job = 1
-if (mycase.noslurm == False):
+if (not options.UQ_only):
+  processes=[]
+  process_jobnum=[]
+  process_hang=[]    #Keep track of how long process has been hanging
+  mycase.postprocessed=np.zeros([mycase.nsamples],int)
+  n_job = 1
+  if (mycase.noslurm == False):
     process_nodes = []
     mynodes = get_nodelist()
 
-#Run the simulations 
-while (n_job <= mycase.nsamples):
-  pactive = active_processes(processes,process_jobnum,process_hang)
-  if (sum(pactive) < int(mycase.np_ensemble)):
-    jobst = str(100000+n_job)
-    rundir = mycase.runroot+'/UQ/'+mycase.casename+'/g'+jobst[1:]+'/'
-    log_file_path = f"{rundir}e3sm_log.txt"
-    #Copy relevant files
-    mycase.ensemble_copy(n_job)
-    with open(log_file_path, "w") as log_file:
-       if (mycase.noslurm == False):
-         node_submit=get_node_submit(pactive,process_nodes,mynodes)
-         command = ['srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+' '+mycase.exeroot+'/e3sm.exe']
-         process_nodes.append(node_submit)
-       else:
-         command = [mycase.exeroot+'/e3sm.exe']
-       process = subprocess.Popen(command, shell=True, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
-       processes.append(process)
-       process_jobnum.append(n_job)
-       process_hang.append(0)
-    n_job=n_job+1
-  else:
-    time.sleep(1)
+  #Run the simulations 
+  while (n_job <= mycase.nsamples):
+    pactive = active_processes(processes,process_jobnum,process_hang)
+    if (sum(pactive) < int(mycase.np_ensemble)):
+      jobst = str(100000+n_job)
+      rundir = mycase.runroot+'/UQ/'+mycase.casename+'/g'+jobst[1:]+'/'
+      log_file_path = f"{rundir}e3sm_log.txt"
+      #Copy relevant files
+      if not options.postproc_only:
+        mycase.ensemble_copy(n_job)
+      with open(log_file_path, "w") as log_file:
+        if (mycase.noslurm == False):
+          node_submit=get_node_submit(pactive,process_nodes,mynodes)
+          command = ['srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+' '+mycase.exeroot+'/e3sm.exe']
+          process_nodes.append(node_submit)
+        else:
+          command = [mycase.exeroot+'/e3sm.exe']
+        if (options.postproc_only):
+            command='ls'
+        process = subprocess.Popen(command, shell=True, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
+        processes.append(process)
+        process_jobnum.append(n_job)
+        process_hang.append(0)
+      n_job=n_job+1
+    else:
+      time.sleep(1)
 
-while (sum(pactive) > 0):
+  while (sum(pactive) > 0):
     pactive = active_processes(processes,process_jobnum,process_hang)
     time.sleep(1)
 
-mycase.create_pkl()
+  mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+
+#UQ part of code
 
 #Train surrogate models
 mycase.train_surrogate(mycase.postproc_vars)
 
 #run GSA
 mycase.GSA(mycase.postproc_vars)
+
+#run MCMC
+#Set intial values for parameters
+if (mycase.obs):
+  parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
+
+  #Run MCMC for the 2 varibles of interest
+  mycase.MCMC(parms, postproc_vars, 100000)
 
 #Save postprocessed output
 mycase.create_pkl()

@@ -24,20 +24,34 @@ def train_surrogate(self,myvars):
     p = self.samples.transpose()
 
     # Filter out invalid data
-    valid_indices = np.where(y[:, 1].squeeze() > -9999)[0]
+    if ('NPP_correct' in var):
+        #valid_indices = np.where(y[:,0].squeeze() > min_valid[var] and < max_valid[var])[0]
+        #valid_indices = np.where(np.min(y[:,1:],axis=1).squeeze() > 400)[0]
+        valid_indices = np.where(np.min(y[:,1:],axis=1) > 400)[0]
+    elif ('NPP_response' in var):
+        valid_indices = np.where(np.min(y[:,1:],axis=1) > 10)[0]
+    elif ('NPP' in var):
+        valid_indices = np.where(np.min(y[:,1:],axis=1) > 0)[0]
+    else:
+        valid_indices = np.where(y[:,0].squeeze() > -9999)[0]   
+    print(var)
+    print(y.shape)
+    print(p.shape)
+    print(valid_indices)
+    print(valid_indices.shape)
+
     y = y[valid_indices, :].copy()
     p = p[valid_indices, :].copy()
 
     self.qoi_bad[vname] = []
     self.qoi_bad_meanval[vname] = []
-    for q in range(0,nqoi):
-        if (max(y[valid_indices,q]) == min(y[valid_indices,q])):
-            self.qoi_bad[vname].append(q)
-            self.qoi_bad_meanval[vname].append(min(y[valid_indices,q]))
+    #for q in range(0,nqoi):
+    #    if (max(y[valid_indices,q]) == min(y[valid_indices,q])):
+    #        self.qoi_bad[vname].append(q)
+    #        self.qoi_bad_meanval[vname].append(min(y[valid_indices,q]))
 
     # Split data into training and validation sets
     ptrain, pval, ytrain, yval = train_test_split(p, y, test_size=0.2, random_state=42)
-
     # Normalize the parameters and outputs
     pscaler      = preprocessing.StandardScaler().fit(ptrain)
     ptrain_norm = pscaler.transform(ptrain)
@@ -70,8 +84,17 @@ def train_surrogate(self,myvars):
       print(qoi, np.corrcoef(ytrain.astype(float)[:,qoi], ypredict_train.astype(float)[:,qoi])[0,1]**2)
     print()
     print('Correlations for testing data: '+vname)
+    UQ_output = './UQ_output/'+self.casename+'/surrogate'
+    os.system('mkdir -p '+UQ_output)
     for qoi in range(0,nqoi):
-      print(qoi, np.corrcoef(yval.astype(float)[:,qoi], ypredict_val.astype(float)[:,qoi])[0,1]**2)
+      rsq = np.corrcoef(yval.astype(float)[:,qoi], ypredict_val.astype(float)[:,qoi])[0,1]**2
+      print(qoi, rsq)
+      plt.plot(yval.astype(float)[:,qoi],ypredict_val.astype(float)[:,qoi],'ro')
+      plt.title(f'$R^2$: {round(rsq,3)}')
+      plt.xlabel('Original model')
+      plt.ylabel('\nSurrogate model')
+      plt.savefig(UQ_output+'/'+vname+'_surrogate'+str(qoi)+'.png', bbox_inches='tight')
+      plt.close()
 
 def run_surrogate(self,parms,myvars):
   surrogate_output={}

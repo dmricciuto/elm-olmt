@@ -1,4 +1,4 @@
-import socket, os, sys, re
+import socket, os, sys, re, glob
 import subprocess
 import numpy as np
 
@@ -30,6 +30,20 @@ def get_machine_info(machine_name=''):
         print('Error:  Machine not detected.  Please specify machine name')
         sys.exit(1)
     return machine, rootdir, inputdata
+
+def get_sitegroups(inputdata):
+    PTCLM = inputdata+'/lnd/clm2/PTCLM'
+    pattern = os.path.join(PTCLM, "*_sitedata.*")
+    files = glob.glob(pattern)
+
+    prefixes = []
+    for file in files:
+        basename = os.path.basename(file)
+        if "_sitedata" in basename:
+            prefix = basename.split("_sitedata")[0]
+            prefixes.append(prefix)
+    return prefixes
+
 
 def get_site_info(inputdata, sitegroup='AmeriFlux'):
     sitegroup_file = open(inputdata+'/lnd/clm2/PTCLM/'+sitegroup+'_sitedata.txt')

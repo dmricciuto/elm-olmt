@@ -102,7 +102,7 @@ class ELMcase():
         self.mpilib=''
 
   def setup_ensemble(self, sampletype='monte_carlo',parm_list='', ensemble_file='', \
-          np_ensemble=64, nsamples=100):
+          np_ensemble=64, nsamples=100, obs={}, obs_err={}):
     read_parm_list(self, parm_list=parm_list)
     if (ensemble_file == ''):
       create_samples(self, sampletype=sampletype, parm_list=parm_list,nsamples=nsamples)
@@ -115,6 +115,8 @@ class ELMcase():
     #Variables for surrogate model
     self.pscaler={}
     self.yscaler={}
+    self.obs=obs
+    self.obs_err=obs_err
 
   def get_machine(self,machine=''):
     if (machine == ''):
