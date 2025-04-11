@@ -16,7 +16,7 @@ class ELMcase():
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', \
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
-            point_list=[], namelist_options=[],casename=''):
+            point_list=[], namelist_options=[],casename='',mpilib=''):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -99,6 +99,7 @@ class ELMcase():
         self.postproc_startyear=-1
         self.postproc_endyear=9999
         self.namelist_options=namelist_options
+        self.mpilib=''
 
   def setup_ensemble(self, sampletype='monte_carlo',parm_list='', ensemble_file='', \
           np_ensemble=64, nsamples=100):
@@ -283,8 +284,8 @@ class ELMcase():
       cmd = cmd+' --project '+self.project
     if (self.compiler != ''):
       cmd = cmd+' --compiler '+self.compiler
-    #if ('baseline' in self.machine):
-    #  cmd = cmd+' --mpilib openmpi-amanzitpls'
+    if (self.mpilib != ''):
+      cmd = cmd+' --mpilib '+self.mpilib
     #ADD MPILIB OPTION HERE
     cmd = cmd+' > '+self.OLMTdir+'/create_newcase.log'
     os.chdir(self.modelroot+'/cime/scripts')
@@ -368,6 +369,8 @@ class ELMcase():
             self.met_endyear=2023
         if ('crujra' in self.forcing):
             self.met_endyear=2022
+        if ('isimip' in self.forcing):
+            self.met_startyear=1951
         #Assume we want a 20-year spinup cycle
         self.met_endyear_spinup = self.met_startyear+20-1
     self.nyears_spinup=self.met_endyear_spinup-self.met_startyear+1
@@ -560,8 +563,8 @@ class ELMcase():
         self.customize_namelist(variable='aero_file', value="'"+self.inputdata_path+"/atm/cam/chem/" \
                 +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
-    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile','humhol','metdir', \
-            'surffile_global','pftdynfile_global','domainfile_global']
+    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
+            'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
@@ -685,23 +688,27 @@ class ELMcase():
                   mypresaero = '"datm.streams.txt.presaero.trans_1850-2000 1850 1850 2000"'
                   myco2      = ', "datm.streams.txt.co2tseries.20tr 1766 1766 2010"'
               elif ('1850' in self.compset):
-                  mypresaero = '"datm.streams.txt.presaero.clim_1850 1 1850 1850"'
+                  mypresaero = '"datm.streams.txt.presaero.clim_1850 1 1 1"'
                   myco2=''
               else:
                   mypresaero = '"datm.streams.txt.presaero.clim_2000 1 2000 2000"'
                   myco2=''
               if (not 'site' in self.forcing):
-                  myoutput.write(' streams = "datm.streams.txt.'+self.datm_mode+'.Solar '+str(self.met_alignyear)+ \
-                                     ' '+str(self.met_startyear)+' '+str(self.met_endyear)+'  ", '+ \
-                                     '"datm.streams.txt.'+self.datm_mode+'.Precip '+str(self.met_alignyear)+ \
-                                     ' '+str(self.met_startyear)+' '+str(self.met_endyear)+'  ", '+ \
-                                     '"datm.streams.txt.'+self.datm_mode+'.TPQW '+str(self.met_alignyear)+ \
-                                     ' '+str(self.met_startyear)+' '+str(self.met_endyear)+'  ", '+mypresaero+myco2+ \
-                                     ', "datm.streams.txt.topo.observed 1 1 1"\n')
+                  myoutput.write(' streams = "datm.streams.txt.'+self.datm_mode+'.Solar '+ \
+                          str(self.met_alignyear)+' '+str(self.met_startyear)+' '+ \
+                          str(self.met_endyear)+'  ", '+ \
+                          '"datm.streams.txt.'+self.datm_mode+'.Precip '+ \
+                          str(self.met_alignyear)+' '+str(self.met_startyear)+ \
+                          ' '+str(self.met_endyear)+'  ", '+ \
+                          '"datm.streams.txt.'+self.datm_mode+'.TPQW '+ \
+                          str(self.met_alignyear)+' '+str(self.met_startyear)+ \
+                          ' '+str(self.met_endyear)+'  ", '+mypresaero+myco2+ \
+                          ', "datm.streams.txt.topo.observed 1 1 1"\n')
               else:
-                  myoutput.write(' streams = "datm.streams.txt.CLM1PT.ELM_USRDAT '+str(self.met_alignyear)+ \
-                                     ' '+str(self.met_startyear)+' '+str(self.met_endyear)+'  ", '+mypresaero+myco2+ \
-                                     ', "datm.streams.txt.topo.observed 1 1 1"\n')
+                  myoutput.write(' streams = "datm.streams.txt.CLM1PT.ELM_USRDAT '+ \
+                          str(self.met_alignyear)+' '+str(self.met_startyear)+ \
+                          ' '+str(self.met_endyear)+'  ", '+mypresaero+myco2+ \
+                          ', "datm.streams.txt.topo.observed 1 1 1"\n')
           elif ('streams' in s):
               continue  #do nothing
           elif ('taxmode' in s):
@@ -746,6 +753,31 @@ class ELMcase():
                   myoutput.write(s)
           myinput.close()
           myoutput.close()
+      #Modify forcing file list
+      if 'isimip' in self.forcing:
+        for vv,vv2 in zip(['Precip', 'Solar', 'TPQW'], ['Prec','Solr','TPQWL']):
+          myinput  = open('./Buildconf/datmconf/datm.streams.txt.'+self.datm_mode+'.'+vv)
+          myoutput = open('./user_datm.streams.txt.'+self.datm_mode+'.'+vv,'w')
+          for s in myinput:
+              if 'atm_forcing.datm7.GSWP3.0.5d.v1.c170516' in s:
+                  if not (vv in s or 'TPHWL' in s):
+                    domainpath = '/'.join(self.metdir.split('/')[:-2])
+                    myoutput.write('     '+domainpath+'\n')
+                  else:
+                    myoutput.write('     '+self.metdir+'/'+vv2+'\n')
+              elif 'domain.lnd.360x720_gswp3.0v1.c170606.nc' in s:
+                 myoutput.write('     domain.lnd.360x720_isimip.3b.c211109.nc\n')
+              elif 'clmforc.GSWP3.c2011' in s:
+                 gcm = self.metdir.split('/')[-2]
+                 scenario = self.metdir.split('/')[-1]
+                 s2 = s.replace('clmforc.GSWP3.c2011', 'clmforc.'+gcm+'.'+scenario+'.c2107'
+                                ).replace(vv, vv2).replace('TPQWLL','TPQWL')
+                 myoutput.write(s2)
+              else:
+                 myoutput.write(s)
+          myinput.close()
+          myoutput.close()
+
       #reverse directories for CLM1PT and site
       if (self.forcing == 'site'):
           myinput  = open('./Buildconf/datmconf/datm.streams.txt.CLM1PT.ELM_USRDAT')
