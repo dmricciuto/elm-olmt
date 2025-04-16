@@ -111,7 +111,7 @@ def postprocess_ensemble(n):
             hnum=2
             mypfts=mycase.postproc_pfts
         for p in mypfts:
-          if (mycase.postproc_freq == 'daily'):  #default
+          if (mycase.postproc_freq == 'daily' or mycase.postproc_freq == 'hourly'):  #default
             mycase.postprocess(v, ens_num=n,startyear=mycase.postproc_startyear, \
                   endyear=mycase.postproc_endyear,index=p,hnum=hnum)
           elif (mycase.postproc_freq == 'monthly'):  #monthly
@@ -174,17 +174,21 @@ mycase.train_surrogate(mycase.postproc_vars)
 
 #run GSA
 mycase.GSA(mycase.postproc_vars)
+mycase.plot_GSA(mycase.postproc_vars)
+
+#Save postprocessed output
+mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
 
 #run MCMC
 #Set intial values for parameters
 if (mycase.obs):
   parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
-
   #Run MCMC for the 2 varibles of interest
-  mycase.MCMC(parms, postproc_vars, 100000)
+  mycase.MCMC(parms, mycase.postproc_vars, 100000)
 
-#Save postprocessed output
-mycase.create_pkl()
+  #Save postprocessed output
+  mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+
 
 
 

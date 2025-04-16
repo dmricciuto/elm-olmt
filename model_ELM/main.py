@@ -10,6 +10,7 @@ from .run_GSA import *
 from .MCMC import *
 from .netcdf4_functions import *
 from datetime import datetime
+import xarray as xr
 
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
@@ -240,6 +241,31 @@ class ELMcase():
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     print('FATES parameter file : '+self.fates_paramfile)
     os.system('cp '+self.fates_paramfile+' '+self.OLMTdir+'/temp/fates_paramfile.nc')
+    if (self.fates_pft >= 0):
+        print('Extracting PFT '+str(self.fates_pft))
+        if (self.pft_duplicates > 1):
+            fname_list=[]
+            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            for pf in range(0,self.pft_duplicates):
+                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
+                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
+                        +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
+                fname_list.append(fname)
+            # Open and concatenate along the 'fates_pft' dimension
+            datasets = [xr.open_dataset(f) for f in fname_list]
+            # Find variables that have 'fates_pft' as a dimension
+            vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
+            # Subset only those vars
+            datasets_trimmed = [ds[vars_with_fpft] for ds in datasets]
+            ds_concat = xr.concat(datasets_trimmed, dim='fates_pft')
+            # Add back the rest of the variables (those without 'fates_pft')
+            vars_wo_fpft = [var for var in datasets[0].data_vars if 'fates_pft' not in datasets[0][var].dims]
+            for var in vars_wo_fpft:
+                ds_concat[var] = datasets[0][var]  # Use first file's value
+            ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
+        else:
+            os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
+                self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')
 
   def set_finidat_file(self, finidat_case='', finidat_year=0, finidat=''):
       if (finidat_case != ''):
@@ -690,7 +716,7 @@ class ELMcase():
                   mypresaero = '"datm.streams.txt.presaero.trans_1850-2000 1850 1850 2000"'
                   myco2      = ', "datm.streams.txt.co2tseries.20tr 1766 1766 2010"'
               elif ('1850' in self.compset):
-                  mypresaero = '"datm.streams.txt.presaero.clim_1850 1 1 1"'
+                  mypresaero = '"datm.streams.txt.presaero.clim_1850 1 1850 1850"'
                   myco2=''
               else:
                   mypresaero = '"datm.streams.txt.presaero.clim_2000 1 2000 2000"'

@@ -97,6 +97,7 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
             values_out = do_timeaverage(values, int(nperyear))
       nperyear_out = 1
     else:
+        #no averaging requested
         values_out = values[:]
         nperyear_out = nperyear
     var_out = var
