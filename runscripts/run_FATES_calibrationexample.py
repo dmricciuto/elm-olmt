@@ -17,14 +17,14 @@ runroot = rootdir+'/e3sm_run'
 modelroot = os.environ['HOME']+'/models/E3SM' 
 
 #Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
-#exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20250414_TAM-06_ICB1850ELMFATES_ad_spinup/bld'
+#exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20250421_TAM-06_ICB1850ELMFATES_ad_spinup/bld'
 exeroot = ''
 
 #----------------------Required inputs---------------------------------------------
 
 runtype = 'site'               #site,latlon_list,latlon_bbox
 mettype = 'site'              #Site or reanalysis product to use (site, gswp3, crujra)
-case_suffix = '3pft'               #Identifier for cases (leave blank if none)
+case_suffix = ''               #Identifier for cases (leave blank if none)
 
 if (runtype == 'site'):
     sites = ['TAM-06']               #Site name, list of site names, or 'all' for all sites in site group
@@ -41,18 +41,19 @@ lon_bounds = [-180,180]
 res = 'hcru_hcru'          #Resolution of global files to extract from
 
 use_cpl_bypass = True      #Coupler bypass for meteorology
-use_SP         = False     #Use Satellite phenolgy mode (doesn't yet work with FATES-SP)
+nutrients      = 'CNP'     #none or SP (SP mode), C (carbon only), CN (carbon/nitrogen), or CNP (carbon/nitrogen/phosphorus)
+nutrient_comp  = 'RD'      #Relative demand (RD) or equilibirium chemistry approximiation (ECA)
+soil_decomp    = 'CTC'     #Convergent trophic cascade (CTC) or Century (CNT) model
 #FATES options
 use_fates      = True       #Use FATES compsets
-fates_nutrient = False      #True     #Use FATES nutrient (parteh_mode = 2)
 fates_pft      = 0          #Extract this PFT index from fates parameter file and only run one (set -1 for all)
                             #Note:  Custom parameter file can be specified instead through case_options (see below)
-pft_duplicates = 3          #Construct a file with n pfts, all using the same parameters as fates_pft
+pft_duplicates = 1          #Construct a file with n pfts, all using the same parameters as fates_pft
 
 #Run lengths/dates
-nyears_ad      =  0 #50      #number of years for ad spinup
+nyears_ad      =  50      #number of years for ad spinup
 nyears_final   =  50      #number of years for final spinup, SP run, or FATES C-only
-nyears_trans   =  0 #20      #number of years for transient run 
+nyears_trans   =  20      #number of years for transient run 
 run_startyear  = 1850      #Starting year for transient run, SP run or FATES C-only
 
 
@@ -145,7 +146,7 @@ if (use_cpl_bypass):
     compset_type='ICB'
 #Construct the list of compsets and supporting information
 twophase=False
-compset_base='CNPRDCTCBC'
+compset_base=nutrients+nutrient_comp+soil_decomp+'BC'
 if (use_fates):
     compset_base='ELMFATES'
 compset_type="I"
@@ -159,7 +160,7 @@ compsets=[]
 suffix=[]
 startyear=[]
 nyears=[]
-if (use_SP):
+if (not use_fates and (nutrients == 'none' or nutrients =='SP')):
   compsets.append(compset_type+'ELMBC')
   suffix.append('')
   startyear.append(run_startyear)
@@ -261,7 +262,9 @@ for site in sites:
         for key in treatment_options.keys():
             cases[c].case_options[key] = treatment_options[key][c-ncases_pretreatment]
     #Other options
-    cases[c].fates_nutrient=fates_nutrient
+    cases[c].nutrients = nutrients
+    cases[c].nutrient_comp = nutrient_comp
+    cases[c].soil_decomp = soil_decomp
     cases[c].fates_pft=fates_pft
     cases[c].pft_duplicates = pft_duplicates
     #Set the custom parameter files

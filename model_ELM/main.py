@@ -574,8 +574,13 @@ class ELMcase():
     self.customize_namelist(variable='fsoilordercon',value="'"+self.rundir+"/CNP_parameters.nc'")
     #Fates options - TODO add nutrient/parteh options
     if ('ED' in self.compset or 'FATES' in self.compset):
-        if self.fates_nutrient:
+        if 'CN' in self.nutrients:
+          #Note, if carbon only, use parteh_mode = 1.
           self.customize_namelist(variable='fates_parteh_mode',value='2')
+          bldnml = '" -nutrient '+self.nutrients.lower()+' -nutrient_comp_pathway '+ \
+                  self.nutrient_comp.lower()+' -soil_decomp '+self.soil_decomp.lower()+'"'
+          bldnml = bldnml.replace('cnt','century')
+          self.xmlchange('ELM_BLDNML_OPTS',append=bldnml)
         self.customize_namelist(variable='fates_paramfile',value="'"+self.rundir+"/fates_paramfile.nc'")
         #if (self.fates_logging):
         #    self.customize_namelist(variable='use_fates_logging',value='.true.')

@@ -45,9 +45,9 @@ def get_nodelist():
               mynodes.append(node_prefix+nstr)
           else:
               if ('baseline' in mycase.machine):
-                nstr=str(n2)
+                nstr=str(n2).strip(']')
               else:
-                nstr=str(10000+n2)[1:]
+                nstr=str(10000+n2)[1:].strip(']')
               mynodes.append(node_prefix+nstr)
     else:
         mynodes.append(n)
