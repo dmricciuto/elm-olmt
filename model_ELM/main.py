@@ -200,7 +200,9 @@ class ELMcase():
             if mettype == '':
               print('Error: When specifying metdir, Must also specify met type (e.g. gswp3)')
               sys.exit(1)
-        self.metdir=metdir
+        self.metdir = metdir
+        if self.forcing == 'site':
+            self.metdir = metdir+'/1x1pt_'+self.site
     self.get_metdata_year_range()
 
   def is_bypass(self):
@@ -263,6 +265,7 @@ class ELMcase():
             for var in vars_wo_fpft:
                 ds_concat[var] = datasets[0][var]  # Use first file's value
             ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
+            os.system('rm fates_paramfile_*.nc')
         else:
             os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
                 self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')
@@ -811,16 +814,20 @@ class ELMcase():
           myinput.close()
           myoutput.close()
 
-      #reverse directories for CLM1PT and site
       if (self.forcing == 'site'):
           myinput  = open('./Buildconf/datmconf/datm.streams.txt.CLM1PT.ELM_USRDAT')
           myoutput = open('./user_datm.streams.txt.CLM1PT.ELM_USRDAT','w')
           for s in myinput:
               if ('CLM1PT_data' in s):
-                  temp = s.replace('CLM1PT_data', 'TEMPSTRING')
-                  s    = temp.replace('1x1pt'+'_'+self.site, 'CLM1PT_data')
-                  temp  =s.replace('TEMPSTRING', '1x1pt'+'_'+self.site)
-                  myoutput.write(temp)
+                  if (self.metdir != ''):
+                    #Replace with user-specified directory
+                    myoutput.write(self.metdir+'\n')
+                  else:
+                    #reverse directories for CLM1PT and site  
+                    temp = s.replace('CLM1PT_data', 'TEMPSTRING')
+                    s    = temp.replace('1x1pt'+'_'+self.site, 'CLM1PT_data')
+                    temp  =s.replace('TEMPSTRING', '1x1pt'+'_'+self.site)
+                    myoutput.write(temp)
               elif (('ED' in self.compset or 'FATES' in self.compset) and 'FLDS' in s):
                   print('Not including FLDS in atm stream file')
               else:

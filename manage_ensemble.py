@@ -169,25 +169,26 @@ if (not options.UQ_only):
 
 #UQ part of code
 
-#Train surrogate models
-mycase.train_surrogate(mycase.postproc_vars)
+if (mycase.postproc_vars != []):
+    #Train surrogate models
+    mycase.train_surrogate(mycase.postproc_vars)
 
-#run GSA
-mycase.GSA(mycase.postproc_vars)
-mycase.plot_GSA(mycase.postproc_vars)
+    #run GSA
+    mycase.GSA(mycase.postproc_vars)
+    mycase.plot_GSA(mycase.postproc_vars)
 
-#Save postprocessed output
-mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+    #Save postprocessed output
+    mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
 
-#run MCMC
-#Set intial values for parameters
-if (mycase.obs):
-  parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
-  #Run MCMC for the 2 varibles of interest
-  mycase.MCMC(parms, mycase.postproc_vars, 100000)
+    #run MCMC
+    #Set intial values for parameters
+    if (mycase.obs):
+        parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
+        #Run MCMC for the 2 varibles of interest
+        mycase.MCMC(parms, mycase.postproc_vars, 100000)
 
-  #Save postprocessed output
-  mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+        #Save postprocessed output
+        mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
 
 
 

@@ -17,13 +17,12 @@ runroot = rootdir+'/e3sm_run'
 modelroot = os.environ['HOME']+'/models/E3SM' 
 
 #Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
-#exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20250421_TAM-06_ICB1850ELMFATES_ad_spinup/bld'
 exeroot = ''
 
 #----------------------Required inputs---------------------------------------------
 
 runtype = 'site'               #site,latlon_list,latlon_bbox
-mettype = 'site'              #Site or reanalysis product to use (site, gswp3, crujra)
+mettype = 'site'               #Site or reanalysis product to use (site, gswp3, crujra)
 case_suffix = ''               #Identifier for cases (leave blank if none)
 
 if (runtype == 'site'):
@@ -62,18 +61,19 @@ run_startyear  = 1850      #Starting year for transient run, SP run or FATES C-o
 #note:  use surffile, domainfile, pftdynfile, metdir instead of the standard namelist variables for those files.
 #case_options['option'] = value or [value1, value2, value3] if applying different options to different compsets
 case_options={} 
+#case_options['metdir'] = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/elm-olmt/runscripts'
 #case_options['fates_paramfile'] = inputdata+'/lnd/clm2/paramdata/fates_params_api.32.0.0_pft1_c231215.nc'
 #case_options['use_fates_planthydro'] = '.true.'
 
 #--------------------ensemble options------------------------------------------------
 
-parm_list      = 'examples/parm_list_fatesUQ'  #'parm_list_example' #Set parameter list (leave blank for no ensemble)
+parm_list      = 'examples/parm_list_fatesUQ'  #Set parameter list (leave blank for no ensemble)
 nsamples       =  256    #number of samples to run
 np_ensemble    =  256    #number of ensemble numbers to run in parallel (MUST be <= nsamples)
 ensemble_file  = ''     #File containing samples (if blank, OLMT will generate one)
 postproc_vars  = ['FATES_NPP','FATES_VEGC']  #Variables to automatically post-process
-postproc_startyear = 45 #1860
-postproc_endyear   = 47 #1862
+postproc_startyear = 1860
+postproc_endyear   = 1862
 postproc_freq      = 'annual'   #Can be daily, monthly, annual, hourly(not tested)
 
 #Observations to use in calibration (must match a model output variable in name/units, and the 
@@ -295,7 +295,7 @@ for site in sites:
               finidat_year=finidat_year)
       cases[c].dependcase = cases[depends[c]].casename
 
-    #Set postprocessing variables for ensemble
+    #Set postprocessing variables for ensemble (final case or treatment case)
     if ((c == ncases-1 or istreatment[c]) and ensemble):
       cases[c].postproc_vars = postproc_vars
       cases[c].postproc_startyear = postproc_startyear
@@ -314,7 +314,7 @@ for site in sites:
         if (site == sites[0] and c == 0):
             #Get the ensemble file from the first site and case
             cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
-                    obs=observations, obs_err=observation_error)
+                    ensemble_file = ensemble_file, obs=observations, obs_err=observation_error)
             ensemble_file = cases[c].ensemble_file
         else:
             #Use the ensemble file for subsequent cases and sites
