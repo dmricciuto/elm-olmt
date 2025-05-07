@@ -13,10 +13,10 @@ machine, rootdir, inputdata = get_machine_info(machine_name='')
 caseroot= rootdir+'/e3sm_cases'
 runroot = rootdir+'/e3sm_run'
 #TODO:  add option to clone repository
-modelroot = os.environ['HOME']+'/models/E3SM_cbgc-v3'  #Existing E3SM code directory
+modelroot = os.environ['HOME']+'/E3SMv3/code/20250506/E3SM'  #Existing E3SM code directory
 
 #Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
-exeroot = '/pscratch/sd/r/ricciuto/e3sm_run/20250313_region_I1850WCCNPTGU_ad_spinup/bld/'
+exeroot = '' #/pscratch/sd/r/ricciuto/e3sm_run/20250313_region_I1850WCCNPTGU_ad_spinup/bld/'
 
 #----------------------Required inputs---------------------------------------------
 
@@ -30,12 +30,12 @@ if (runtype == 'site'):
     numproc = 1
 else:
     region_name = 'region'   #Set the name of the region/point list to be simulated
-    numproc = 384            #Number of processors, must be <= the number of active gridcells
+    numproc = 1 # 63 # 384            #Number of processors, must be <= the number of active gridcells
     if (runtype == 'latlon_list'):
-        point_list_file = '/global/homes/r/ricciuto/models/elm-olmt/runscripts/tgu_points.txt'   #file with a list of lat lons
+        point_list_file = os.environ['HOME']+'/OLMT/elm-olmt/runscripts/tgu_points.txt'   #file with a list of lat lons
 #If neither point_list or site is defined, it will use the bounds below.
-lat_bounds = [-90,90]
-lon_bounds = [-180,180]
+lat_bounds = [40,44] #[-90,90]
+lon_bounds = [-120,-117] #[-180,180]
 res = 'r05_r05'          #Resolution of global files to extract from
 
 use_cpl_bypass = False      #Coupler bypass for meteorology
@@ -44,8 +44,8 @@ use_fates      = False     #Use FATES compsets
 fates_nutrient = False      #Use FATES nutrient (parteh_mode = 2)
 use_TGU        = True
 
-nyears_ad      =   40      #number of years for ad spinup
-nyears_final   =   40      #number of years for final spinup OR for SP run
+nyears_ad      =   200      #number of years for ad spinup
+nyears_final   =   600      #number of years for final spinup OR for SP run
 nyears_trans   =  164      #number of years for transient run 
                            #  If -1, the final year will be the last year of forcing data.
 run_startyear  = 1850      #Starting year for transient run OR for SP run
@@ -139,7 +139,7 @@ compset_type="I"
 if (use_cpl_bypass):
     compset_type='ICB'
 elif ((mettype != 'site' or 'PR-LUQ' in sites) and nyears_trans != 0):
-    twophase=True       #if using BOTH DATM and reanalysis, split into 2 cases
+    twophase=False #True       #if using BOTH DATM and reanalysis, split into 2 cases
 
 #TODO - move construction of compset lists to a function (in OLMTinfo)
 compsets=[]

@@ -228,6 +228,7 @@ class ELMcase():
       self.paramfile = self.get_namelist_variable('paramfile')
     print('Parameter file: '+self.paramfile)
     #Copy the parameter file to the temp directory 
+    os.system('mkdir -p '+self.OLMTdir+'/temp/')
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
     #TODO - add metadata to the copied file about original filename
 
@@ -570,6 +571,7 @@ class ELMcase():
           self.customize_namelist(variable='flanduse_timeseries',value="'"+pftdynfile+"'")
       self.customize_namelist(variable='check_finidat_fsurdat_consistency',value='.false.')
       self.customize_namelist(variable='check_finidat_year_consistency',value='.false.')
+      self.customize_namelist(variable='do_transient_crops',value='.true.')   # TKT Changes
       self.set_histvars()
     else:
       self.set_histvars(spinup=True)
@@ -698,6 +700,8 @@ class ELMcase():
       else:
         self.xmlchange('BUILD_COMPLETE',value='TRUE')
       #If using DATM, customize the stream files
+      if (not self.is_bypass()): # TKT changed to allow single grid runs with default forcing
+          self.modify_datm_streamfiles_TGU()
       if (not self.is_bypass() and not 'default' in self.forcing):
           self.modify_datm_streamfiles()
       #Copy customized parameter, surface and domain files to run directory
@@ -710,6 +714,19 @@ class ELMcase():
          execute = subprocess.call(cmd, shell=True)
       if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn)):
          os.system('cp '+self.OLMTdir+'/temp/surfdata.pftdyn.nc '+self.rundir)
+
+  def modify_datm_streamfiles_TGU(self):  # TKT changed to modify datm_in when forcing is default
+    if (not self.is_bypass()):
+      os.chdir(self.casedir)
+      myinput  = open('./Buildconf/datmconf/datm_in')
+      myoutput = open('user_nl_datm','w')
+      for s in myinput:
+          if ('mapalgo' in s):   ## Changes TKT
+              stmp = "mapalgo = 'nn', 'nn', 'nn', 'nn', 'nn','nn'"
+              #s.replace('bilinear','nn')
+              myoutput.write(stmp)
+      myinput.close()
+      myoutput.close()
 
   def modify_datm_streamfiles(self):
     #stream file modifications for datm runs
