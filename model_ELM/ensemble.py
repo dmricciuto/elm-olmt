@@ -61,15 +61,18 @@ def create_ensemble_script(self, walltime=6):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH -t '+str(walltime)+'\n')
+        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
+        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH -p '+self.queue+'\n')
+        if (self.project != ''):
+            myfile.write('#SBATCH -A '+self.project+'\n')
     myfile.write('#SBATCH -J '+self.casename+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')  
-    if (self.project != ''):
-        myfile.write('#SBATCH -A '+self.project+'\n')
-    myfile.write('#SBATCH -p '+self.queue+'\n')
+
     myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
     myfile.write('./preview_namelists\n\n')
@@ -100,15 +103,18 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH -t '+str(walltime)+'\n')
+        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
+        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH -p '+self.queue+'\n')
+        if (self.project != ''):
+            myfile.write('#SBATCH -A '+self.project+'\n')
+
     myfile.write('#SBATCH -J '+self.casename.replace('_'+self.site,'')+'\n')
     myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')
-    if (self.project != ''):
-        myfile.write('#SBATCH -A '+self.project+'\n')
-    myfile.write('#SBATCH -p '+self.queue+'\n')
     myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
     for s in sites:
@@ -136,6 +142,15 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
         myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
                 self.rundir+'/e3sm_log.txt &\n\n')
     myfile.write('wait\n')
+    myfile.write('cd '+self.OLMTdir+'\n')
+    for s in sites:
+        if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename \
+            and not 'ad_spinup' in self.casename):
+            #Assume this is a final spinup case, do spinup diagnostic plots
+            myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
+        elif self.postproc_vars:
+            #Do requested postprocessing and plotting
+            myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+'\n')
     myfile.close()
     os.system('chmod u+x '+fname)
     return os.path.abspath('./'+fname)

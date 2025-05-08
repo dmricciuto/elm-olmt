@@ -13,8 +13,8 @@ machine, rootdir, inputdata = get_machine_info(machine_name='')
 caseroot= rootdir+'/e3sm_cases'
 runroot = rootdir+'/e3sm_run'
 #TODO:  add option to clone repository
-#modelroot = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/E3SM'  #Existing E3SM code directory
-modelroot = os.environ['HOME']+'/models/E3SM' 
+modelroot = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/E3SM'  #Existing E3SM code directory
+#modelroot = os.environ['HOME']+'/models/E3SM' 
 
 #Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
 exeroot = ''
@@ -298,11 +298,11 @@ for site in sites:
     #Set postprocessing variables for ensemble (final case or treatment case)
     if ((c == ncases-1 or istreatment[c]) and ensemble):
       cases[c].postproc_vars = postproc_vars
-      cases[c].postproc_startyear = postproc_startyear
-      cases[c].postproc_endyear = postproc_endyear
-      cases[c].postproc_freq = postproc_freq
     else:
       cases[c].postproc_vars=[]
+    cases[c].postproc_startyear = postproc_startyear
+    cases[c].postproc_endyear = postproc_endyear
+    cases[c].postproc_freq = postproc_freq
 
     #Set up the case (surface, domain and pftdata)
     print('Setting up case for site: '+site)

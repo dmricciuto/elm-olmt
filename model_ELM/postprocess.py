@@ -1,5 +1,6 @@
 from netCDF4 import Dataset
-import os,glob
+import xarray as xr
+import re,os,glob
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -31,7 +32,71 @@ def do_timeaverage(values, nav):
        values_out[t] = np.mean(values[t*nav:(t+1)*nav])
    return values_out
 
+# -- Get sorted list of .nc files --
+def sorted_h0_files(directory):
+    files = glob.glob(os.path.join(directory, '*.elm.h0.*-01-01-00000.nc'))
+    return sorted(files, key=lambda f: int(re.search(r'\.(\d+)-01-01-00000\.nc', f).group(1)))
 
+#Plot ad and final spinup together
+def plot_spinup(self, plotvars=[]):
+    if not plotvars:
+        plotvars = ['NEE','TOTVEGC','TOTSOMC','GPP']
+    fn_dir = self.rundir
+    ad_dir = self.rundir.replace(self.casename,self.dependcase)
+    print(fn_dir)
+    print(ad_dir)
+    #Ignore first file
+    files1 = sorted_h0_files(ad_dir)[1:]
+    files2 = sorted_h0_files(fn_dir)[1:]
+
+    # -- Load datasets --
+    ds1 = xr.open_mfdataset(files1, combine='nested', concat_dim='time')
+    ds2 = xr.open_mfdataset(files2, combine='nested', concat_dim='time')
+
+    # -- Extract years from filenames --
+    years1 = [int(re.search(r'\.(\d+)-01-01-00000\.nc', f).group(1)) for f in files1]
+    years2 = [int(re.search(r'\.(\d+)-01-01-00000\.nc', f).group(1)) for f in files2]
+    years2_offset = [y + max(years1) for y in years2]  # offset second series
+
+    # -- Assign time coordinates --
+    ds1 = ds1.assign_coords(time=years1)
+    ds2 = ds2.assign_coords(time=years2_offset)
+
+    # -- Concatenate datasets --
+    ds_combined = xr.concat([ds1, ds2], dim='time')
+
+    for v in plotvars:
+    # -- Extract and spatially average NEE --
+        vals = ds_combined[v]
+        vals_mean = vals.mean(dim=('lndgrid'))  # or 'gridcell' if applicable
+        ylabel = v
+        if (v == 'NEE' or v == 'GPP'):
+            #Convert to gC/m2/yr
+            vals_mean=abs(vals_mean)*24*3600*365
+        if (v == 'NEE'):
+            #Log scale
+            vals_mean = np.log10(vals_mean)
+            ylabel = "log10(NEE)"
+
+        transition_year = max(years1)
+
+        # -- Plotting --
+        plt.figure(figsize=(10, 5))
+        plt.plot(ds_combined['time'], vals_mean, marker='o')
+        plt.title(v+" during spinup")
+        plt.xlabel("Year")
+        plt.ylabel(ylabel)
+        # Horizontal line at y=0
+        if (v == 'NEE'):
+            plt.axhline(0, color='red', linestyle='--', label='NEE threshold (1 gC/m2/yr)')
+
+        # Vertical line at transition between dirs
+        plt.axvline(transition_year, color='blue', linestyle=':', label=f'Spinup transition')
+
+        plt.grid(True)
+        os.system('mkdir -p '+self.rundir+'/../diagnostics')
+        plt.savefig(self.rundir+'/../diagnostics/spinup_plot_'+v+'.png')
+             
 def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0, \
         dailytomonthly=False, annualmean=False,  meanseasonalcycle=False, \
         xindex=0,yindex=0, ens_num=0, plot=False):
@@ -74,6 +139,18 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
           file_list = file_list[:-1]
     os.system('ncrcat -O -v '+var.split('_pft')[0]+' '+' '.join(file_list)+' '+var+'.nc')
     myoutput = Dataset(var+'.nc','r')
+    units = myoutput[var.split('_pft')[0]].units
+    #change flux units
+    factor = 1.0
+    if (units == 'gC/m^2/s' or units == 'gN/m^2/s' or units == 'gP/m^2/s'):
+        nutrient = units[1]
+        if annualmean:
+            units = 'g'+nutrient+'/m^2/yr'
+            factor = 24*3600*365.
+        else:
+            units = 'g'+nutrient+'/m^2/day'
+            factor = 24*3600
+
     if (myoutput[var.split('_pft')[0]][:].ndim == 4):
       #2D output with vertical structure
       values = myoutput[var.split('_pft')[0]][:,index,yindex,xindex]
@@ -113,6 +190,10 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
     for t in range(0,len(values_out)):
         self.output['taxis'][t] = startyear+t/nperyear_out
     if (plot):
-        plt.plot(self.output['taxis'],self.output[var_out],'k')
+        os.system('mkdir -p '+self.rundir+'/../diagnostics')
+        plt.plot(self.output['taxis'],self.output[var_out]*factor,'k')
+        plt.ylabel(var_out+' ('+units+')')
+        plt.xlabel('Years')
         plt.legend([var_out])
-        plt.show()
+        plt.tight_layout()
+        plt.savefig(self.rundir+'/../diagnostics/plot_'+var_out+'_'+str(startyear)+'-'+str(endyear)+'.png')

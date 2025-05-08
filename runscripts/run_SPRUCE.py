@@ -1,52 +1,79 @@
 import sys
 sys.path.append('..')
 import model_ELM
-from OLMTutils import get_machine_info, get_site_info
+from OLMTutils import get_machine_info, get_site_info, get_point_list
 import os
 import numpy as np
 
 
 #Get default directories, automatically detect machine if machine_name=''
-machine, rootdir, inputdata = get_machine_info(machine_name='')
+machine, rootdir, inputdata, queue, project = get_machine_info(machine_name='')
 
 #set rootdir and inputdata below if you want to override defaults
+rootdir = '/gpfs/wolf2/cades/cli185/proj-shared/'+os.environ['USER']+'/SPRUCE'
 caseroot= rootdir+'/e3sm_cases'
 runroot = rootdir+'/e3sm_run'
 #TODO:  add option to clone repository
-modelroot = os.environ['HOME']+'/models/E3SM-Peatlands'  #Existing E3SM code directory
+modelroot = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/E3SM-Peatlands'  #Existing E3SM code directory
+#modelroot = os.environ['HOME']+'/models/E3SM' 
+queue = 'batch_ccsi'       #Override default queue
 
-#We are going to use a pre-built executable. Set exeroot='' to build 
-exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20240812_US-SPR_ICB1850CNRDCTCBC_ad_spinup/bld'
-#exeroot = ''
+#Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
+exeroot = ''
+
 #----------------------Required inputs---------------------------------------------
-sites = 'US-SPR'           #Site or list of sites (6-character FLUXNET ID) or 'all for all sites in group
-sitegroup = 'AmeriFlux'    #Sites defined in <inputdata>/lnd/clm2/PTCLM/<sitegroup>_sitedata.txt
-mettype = 'site'           #Site or reanalysis product
-case_suffix = ''           #Identifier for cases (leave blank if none)
 
-use_cpl_bypass = True     #Coupler bypass for meteorology
-use_SP         = False     #Use Satellite phenolgy mode (doesn't yet work with FATES-SP)
+runtype = 'site'               #site,latlon_list,latlon_bbox
+mettype = 'site'               #Site or reanalysis product to use (site, gswp3, crujra)
+case_suffix = 'nfix_orig'               #Identifier for cases (leave blank if none)
+
+if (runtype == 'site'):
+    sites = ['US-SPR']               #Site name, list of site names, or 'all' for all sites in site group
+    sitegroup = 'AmeriFlux'       #Sites defined in <inputdata>/lnd/clm2/PTCLM/<sitegroup>_sitedata.txt
+    numproc = 1
+else:
+    region_name = 'gradient'   #Set the name of the region/point list to be simulated
+    numproc = 5            #Number of processors, must be <= the number of active gridcells
+    if (runtype == 'latlon_list'):
+        point_list_file = '/home/ac.ricciuto/models/elm-olmt/test_list.txt'   #file with a list of lat lons
+#If neither point_list or site is defined, it will use the bounds below.
+lat_bounds = [-90,90]
+lon_bounds = [-180,180]
+res = 'hcru_hcru'          #Resolution of global files to extract from
+
+use_cpl_bypass = True      #Coupler bypass for meteorology
+nutrients      = 'CNP'     #none or SP (SP mode), C (carbon only), CN (carbon/nitrogen), or CNP (carbon/nitrogen/phosphorus)
+nutrient_comp  = 'RD'      #Relative demand (RD) or equilibirium chemistry approximiation (ECA)
+soil_decomp    = 'CTC'     #Convergent trophic cascade (CTC) or Century (CNT) model
+#FATES options
 use_fates      = False     #Use FATES compsets
-fates_nutrient = True      #Use FATES nutrient (parteh_mode = 2)
+fates_pft      = 0          #Extract this PFT index from fates parameter file and only run one (set -1 for all)
+                            #Note:  Custom parameter file can be specified instead through case_options (see below)
+pft_duplicates = 1          #Construct a file with n pfts, all using the same parameters as fates_pft
 
-nyears_ad      =  240     #number of years for ad spinup
-nyears_final   =  100      #number of years for final spinup OR for SP run
+#Run lengths/dates
+nyears_ad      =  200      #number of years for ad spinup
+nyears_final   =  400      #number of years for final spinup, SP run, or FATES C-only
 nyears_trans   =  165      #number of years for transient run 
-                           #  If -1, the final year will be the last year of forcing data.
-run_startyear  = 1850      #Starting year for transient run OR for SP run
-
+run_startyear  =  1850     #Starting year for transient run, SP run or FATES C-only
 
 #---------------------Optional inputs via namelist variables------------------------
 #Define a dictionary to handle namelist options.
 #note:  set  'surffile', 'domainfile', 'pftdynfile', 'metdir' instead of the standard namelist variables for those files.
 #note:  Also set options here that use CPPDEFS (e.g. marsh, humhol)
 #case_options['option'] = value or [value1, value2, value3] if applying different options to different compsets
-case_options={} 
+case_options={}
 case_options['humhol'] = True
-case_options['metdir'] = inputdata+'/SPRUCE_data/'
+case_options['metdir'] = inputdata+'/SPRUCE_data/2024_version'
 case_options['pftdynfile'] = inputdata+'/SPRUCE_data/pftdyn/surfdata.pftdyn_plot07.nc'
-case_options['paramfile'] = '/ccsopen/home/zdr/models/OLMT/clm_params_SPRUCE_20231120_spruceroot.nc'
+case_options['paramfile'] = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/elm-olmt/clm_params_SPRUCE_20250507.nc'
+#case_options['paramfile'] = '/ccsopen/home/zdr/models/OLMT/clm_params_SPRUCE_20231120_spruceroot_cn20.nc'
 case_options['use_nofire'] = '.true.'
+#isotopes
+#case_options['use_c13'] = '.true.'
+#case_options['use_c14'] = '.true.'
+#case_options('use_c14_bombspike'] = '.true.'
+#case_options['atm_c14_filename'] = inputdata+'/atm/datm7/CO2/atm_delta_C14_data_1850-2007_monthly_25082011.nc'
 
 #--------------------ensemble options------------------------------------------------
 
@@ -54,7 +81,7 @@ parm_list      = ''    #Set parameter list (leave blank for no ensemble)
 nsamples       =  1000    #number of samples to run
 np_ensemble    =  384    #number of ensemble numbers to run in parallel (MUST be <= nsamples)
 ensemble_file  = ''     #File containing samples (if blank, OLMT will generate one)
-postproc_vars  = ['GPP','ER','NPP','NEE','TLAI','FSH','EFLX_LH_TOT']  #Variables to automatically post-process
+postproc_vars  = [] #['GPP','ER','NPP','NEE','TLAI','FSH','EFLX_LH_TOT']  #Variables to automatically post-process
 postproc_startyear = 2000
 postproc_endyear   = 2007
 postproc_freq      = 'monthly'   #Can be daily, monthly, annual
@@ -63,7 +90,7 @@ postproc_freq      = 'monthly'   #Can be daily, monthly, annual
 #
 #Treatment cases will use the same compset as the last case, and will inherit case_options unless overwritten
 #Specify additional options for treatments as a list (one for each desired treatment)
-nyears_treatment   = 7                               #number of years to run treatment simulation (assumed all same)
+nyears_treatment   = 9                               #number of years to run treatment simulation (assumed all same)
 startyear_treatment = run_startyear + nyears_trans   #Starting year (assuming to start from end of transient
 treatment_options={}
 #Treatment cases
@@ -73,31 +100,67 @@ plots=[7,6,20,13,8,17,19,11,4,16,10]  #Plot numbers corresponding to each treatm
 #Add Treatment cases
 treatment_options['suffix'] = treatments
 treatment_options['metdir'] = []
-treatment_options['pftdynfile']=[]
+treatment_options['pftdynfile']  = []
+treatment_options['hist_fincl2'] = []
+treatment_options['hist_dov2xy'] = []
+treatment_options['hist_mfilt'] = []
+treatment_options['hist_nhtfrq'] = []
+treatment_options['startdate_add_co2'] = []
+treatment_options['add_co2'] = []
 for p in range(0,len(plots)):
     plotstr = str(100+plots[p])[1:]
+    treatment_options['hist_fincl2'].append("'NPP','GPP','TOTVEGC','TOTVEGC_ABG','FROOTC','TLAI','QVEGT','QVEGE','LEAFC','AGNPP','BGNPP','CPOOL','PLANT_NDEMAND','PLANT_PDEMAND'")
+    treatment_options['hist_dov2xy'].append('.true., .false.')
     treatment_options['metdir'].append(case_options['metdir']+'/plot'+plotstr)  #Each case has its own met data directory
     #Each case has its own dynamic PFT file
     treatment_options['pftdynfile'].append(inputdata+'/SPRUCE_data/pftdyn/surfdata.pftdyn_plot'+plotstr+'.nc')
+    treatment_options['hist_mfilt'].append('365,365')
+    treatment_options['hist_nhtfrq'].append('-24,-24')
+    treatment_options['startdate_add_co2'].append("'20160301'")
+    if ('eCO2' in treatments[p]):
+        treatment_options['add_co2'].append('500')
+    else:
+        treatment_options['add_co2'].append('0')
+
 
 #---------------End of user input -----------------------------------------------------
 
+print('\n')
+if (runtype == 'site'):
+  #Check to see if all reqested sites exist
+  if not isinstance(sites,list):
+        sites=[sites]
 
-#Check to see if all reqested sites exist
-siteinfo = get_site_info(inputdata, sitegroup=sitegroup)
-if not isinstance(sites,list):
-    sites=[sites]
-if sites[0] == 'all':
-    sites = list(siteinfo.keys())
-    print('Running all sites in '+sitegroup+' site group:')
-    print(sites)
+  if (sites[0] != ''):
+    siteinfo = get_site_info(inputdata, sitegroup=sitegroup)
+    if sites[0] == 'all':
+        sites = list(siteinfo.keys())
+        print('Running all sites in '+sitegroup+' site group:')
+        print(sites)
+    else:
+        for s in sites:
+            if not (s in siteinfo.keys()):
+                print(s+' not in '+sitegroup+' site group. Exiting.')
+                print('Available sites: ',siteinfo.keys())
+                sys.exit(1)
+        print('Running site(s): ', sites)
+  point_list  = []
+  region_name = ''
 else:
-    for s in sites:
-        if not (s in siteinfo.keys()):
-            print(s+' not in '+sitegroup+' site group. Exiting.')
-            print('Available sites: ',siteinfo.keys())
-            sys.exit(1)
-    print('Running site(s): ', sites)
+    sites=['']
+    if (runtype == 'latlon_list'):
+        point_list = get_point_list(point_list_file)
+        print('Running ', len(point_list), 'grid cells')
+        print('Points in '+point_list_file)
+        if (numproc > len(point_list)):
+            numproc = len(point_list)
+            print('Warning:  number of proceessors greater than number '\
+                    ,'of grid cells. Setting numproc = ',numproc)
+    else:
+        point_list = []
+        print('Running with lat/lon bounding box')
+        print('Lat: ', lat_bounds)
+        print('Lon: ', lon_bounds)
 
 #Construct the list of compsets and suppring information
 compset_type="I"
@@ -105,7 +168,7 @@ if (use_cpl_bypass):
     compset_type='ICB'
 #Construct the list of compsets and supporting information
 twophase=False
-compset_base='CNPRDCTCBC'
+compset_base=nutrients+nutrient_comp+soil_decomp+'BC'
 if (use_fates):
     compset_base='ELMFATES'
 compset_type="I"
@@ -119,7 +182,7 @@ compsets=[]
 suffix=[]
 startyear=[]
 nyears=[]
-if (use_SP):
+if (not use_fates and (nutrients == 'none' or nutrients =='SP')):
   compsets.append(compset_type+'ELMBC')
   suffix.append('')
   startyear.append(run_startyear)
@@ -200,13 +263,17 @@ for site in sites:
 
     cases[c] = model_ELM.ELMcase(caseid='',compset=compsets[c], site=site, \
         caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
-        machine=machine, exeroot=exeroot, suffix=mysuffix,  \
-        res='hcru_hcru', nyears=nyears[c],startyear=startyear[c])
+        machine=machine, exeroot=exeroot, suffix=mysuffix, queue = queue, \
+        res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
+        lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
+        project=project)
 
     #Create the case
     cases[c].create_case()
     cases[c].case_options={}
-    cases[c].siteinfo = siteinfo[site]
+    if (site != ''):
+        cases[c].siteinfo = siteinfo[site]
+
     #Get the namelist options for this case
     for key in case_options.keys():
         if isinstance(case_options[key], list):
@@ -218,7 +285,11 @@ for site in sites:
         for key in treatment_options.keys():
             cases[c].case_options[key] = treatment_options[key][c-ncases_pretreatment]
     #Other options
-    cases[c].fates_nutrient=fates_nutrient
+    cases[c].nutrients = nutrients
+    cases[c].nutrient_comp = nutrient_comp
+    cases[c].soil_decomp = soil_decomp
+    cases[c].fates_pft=fates_pft
+    cases[c].pft_duplicates = pft_duplicates
     #Set the custom parameter files
     if ('fates_paramfile' in case_options):
       cases[c].fates_paramfile = case_options['fates_paramfile']
@@ -247,7 +318,7 @@ for site in sites:
               finidat_year=finidat_year)
       cases[c].dependcase = cases[depends[c]].casename
 
-    #Set postprocessing variables for ensemble
+    #Set postprocessing variables for ensemble (final case or treatment case)
     if ((c == ncases-1 or istreatment[c]) and ensemble):
       cases[c].postproc_vars = postproc_vars
       cases[c].postproc_startyear = postproc_startyear
@@ -262,13 +333,17 @@ for site in sites:
     if (c == 0):
       #Get the surface and domain data 
       cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
-      if (ensemble and site == sites[0]):
-        cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples)
-        ensemble_file = cases[c].ensemble_file
-    elif (ensemble):
-      #Set up ensemble file using the file generated in the first site and case
-      cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,ensemble_file=ensemble_file)
-    if (c == 2 and not use_fates):
+    if (ensemble):
+        if (site == sites[0] and c == 0):
+            #Get the ensemble file from the first site and case
+            cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
+                    ensemble_file = ensemble_file, obs=observations, obs_err=observation_error)
+            ensemble_file = cases[c].ensemble_file
+        else:
+            #Use the ensemble file for subsequent cases and sites
+            cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
+                ensemble_file = ensemble_file, obs=observations, obs_err=observation_error)
+    if ('20TR' in compsets[c] and not use_fates):
       #Get the dynamic PFT data
       cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
       cases[c].setup_domain_surfdata(makepftdyn=True)
@@ -285,12 +360,17 @@ for site in sites:
     #Set exeroot for all subsequent cases/sites so we don't have to rebuild
     if (depends[c] < 0 and site == sites[0]):
         exeroot = cases[c].exeroot
-    if (site == sites[0]):
-        #Always use the multi-site script even for one site
-        multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
-    if (site == sites[nsites-1] or ensemble):
+    if (ensemble):
+        multisite_scripts[c] = cases[c].create_multisite_script([site], scriptdir)
         jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
             ensemble=ensemble,multisite_script=multisite_scripts[c])
+    else:
+        if (site == sites[0]):
+            #Always use the multi-site script even for one site
+            multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
+        if (site == sites[nsites-1]):
+            jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
+                ensemble=ensemble,multisite_script=multisite_scripts[c])
     #Return to script directory
     os.chdir(scriptdir)
 

@@ -14,7 +14,7 @@ import xarray as xr
 
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
-            res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', \
+            res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', project = '',\
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
             point_list=[], namelist_options=[],casename='',mpilib=''):
@@ -60,7 +60,7 @@ class ELMcase():
         else:
           self.caseid = caseid
         self.queue=queue
-        self.project=''
+        self.project=project
         self.get_machine(machine=machine)
         self.compiler=''
         self.pio_version=2
@@ -127,18 +127,10 @@ class ELMcase():
     else:
       self.machine=machine
     self.noslurm=False
-    if ('linux' in self.machine or 'ubuntu' in self.machine):
+    if ('linux' in self.machine or 'ubuntu' in self.machine or 'docker' in self.machine):
         self.noslurm=True
     if self.queue == '':
         self.queue='batch'
-    if ('baseline' in self.machine):
-        self.project='CLI185'
-    if ('pm-cpu' in self.machine):
-        self.project='e3sm'
-        self.queue='regular'
-    elif ('chrysalis' in self.machine):
-        self.project='e3sm'
-        self.queue='compute'
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -605,7 +597,9 @@ class ELMcase():
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
             if (isinstance(self.case_options[key], str) and not ('hist_' in key) \
-                    and not '.true.' in self.case_options[key] and not '.false.' in self.case_options[key]):
+                    and not '.true.' in self.case_options[key] and \
+                    not '.false.' in self.case_options[key] and not ('add_co2' in key)):
+                #Make these strings
                 self.customize_namelist(variable=key,value="'"+self.case_options[key]+"'")
             else:
                 self.customize_namelist(variable=key,value=str(self.case_options[key]))

@@ -4,6 +4,8 @@ import numpy as np
 
 #Function to return default directories for supported machines
 def get_machine_info(machine_name=''):
+    queue = ''
+    project = ''
     if (machine_name == ''):
         if ('HOSTNAME' in os.environ):
             machine_name=os.environ['HOSTNAME']
@@ -14,23 +16,34 @@ def get_machine_info(machine_name=''):
         rootdir = '/gpfs/wolf2/cades/cli185/scratch/'+os.environ['USER']
         inputdata = '/gpfs/wolf2/cades/cli185/world-shared/e3sm/inputdata/'
         machine = 'cades-baseline'
+        queue = 'batch'
+        project = 'CLI185'
     elif  ('chrlogin' in machine_name or 'chrysalis' in machine_name):
         rootdir = '/lcrc/group/e3sm/'+os.environ['USER']+'/scratch'
         inputdata = '/lcrc/group/e3sm/ccsm-data/inputdata'
         machine = 'chrysalis'
+        queue = 'compute'
+        project = 'e3sm'
     elif ('pm-cpu' in machine_name or 'login' in machine_name):
         rootdir = os.environ['SCRATCH']
         inputdata = '/global/cfs/cdirs/e3sm/inputdata'
         machine = 'pm-cpu'
+        queue = 'regular'
+        project = 'e3sm'
     elif ('ubuntu' in machine_name or 'linux-generic' in machine_name):
         rootdir = os.environ['HOME']+'/models'
         inputdata = rootdir + '/inputdata'
         machine = 'linux-generic'
+    elif ('docker' in machine_name):
+        rootdir = '/output'
+        inputdata = '/inputdata'
+        machine = 'docker'
     else:
         print('Error:  Machine not detected.  Please specify machine name')
         sys.exit(1)
-    return machine, rootdir, inputdata
+    return machine, rootdir, inputdata, queue, project
 
+#Function to get the available site groups
 def get_sitegroups(inputdata):
     PTCLM = inputdata+'/lnd/clm2/PTCLM'
     pattern = os.path.join(PTCLM, "*_sitedata.*")
@@ -107,4 +120,8 @@ def get_point_list(fname):
     return points
 #TODO:  Function to return met data path for various options
 
-
+def get_default_diag_vars(nutrients, use_fates):
+    if (nutrients == 'none'):
+        return ['TLAI','FPSN','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','SNOWDP','QRUNOFF','QDRAI','QOVER']
+    else:
+        return ['NEE','NBP','TLAI','TOTSOMC','CWDC','TOTLITC','TOTECOSYSC','NPP','GPP','QVEGT','QVEGE','EFLX_LH_TOT']

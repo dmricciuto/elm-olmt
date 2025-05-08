@@ -1,54 +1,67 @@
 import sys
 sys.path.append('..')
 import model_ELM
-from OLMTutils import get_machine_info, get_site_info, get_point_list
+from OLMTutils import get_machine_info, get_site_info, get_point_list, get_default_diag_vars
 import os
 import numpy as np
 
 
 #Get default directories, automatically detect machine if machine_name=''
-machine, rootdir, inputdata = get_machine_info(machine_name='')
+machine, rootdir, inputdata, queue, project = get_machine_info(machine_name='')
 
 #set rootdir and inputdata below if you want to override defaults
 caseroot= rootdir+'/e3sm_cases'
 runroot = rootdir+'/e3sm_run'
 #TODO:  add option to clone repository
-modelroot = os.environ['HOME']+'/models/E3SM'  #Existing E3SM code directory
+modelroot = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/E3SM'  #Existing E3SM code directory
+#modelroot = os.environ['HOME']+'/models/E3SM' 
 
 #Set the full path of the bld directory to use a pre-built executable. Set exeroot='' to build 
-#exeroot = '/lcrc/group/e3sm/ac.ricciuto/scratch/e3sm_run/20250225_US-UMB_ICB1850CNRDCTCBC_ad_spinup/bld/'
-exeroot = ''
+exeroot = '/gpfs/wolf2/cades/cli185/scratch/zdr/e3sm_run/20250506_US-UMB_ICBELMBC/bld'
+queue = 'batch_ccsi'
 
 #----------------------Required inputs---------------------------------------------
 
 runtype = 'site'               #site,latlon_list,latlon_bbox
-mettype = 'gswp3'              #Site or reanalysis product to use (site, gswp3, crujra)
+mettype = 'gswp3'               #Site or reanalysis product to use (site, gswp3, crujra)
 case_suffix = ''               #Identifier for cases (leave blank if none)
 
 if (runtype == 'site'):
-    sites = 'US-UMB'           #Site name, list of site names, or 'all' for all sites in site group
+    sites = ['US-UMB','US-MOz']               #Site name, list of site names, or 'all' for all sites in site group
     sitegroup = 'AmeriFlux'       #Sites defined in <inputdata>/lnd/clm2/PTCLM/<sitegroup>_sitedata.txt
     numproc = 1
 else:
-    region_name = 'region'   #Set the name of the region/point list to be simulated
-    numproc = 384            #Number of processors, must be <= the number of active gridcells
+    region_name = 'gradient'   #Set the name of the region/point list to be simulated
+    numproc = 5            #Number of processors, must be <= the number of active gridcells
     if (runtype == 'latlon_list'):
-        point_list_file = ''   #file with a list of lat lons
+        point_list_file = '/home/ac.ricciuto/models/elm-olmt/test_list.txt'   #file with a list of lat lons
 #If neither point_list or site is defined, it will use the bounds below.
 lat_bounds = [-90,90]
 lon_bounds = [-180,180]
 res = 'hcru_hcru'          #Resolution of global files to extract from
 
 use_cpl_bypass = True      #Coupler bypass for meteorology
-use_SP         = False     #Use Satellite phenolgy mode (doesn't yet work with FATES-SP)
+nutrients      = 'none'     #none or SP (SP mode), C (carbon only), CN (carbon/nitrogen), or CNP (carbon/nitrogen/phosphorus)
+nutrient_comp  = 'RD'      #Relative demand (RD) or equilibirium chemistry approximiation (ECA)
+soil_decomp    = 'CTC'     #Convergent trophic cascade (CTC) or Century (CNT) model
+#FATES options
 use_fates      = False     #Use FATES compsets
-fates_nutrient = False      #Use FATES nutrient (parteh_mode = 2)
+fates_pft      = 0          #Extract this PFT index from fates parameter file and only run one (set -1 for all)
+                            #Note:  Custom parameter file can be specified instead through case_options (see below)
+pft_duplicates = 1          #Construct a file with n pfts, all using the same parameters as fates_pft
 
-nyears_ad      =   40      #number of years for ad spinup
-nyears_final   =   40      #number of years for final spinup OR for SP run
-nyears_trans   =  164      #number of years for transient run 
-                           #  If -1, the final year will be the last year of forcing data.
-run_startyear  = 1850      #Starting year for transient run OR for SP run
+#Run lengths/dates
+nyears_ad      =  0      #number of years for ad spinup
+nyears_final   =  50      #number of years for final spinup, SP run, or FATES C-only
+nyears_trans   =  0      #number of years for transient run 
+run_startyear  =  1960     #Starting year for transient run, SP run or FATES C-only
+
+#Variables to post-process, time period and frequency of desired output.  
+#  If not ensemble mode, plot these; if ensemble, use for further UQ analysis
+postproc_vars  = get_default_diag_vars(nutrients, use_fates) #['NPP','TOTVEGC']  #Variables to automatically post-process
+postproc_startyear = 2006
+postproc_endyear   = 2009
+postproc_freq      = 'Monthly'   #Can be daily, monthly, annual, hourly (not tested)
 
 
 #---------------------Optional inputs via namelist variables------------------------
@@ -56,21 +69,23 @@ run_startyear  = 1850      #Starting year for transient run OR for SP run
 #note:  use surffile, domainfile, pftdynfile, metdir instead of the standard namelist variables for those files.
 #case_options['option'] = value or [value1, value2, value3] if applying different options to different compsets
 case_options={} 
+#case_options['metdir'] = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/elm-olmt/runscripts'
 #case_options['fates_paramfile'] = inputdata+'/lnd/clm2/paramdata/fates_params_api.32.0.0_pft1_c231215.nc'
-#case_options['hist_mfilt']  = '1'
-#case_options['hist_nhtfrq'] = '0'
-
+#case_options['use_fates_planthydro'] = '.true.'
 
 #--------------------ensemble options------------------------------------------------
 
-parm_list      = ''  #'parm_list_example' #Set parameter list (leave blank for no ensemble)
-nsamples       =  1000    #number of samples to run
-np_ensemble    =  384    #number of ensemble numbers to run in parallel (MUST be <= nsamples)
+parm_list      = '' #'parm_list_example'  #Set parameter list (leave blank for no ensemble)
+nsamples       =  100    #number of samples to run
+np_ensemble    =  100    #number of ensemble numbers to run in parallel (MUST be <= nsamples)
 ensemble_file  = ''     #File containing samples (if blank, OLMT will generate one)
-postproc_vars  = ['GPP','ER','NPP','NEE','TLAI','FSH','EFLX_LH_TOT']  #Variables to automatically post-process
-postproc_startyear = 2007
-postproc_endyear   = 2008
-postproc_freq      = 'monthly'   #Can be daily, monthly, annual
+
+#Observations to use in calibration (must match a model output variable in name/units, and the 
+#  length of the postprocessed record 
+#This could be replaced with code to read an observation file.
+observations = {}
+observation_error = {}
+
 
 #----------------------Define treatment cases ----------------------------------------
 #
@@ -79,11 +94,6 @@ postproc_freq      = 'monthly'   #Can be daily, monthly, annual
 nyears_treatment   = 85                              #number of years to run treatment simulation (assumed all same)
 startyear_treatment = run_startyear + nyears_trans   #Starting year (assuming to start from end of transient
 treatment_options={}
-#treatment_options['suffix']        = ['reseed']      #List of suffixes for different treatments (required)
-#treatment_options['restart_leafc_storage'] = [10.]           #Restart file manipulation (experimental)
-#treatment_options['restart_soil4c_vr'] = ['*0.5']
-#treatment_options['restart_soil4n_vr'] = ['*0.5']
-#treatment_options['restart_soil4p_vr'] = ['*0.5']
 
 #---------------End of user input -----------------------------------------------------
 
@@ -130,7 +140,7 @@ if (use_cpl_bypass):
     compset_type='ICB'
 #Construct the list of compsets and supporting information
 twophase=False
-compset_base='CNPRDCTCBC'
+compset_base=nutrients+nutrient_comp+soil_decomp+'BC'
 if (use_fates):
     compset_base='ELMFATES'
 compset_type="I"
@@ -144,7 +154,7 @@ compsets=[]
 suffix=[]
 startyear=[]
 nyears=[]
-if (use_SP):
+if (not use_fates and (nutrients == 'none' or nutrients =='SP')):
   compsets.append(compset_type+'ELMBC')
   suffix.append('')
   startyear.append(run_startyear)
@@ -225,7 +235,7 @@ for site in sites:
 
     cases[c] = model_ELM.ELMcase(caseid='',compset=compsets[c], site=site, \
         caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
-        machine=machine, exeroot=exeroot, suffix=mysuffix,  \
+        machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, project=project,  \
         res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
         lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list)
 
@@ -246,7 +256,11 @@ for site in sites:
         for key in treatment_options.keys():
             cases[c].case_options[key] = treatment_options[key][c-ncases_pretreatment]
     #Other options
-    cases[c].fates_nutrient=fates_nutrient
+    cases[c].nutrients = nutrients
+    cases[c].nutrient_comp = nutrient_comp
+    cases[c].soil_decomp = soil_decomp
+    cases[c].fates_pft=fates_pft
+    cases[c].pft_duplicates = pft_duplicates
     #Set the custom parameter files
     if ('fates_paramfile' in case_options):
       cases[c].fates_paramfile = case_options['fates_paramfile']
@@ -275,8 +289,8 @@ for site in sites:
               finidat_year=finidat_year)
       cases[c].dependcase = cases[depends[c]].casename
 
-    #Set postprocessing variables for ensemble
-    if ((c == ncases-1 or istreatment[c]) and ensemble):
+    #Set postprocessing variables (final case or treatment case)
+    if (c == ncases-1 or istreatment[c]):
       cases[c].postproc_vars = postproc_vars
       cases[c].postproc_startyear = postproc_startyear
       cases[c].postproc_endyear = postproc_endyear
@@ -290,13 +304,17 @@ for site in sites:
     if (c == 0):
       #Get the surface and domain data 
       cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
-      if (ensemble and site == sites[0]):
-        cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples)
-        ensemble_file = cases[c].ensemble_file
-    elif (ensemble):
-      #Set up ensemble file using the file generated in the first site and case
-      cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,ensemble_file=ensemble_file)
-    if (c == 2 and not use_fates):
+    if (ensemble):
+        if (site == sites[0] and c == 0):
+            #Get the ensemble file from the first site and case
+            cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
+                    ensemble_file = ensemble_file, obs=observations, obs_err=observation_error)
+            ensemble_file = cases[c].ensemble_file
+        else:
+            #Use the ensemble file for subsequent cases and sites
+            cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
+                ensemble_file = ensemble_file, obs=observations, obs_err=observation_error)
+    if ('20TR' in compsets[c] and not use_fates):
       #Get the dynamic PFT data
       cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
       cases[c].setup_domain_surfdata(makepftdyn=True)
@@ -313,12 +331,17 @@ for site in sites:
     #Set exeroot for all subsequent cases/sites so we don't have to rebuild
     if (depends[c] < 0 and site == sites[0]):
         exeroot = cases[c].exeroot
-    if (site == sites[0]):
-        #Always use the multi-site script even for one site
-        multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
-    if (site == sites[nsites-1] or ensemble):
+    if (ensemble):
+        multisite_scripts[c] = cases[c].create_multisite_script([site], scriptdir)
         jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
             ensemble=ensemble,multisite_script=multisite_scripts[c])
+    else:
+        if (site == sites[0]):
+            #Always use the multi-site script even for one site
+            multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
+        if (site == sites[nsites-1]):
+            jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
+                ensemble=ensemble,multisite_script=multisite_scripts[c])
     #Return to script directory
     os.chdir(scriptdir)
 
