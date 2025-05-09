@@ -182,6 +182,17 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 if (self.siteinfo['PCT_CLAY'] >= 0):
                     ds['PCT_CLAY'][:] = self.siteinfo['PCT_CLAY']
                     print('Setting $CLAY to ',self.siteinfo['PCT_CLAY'])
+                #SPRUCE-specific properties
+                if ('SPR' in self.site):
+                  print('Setting SPRUCE organic, soil order and P variables')
+                  ds['ORGANIC'][0:8,:] = 130.
+                  ds['ORGANIC'][8,:]   = 65.
+                  ds['SOIL_ORDER'][:]  = 3
+                  ds['LABILE_P'][:]    = 1.0
+                  ds['APATITE_P'][:]   = 0.1
+                  ds['SECONDARY_P'][:] = 1.0
+                  ds['OCCLUDED_P'][:]  = 1.0
+
             #else:  TODO - handle land use transitions
         #else:
         #    for p in range(0,len(mylat)):
