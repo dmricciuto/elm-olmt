@@ -2,9 +2,12 @@ import os
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import numpy as np
+import tkinter.simpledialog as simpledialog
 from OLMTutils import get_machine_info, get_site_info, get_sitegroups
 import mapselect
 import pickle
+import subprocess
+import threading
 
 class E3SMConfigurator(tk.Toplevel):   #Tk):
     def __init__(self, master=None):
@@ -12,18 +15,21 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.title("E3SM GUI Configurator")
         self.geometry("1200x900")
         self.result = None
+        self.ssh = None
+        self.sftp = None
+        self.logged_in = False
 
         # When the window is closed via the window manager, call on_close
         self.protocol("WM_DELETE_WINDOW", self.on_close)        
 
         # Execute get_machine_info to get defaults
-        self.machine, self.rootdir, self.inputdata = get_machine_info(machine_name='')
-        self.sitegroups = get_sitegroups(self.inputdata)
-        self.siteinfo = get_site_info(self.inputdata)
-        caseroot = self.rootdir + '/e3sm_cases'
-        runroot = self.rootdir + '/e3sm_run'
+        self.machine, self.rootdir, self.inputdata, self.queue, self.project, self.hostname = \
+		get_machine_info(machine_name='docker')
+        self.sitegroups = get_sitegroups(os.environ['HOME']+'/models/inputdata')
+        self.siteinfo = get_site_info(os.environ['HOME']+'/models/inputdata')
+
         inputdata = self.inputdata
-        modelroot = os.environ.get('HOME', '') + '/models/E3SM'
+        modelroot = '/code/E3SM'
         exeroot_default = ''   # default blank
         queue_default = 'batch'
         
@@ -35,18 +41,18 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
         tk.Label(top_frame, text="Case Root:").grid(row=0, column=0, sticky="w", padx=5, pady=5)
         self.caseroot_entry = tk.Entry(top_frame, width=45)
-        self.caseroot_entry.insert(0, caseroot)
+        self.caseroot_entry.insert(0, self.rootdir+'/e3sm_cases')
         self.caseroot_entry.grid(row=0, column=1, padx=5, pady=5)
         browse_caseroot = tk.Button(top_frame, text="Browse",
-                            command=lambda: self.browse_directory(self.caseroot_entry))
+                            command=lambda: self.smart_browse(self.caseroot_entry))
         browse_caseroot.grid(row=0, column=2, padx=5, pady=5)
 
         tk.Label(top_frame, text="Run Root:").grid(row=0, column=3, sticky="w", padx=5, pady=5)
         self.runroot_entry = tk.Entry(top_frame, width=45)
-        self.runroot_entry.insert(0, runroot)
+        self.runroot_entry.insert(0, self.rootdir+'/e3sm_run')
         self.runroot_entry.grid(row=0, column=4, padx=5, pady=5)
         browse_runroot = tk.Button(top_frame, text="Browse",
-                            command=lambda: self.browse_directory(self.runroot_entry))
+                            command=lambda: self.smart_browse(self.runroot_entry))
         browse_runroot.grid(row=0, column=5, padx=5, pady=5)
 
         # Row 1: Exe Root and Model Root
@@ -54,8 +60,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.modelroot_entry = tk.Entry(top_frame, width=45)
         self.modelroot_entry.insert(0, modelroot)
         self.modelroot_entry.grid(row=1, column=1, padx=5, pady=5)
-        browse_modelroot = tk.Button(top_frame, text="Browse",
-                            command=lambda: self.browse_directory(self.modelroot_entry))
+        browse_modelroot = tk.Button(top_frame, text="Browse", command=lambda: self.smart_browse(self.modelroot_entry))
         browse_modelroot.grid(row=1, column=2, padx=5, pady=5)
 
         tk.Label(top_frame, text="Exeroot:").grid(row=1, column=3, sticky="w", padx=5, pady=5)
@@ -63,30 +68,55 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.exeroot_entry.insert(0, exeroot_default)
         self.exeroot_entry.grid(row=1, column=4, padx=5, pady=5)
         browse_exeroot = tk.Button(top_frame, text="Browse",
-                            command=lambda: self.browse_directory(self.exeroot_entry))
+                            command=lambda: self.browse_directory(self.smart_browse(self.exeroot_entry)))
         browse_exeroot.grid(row=1, column=5, padx=5, pady=5)
 
 
-        #Row 2:  Input data
+        # Row 2: Input data
         tk.Label(top_frame, text="Input data:").grid(row=2, column=0, sticky="w", padx=5, pady=5)
         self.inputdata_entry = tk.Entry(top_frame, width=45)
         self.inputdata_entry.insert(0, inputdata)
         self.inputdata_entry.grid(row=2, column=1, padx=5, pady=5)
         browse_inputdata = tk.Button(top_frame, text="Browse",
-                            command=lambda: self.browse_directory(self.inputdata_entry))
+                            command=lambda: self.smart_browse(self.inputdata_entry))
         browse_inputdata.grid(row=2, column=2, padx=5, pady=5)
 
-        #Row 3:  queue and machine
+        # Row 2b: Met Directory (initially visible)
+        self.metdir_label = tk.Label(top_frame, text="Met Directory:")
+        self.metdir_label.grid(row=2, column=3, sticky="w", padx=5, pady=5)
+        self.metdir_entry = tk.Entry(top_frame, width=45)
+        # Set metdir based on initial mettype
+        initial_mettype = self.mettype_var.get() if hasattr(self, "mettype_var") else "era5-daymet"
+        if initial_mettype == "era5-daymet":
+            subdir = "atm/datm7/Daymet_ERA5_TESSFA2/cpl_bypass_full"
+        elif initial_mettype == "gswp3":
+            subdir = "atm/datm7/atm_forcing.datm7.GSWP3.0.5d.v2.c180716/cpl_bypass_full"
+        elif initial_mettype == "crujra":
+            subdir = "atm/datm7/atm_forcing.CRUJRA_trendy_2025/cpl_bypass_full"
+        else:
+            subdir = "atm/datm7"
+        default_metdir = os.path.join(self.inputdata_entry.get(), subdir)
+        self.metdir_entry.insert(0, default_metdir)
+        self.metdir_entry.grid(row=2, column=4, padx=5, pady=5)
+        self.browse_metdir = tk.Button(top_frame, text="Browse",
+                               command=lambda: self.smart_browse(self.metdir_entry))
+        self.browse_metdir.grid(row=2, column=5, padx=5, pady=5)
+
+        # Row 3:  queue and machine
         tk.Label(top_frame, text="Machine:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
-        self.machine_entry = tk.Entry(top_frame, width=45)
-        self.machine_entry.insert(0, self.machine)
-        self.machine_entry.grid(row=3, column=1, padx=5, pady=5)
+        self.machine_var = tk.StringVar(value=self.machine)
+        machine_options = ["baseline", "chrysalis", "pm-cpu", "docker"]
+        self.machine_menu = ttk.Combobox(top_frame, textvariable=self.machine_var, values=machine_options, state="readonly")
+        self.machine_menu.grid(row=3, column=1, padx=5, pady=5)
+        self.machine_menu.bind("<<ComboboxSelected>>", self.on_machine_selected)
 
         tk.Label(top_frame, text="Queue:").grid(row=3, column=3, sticky="w", padx=5, pady=5)
         self.queue_entry = tk.Entry(top_frame, width=45)
         self.queue_entry.insert(0, queue_default)
         self.queue_entry.grid(row=3, column=4, padx=5, pady=5)
         
+        self.login_btn = tk.Button(top_frame, text="Login", command=self.remote_login)
+        self.login_btn.grid(row=3, column=2, padx=5, pady=5)
 
         # Notebook for other options
         self.notebook = ttk.Notebook(self)
@@ -102,6 +132,11 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         # Save/Print button at the bottom
         save_btn = tk.Button(self, text="Save Configuration", command=self.save_configuration)
         save_btn.pack(side=tk.BOTTOM, pady=10)
+
+        run_docker_btn = tk.Button(self, text="Run in Docker", command=self.run_in_docker_container)
+        run_docker_btn.pack(side=tk.BOTTOM, pady=5)
+
+        self.use_cpl_bypass_var.trace_add("write", lambda *args: self.update_metdir_visibility(top_frame))
 
     def browse_directory(self, entry):
       directory = filedialog.askdirectory(initialdir=entry.get() or "/")
@@ -125,6 +160,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         mettype_options = ["era5-daymet", "gswp3", "crujra"]
         self.mettype_menu = ttk.Combobox(parent, textvariable=self.mettype_var, values=mettype_options, state="readonly")
         self.mettype_menu.grid(row=row, column=3, padx=5, pady=5)
+        self.mettype_menu.bind("<<ComboboxSelected>>", self.on_mettype_selected)
         row += 1
 
         # --- Case Suffix ---
@@ -151,7 +187,41 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
              self.site_menu.insert(tk.END, option)
              #self.site_menu.pack(padx=10, pady=10)
         self.site_menu.grid(row=1, column=1, padx=5, pady=5)
+        # Add "Show Sites on Map" button
+        self.show_sites_btn = tk.Button(self.sites_frame, text="Show Sites on Map", command=self.show_sites_on_map)
+        self.show_sites_btn.grid(row=2, column=0, columnspan=2, pady=5)
         self.sites_frame.grid(row=row, column=0, columnspan=4, sticky="w", padx=5, pady=5)
+        row += 1
+        self.REGION_BOUNDS = {
+            'Global':      [-180.25, 180.25, -90.25, 90.25],
+            'Boreal North America':      [-170.25, -60.25, 49.75, 79.75],
+            'Temperate North America':      [-125.25, -66.25, 30.25, 49.75],
+            'CONUS':     [-125.25, -66.25, 23.25, 54.75],
+            'Columbia Basin':  [-126, -108, 40.0, 55.0],
+            'Central America':      [-115.25, -80.25, 9.75, 30.25],
+            'South America':      [-80.25, -40.25, -59.75, 12.75],
+            'Northern Hemisphere South America':      [-80.25, -50.25, 0.25, 12.75],
+            'Southern Hemisphere South America':      [-80.25, -40.25, -59.75, 0.25],
+            'Europe':      [-10.25, 30.25, 35.25, 70.25],
+            'Middle East':      [-10.25, 60.25, 20.24, 40.25],
+            'Africa':      [-20.25, 45.25, -34.75, 20.25],
+            'Northern Hemisphere Africa':      [-20.25, 45.25, 0.25, 20.25],
+            'Southern Hemisphere Africa':      [10.25, 45.25, -34.75, 0.25],
+            'Asia':      [30.25, 179.75, -10.25, 70.25],
+            'Boreal Asia':      [30.25, 179.25, 54.75, 70.25],
+            'Central Asia':      [30.25, 142.58, 30.25, 54.75],
+            'Southeast Asia':      [65.25, 120.25, 5.25, 30.25],
+            'Equatorial Asia':      [99.75, 150.25, -10.25, 10.25],
+            'Australia':      [112.00, 154.00, -41.25, -10.50],
+        }
+        # --- Region selection ---
+        self.region_label = tk.Label(parent, text="Region:")
+        self.region_var = tk.StringVar()
+        region_options = ['Custom'] + list(self.REGION_BOUNDS.keys())
+        self.region_menu = ttk.Combobox(parent, textvariable=self.region_var, values=region_options, state="readonly")
+        self.region_menu.bind("<<ComboboxSelected>>", self.on_region_selected)
+        self.region_label.grid(row=row, column=0, sticky="w", padx=5, pady=5)
+        self.region_menu.grid(row=row, column=1, padx=5, pady=5)
         row += 1
 
         # --- Lat/Lon bounds (if runtype == "latlon_bbox") ---
@@ -175,14 +245,20 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         # Button to open the Cartopy map selector.
         select_btn = tk.Button(self.latlon_frame, text="Select on Map", command=self.open_map_selector)
         select_btn.grid(row=2, column=0, columnspan=2, pady=10)
-        
+
+        # Add numproc entry (default 1)
+        tk.Label(self.latlon_frame, text="Num Processors:").grid(row=3, column=0, sticky="w")
+        self.numproc_entry = tk.Entry(self.latlon_frame, width=5)
+        self.numproc_entry.insert(0, "1")
+        self.numproc_entry.grid(row=3, column=1, padx=5)
+
         self.latlon_frame.grid(row=row, column=0, columnspan=4, sticky="w", padx=5, pady=5)
         row += 1
 
         # --- Resolution ---
         tk.Label(parent, text="Resolution:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
         self.resolution_var = tk.StringVar(value="r05_r05")
-        resolution_options = ["r05_r05", "r10_r10", "r20_r20"]
+        resolution_options = ["r05_r05", "hcru_hcru", "f09_f09"]
         self.resolution_menu = ttk.Combobox(parent, textvariable=self.resolution_var, values=resolution_options, state="readonly")
         self.resolution_menu.grid(row=row, column=1, padx=5, pady=5)
         row += 1
@@ -238,7 +314,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.case_options_text = scrolledtext.ScrolledText(parent, width=60, height=10)
         self.case_options_text.grid(row=row, column=1, columnspan=3, padx=5, pady=5)
         # Insert some dummy text (modify as needed)
-        self.case_options_text.insert(tk.END, "{\n    'metdir': '/path/to/metdir',\n    # ...\n}")
+        self.case_options_text.insert(tk.END, "{\n   variable: value,\n    # ...\n}")
         row += 1
 
         # Finally, update which runtype frame to show:
@@ -255,36 +331,88 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             self.lon_min_entry.insert(0, f"{min_lon:.2f}")
             self.lon_max_entry.delete(0, tk.END)
             self.lon_max_entry.insert(0, f"{max_lon:.2f}")
+            # Set region to "Custom"
+            self.region_var.set("Custom")
 
-        # Open the Cartopy map selector window; the callback updates the GUI entries.
-        mapselect.CartopyMapSelector(update_bounds)
+        # Get current bounds from the entries
+        try:
+            min_lat = float(self.lat_min_entry.get())
+            max_lat = float(self.lat_max_entry.get())
+            min_lon = float(self.lon_min_entry.get())
+            max_lon = float(self.lon_max_entry.get())
+        except ValueError:
+            # Fallback to global if parsing fails
+            min_lat, max_lat, min_lon, max_lon = -90, 90, -180, 180
+
+        # Pass initial bounds to the map selector
+        mapselect.CartopyMapSelector(
+            update_bounds,
+            initial_bounds=(min_lat, max_lat, min_lon, max_lon)
+        )
+
+    def show_sites_on_map(self):
+        selected_sitegroup = self.sitegroup_var.get()
+        myinputdata = self.inputdata_entry.get()
+        if (self.machine == 'docker'):
+            myinputdata = os.path.join(os.environ['HOME'], 'models/inputdata')
+        siteinfo = get_site_info(myinputdata, sitegroup=selected_sitegroup, sftp=self.sftp)
+        sites = []
+        name_to_index = {}
+        for idx, (sitename, info) in enumerate(siteinfo.items()):
+            lat = info.get("lat")
+            lon = info.get("lon")
+            if lat is not None and lon is not None:
+                sites.append({"name": sitename, "lat": lat, "lon": lon})
+                name_to_index[sitename] = idx
+
+        def update_selected_sites(selected_sites):
+            # selected_sites is a list of site dicts
+            self.site_menu.selection_clear(0, tk.END)
+            for site in selected_sites:
+                idx = name_to_index.get(site["name"])
+                if idx is not None:
+                    self.site_menu.selection_set(idx)
+                    self.site_menu.see(idx)
+
+        mapselect.CartopyMapSelector(update_selected_sites, sites=sites)
 
     def update_runtype_fields(self, event=None):
         """
-        Show/hide the site selection or lat/lon bounds based on runtype.
+        Show/hide the site selection, region, or lat/lon bounds based on runtype.
         """
         runtype = self.runtype_var.get()
         if runtype == "site":
             self.sites_frame.grid()
             self.latlon_frame.grid_remove()
-            # Optionally, force the combobox to display the default by calling .set()
+            self.region_label.grid_remove()
+            self.region_menu.grid_remove()
             self.update_sitelist()
             self.sitegroup_menu.set(self.sitegroups[0])
+            self.numproc_entry.delete(0, tk.END)
+            self.numproc_entry.insert(0, "1")
         elif runtype == "latlon_bbox":
             self.latlon_frame.grid()
+            self.region_label.grid()
+            self.region_menu.grid()
             self.sites_frame.grid_remove()
         else:
-            # For other run types, hide both (or extend as needed)
             self.sites_frame.grid_remove()
             self.latlon_frame.grid_remove()
+            self.region_label.grid_remove()
+            self.region_menu.grid_remove()
+            self.numproc_entry.delete(0, tk.END)
+            self.numproc_entry.insert(0, "1")
 
     def update_sitelist(self, event=None):
         # Get the currently selected sitegroup from the sitegroup_menu
         selected_sitegroup = self.sitegroup_menu.get()
         if selected_sitegroup:
             # Call get_site_info to update the site information
-            self.siteinfo = get_site_info(self.inputdata, sitegroup=selected_sitegroup)
-        
+            myinputdata = self.inputdata_entry.get()
+            if (self.machine == 'docker'):
+                myinputdata = os.path.join(os.environ['HOME'], 'models/inputdata')
+            self.siteinfo = get_site_info(myinputdata, sitegroup=selected_sitegroup, sftp=self.sftp)
+
             new_site_list = list(self.siteinfo.keys())
             self.site_menu.delete(0, tk.END)
             for option in new_site_list:
@@ -358,12 +486,13 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         """
         config = {}
         # Top-level machine and directory options
-        config["machine"] = self.machine_entry.get()
+        config["machine"] = self.machine_var.get()
         config["caseroot"] = self.caseroot_entry.get()
         config["runroot"] = self.runroot_entry.get()
         config["modelroot"] = self.modelroot_entry.get()
         config["exeroot"] = self.exeroot_entry.get()
         config["queue"] = self.queue_entry.get()
+        config["project"] = self.project
         config["inputdata"] = self.inputdata_entry.get()
 
         # Required inputs
@@ -372,12 +501,15 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         config["case_suffix"] = self.case_suffix_entry.get()
 
         if config["runtype"] == "site":
-            #config["site"] = self.site_var.get()
             config["site"] = [self.site_menu.get(i) for i in self.site_menu.curselection()]
             config["sitegroup"] = self.sitegroup_var.get()
+            config["numproc"] = 1
         elif config["runtype"] == "latlon_bbox":
             config["lat_bounds"] = [self.lat_min_entry.get(), self.lat_max_entry.get()]
             config["lon_bounds"] = [self.lon_min_entry.get(), self.lon_max_entry.get()]
+            config["numproc"] = int(self.numproc_entry.get())
+        else:
+            config["numproc"] = 1
 
         config["resolution"] = self.resolution_var.get()
         config["use_cpl_bypass"] = self.use_cpl_bypass_var.get()
@@ -393,8 +525,24 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             config["nyears_final"] = self.nyears_final_entry.get()
             config["nyears_trans"] = self.nyears_trans_entry.get()
 
-        config["case_options"] = self.case_options_text.get("1.0", tk.END).strip()
-
+        # Parse case_options as a dictionary
+        case_options_text = self.case_options_text.get("1.0", tk.END).strip()
+        case_options_dict = {}
+        for line in case_options_text.splitlines():
+            line = line.strip()
+            if not line or line.startswith("#"):
+                continue
+            # Support both '=' and ':' as separators
+            if '=' in line:
+                key, value = line.split('=', 1)
+            elif ':' in line:
+                key, value = line.split(':', 1)
+            else:
+                continue
+            case_options_dict[key.strip()] = value.strip()
+        config["case_options"] = case_options_dict
+        config["metdir"] = self.metdir_entry.get() if self.use_cpl_bypass_var.get() else ""
+        
         # Ensemble options
         ens = {}
         ens["parm_list"] = self.parm_list_entry.get()
@@ -409,15 +557,288 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         config["ensemble_options"] = ens
 
         self.result = config
-        self.destroy()
+        # Save config as a pickle file
+        with open("./temp/config.pkl", "wb") as f:
+            pickle.dump(config, f, protocol=pickle.HIGHEST_PROTOCOL)
+            # Close the file
+            f.close()
 
-        #messagebox.showinfo("Configuration Saved", "Configuration saved successfully!")
+        messagebox.showinfo("Configuration Saved", "Configuration saved successfully!")
 
     def on_close(self):
         # In case the user closes the window via the window manager,
         # we set result to an empty dictionary (or you could set it to None).
+        if self.sftp:
+            self.sftp.close()
+        if self.ssh:
+            self.ssh.close()
         self.result = {}
         self.destroy()
+
+    def on_region_selected(self, event=None):
+        region = self.region_var.get()
+        if region in self.REGION_BOUNDS:
+            lon_min, lon_max, lat_min, lat_max = self.REGION_BOUNDS[region]
+            self.lat_min_entry.delete(0, tk.END)
+            self.lat_min_entry.insert(0, str(lat_min))
+            self.lat_max_entry.delete(0, tk.END)
+            self.lat_max_entry.insert(0, str(lat_max))
+            self.lon_min_entry.delete(0, tk.END)
+            self.lon_min_entry.insert(0, str(lon_min))
+            self.lon_max_entry.delete(0, tk.END)
+            self.lon_max_entry.insert(0, str(lon_max))
+
+    def update_metdir_visibility(self, frame=None):
+        show = self.use_cpl_bypass_var.get()
+        if show:
+            self.metdir_label.grid()
+            self.metdir_entry.grid()
+            self.browse_metdir.grid()
+        else:
+            self.metdir_label.grid_remove()
+            self.metdir_entry.grid_remove()
+            self.browse_metdir.grid_remove()
+
+    def remote_login(self):
+        if self.logged_in:
+            self.remote_logout()
+            return
+
+        import paramiko
+        username = simpledialog.askstring("Remote Username", "Enter your remote username:", parent=self)
+        if username is None:
+            return
+        password = simpledialog.askstring("Remote Password", "Enter your remote password:", show="*", parent=self)
+        if password is None:
+            return
+        try:
+            self.ssh = paramiko.SSHClient()
+            self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+            self.ssh.connect(self.hostname, username=username, password=password)
+            self.sftp = self.ssh.open_sftp()
+            self.logged_in = True
+            self.login_btn.config(text="Logout")
+            messagebox.showinfo("Success", f"Logged in to {self.hostname}", parent=self)
+            self.remote_homedir = self.sftp.normalize('.')
+            # --- Update modelroot entry on login ---
+            self.modelroot_entry.delete(0, tk.END)
+            self.modelroot_entry.insert(0, os.path.join(self.remote_homedir, 'models/E3SM'))
+
+            # --- Update sitegroups from remote ---
+            from OLMTutils import get_sitegroups
+            remote_inputdata = self.inputdata_entry.get()
+            if (self.machine == 'docker'):
+                remote_inputdata = os.path.join(os.environ['HOME'], 'models/inputdata')
+            self.sitegroups = get_sitegroups(remote_inputdata, sftp=self.sftp)
+            print(self.sitegroups)
+
+            if self.sitegroups:
+                self.sitegroup_menu['values'] = self.sitegroups
+                self.sitegroup_var.set(self.sitegroups[0])
+                self.update_sitelist()
+            else:
+                messagebox.showwarning("No Sitegroups", "No sitegroups found in remote inputdata.", parent=self)
+
+        except Exception as e:
+            self.ssh = None
+            self.sftp = None
+            self.logged_in = False
+            messagebox.showerror("Error", f"Failed to login:\n{e}", parent=self)
+
+    def remote_logout(self):
+        if self.sftp:
+            self.sftp.close()
+            self.sftp = None
+        if self.ssh:
+            self.ssh.close()
+            self.ssh = None
+        self.logged_in = False
+        self.login_btn.config(text="Login")
+        messagebox.showinfo("Logged out", "Disconnected from remote host.", parent=self)
+
+    def browse_local_directory(self, entry):
+        directory = filedialog.askdirectory(initialdir=entry.get() or "/")
+        if directory:
+            entry.delete(0, tk.END)
+            entry.insert(0, directory)
+
+    def browse_remote_directory(self, entry):
+        if not self.sftp:
+            messagebox.showerror("Error", "Not logged in to remote machine.", parent=self)
+            return
+        class RemoteDirDialog(tk.Toplevel):
+            def __init__(dialog_self, sftp, start_path="."):
+                super().__init__(self)
+                dialog_self.sftp = sftp
+                dialog_self.title("Select Remote Directory")
+                dialog_self.geometry("500x400")
+                dialog_self.selected_dir = None
+
+                dialog_self.path_var = tk.StringVar(value=start_path)
+                path_frame = tk.Frame(dialog_self)
+                path_frame.pack(fill="x", padx=10, pady=5)
+                tk.Label(path_frame, text="Path:").pack(side="left")
+                dialog_self.path_entry = tk.Entry(path_frame, textvariable=dialog_self.path_var, width=50)
+                dialog_self.path_entry.pack(side="left", fill="x", expand=True)
+                tk.Button(path_frame, text="Go", command=dialog_self.update_list).pack(side="left", padx=5)
+
+                dialog_self.listbox = tk.Listbox(dialog_self, selectmode="browse")
+                dialog_self.listbox.pack(fill="both", expand=True, padx=10, pady=5)
+                dialog_self.listbox.bind("<Double-Button-1>", dialog_self.on_double_click)
+
+                btn_frame = tk.Frame(dialog_self)
+                btn_frame.pack(fill="x", padx=10, pady=5)
+                tk.Button(btn_frame, text="Select", command=dialog_self.select_dir).pack(side="right")
+                tk.Button(btn_frame, text="Cancel", command=dialog_self.destroy).pack(side="right", padx=5)
+
+                dialog_self.update_list()
+
+            def update_list(dialog_self):
+                path = dialog_self.path_var.get()
+                try:
+                    items = dialog_self.sftp.listdir_attr(path)
+                    dirs = [item.filename for item in items if str(item.longname).startswith('d')]
+                    dirs.sort()
+                    dialog_self.listbox.delete(0, tk.END)
+                    if path not in ("/", ""):
+                        dialog_self.listbox.insert(tk.END, "..")
+                    for d in dirs:
+                        dialog_self.listbox.insert(tk.END, d)
+                except Exception as e:
+                    messagebox.showerror("Error", f"Failed to list directory:\n{e}", parent=dialog_self)
+
+            def on_double_click(dialog_self, event):
+                selection = dialog_self.listbox.curselection()
+                if not selection:
+                    return
+                selected = dialog_self.listbox.get(selection[0])
+                path = dialog_self.path_var.get()
+                if selected == "..":
+                    # Go up one directory
+                    new_path = os.path.dirname(path.rstrip("/"))
+                    if not new_path:
+                        new_path = "/"
+                    dialog_self.path_var.set(new_path)
+                else:
+                    # Go into selected directory
+                    new_path = os.path.join(path, selected)
+                    dialog_self.path_var.set(new_path)
+                dialog_self.update_list()
+
+            def select_dir(dialog_self):
+                entry.delete(0, tk.END)
+                entry.insert(0, dialog_self.path_var.get())
+                dialog_self.destroy()
+
+        # Start at current value or home
+        start_path = entry.get() or self.sftp.normalize('.')
+        RemoteDirDialog(self.sftp, start_path)
+
+    def smart_browse(self, entry):
+        """
+        Use remote browse if logged in, otherwise use local browse.
+        """
+        print(self.sftp)
+        if self.sftp:
+            self.browse_remote_directory(entry)
+        else:
+            if (self.machine_var.get() == "docker"):
+                # For Docker, use local paths for inputdata and modelroot
+                if ('inputdata' in entry.get()):
+                    entry.delete(0, tk.END)
+                    entry.insert(0, os.path.join(os.environ['HOME'], 'models/inputdata'))
+                    self.browse_local_directory(entry)
+                    new_path = entry.get()
+                    entry.delete(0, tk.END)
+                    entry.insert(0, new_path.replace(os.path.join(os.environ['HOME'], 'models/inputdata'), '/inputdata'))
+                elif ('/code/' in entry.get()):
+                    old_path = entry.get()
+                    old_path.replace('/code', os.path.join(os.environ['HOME'], 'models'))
+                    entry.delete(0, tk.END)
+                    entry.insert(0, old_path)
+                    self.browse_local_directory(entry)
+                    new_path = entry.get()
+                    entry.delete(0, tk.END)
+                    entry.insert(0, new_path.replace(os.path.join(os.environ['HOME'], 'models'), '/code'))
+                elif ('/output/' in entry.get()):
+                    messagebox.showerror("Error", "Cannot modify paths in container output directory.", parent=self)
+            else:
+                self.browse_local_directory(entry)
+
+    def on_machine_selected(self, event=None):
+        # If logged in, log out and reset button
+        if self.logged_in:
+            self.remote_logout()
+
+        self.machine = self.machine_var.get()
+        # Get updated info for the selected machine
+        self.machine, self.rootdir, self.inputdata, self.squeue, self.project, self.hostname = \
+        get_machine_info(machine_name=self.machine)
+        # Update the inputdata entry
+        self.inputdata_entry.delete(0, tk.END)
+        self.inputdata_entry.insert(0, self.inputdata)
+        # Optionally update other fields if you want:
+        self.caseroot_entry.delete(0, tk.END)
+        self.caseroot_entry.insert(0, os.path.join(self.rootdir, "e3sm_cases")) 
+        self.modelroot_entry.delete(0, tk.END)
+        if (self.machine == 'docker'):
+            self.modelroot_entry.insert(0, "/code/E3SM")
+        else:
+            self.modelroot_entry.insert(0, os.path.join(os.environ['HOME'], 'models/E3SM'))
+        self.runroot_entry.delete(0, tk.END)
+        self.runroot_entry.insert(0, os.path.join(self.rootdir, "e3sm_run"))    
+
+        # --- Update metdir based on current mettype ---
+        mettype = self.mettype_var.get()
+        if mettype == "era5-daymet":
+            subdir = "atm/datm7/Daymet_ERA5_TESSFA2/cpl_bypass_full"
+        elif mettype == "gswp3":
+            subdir = "atm/datm7/atm_forcing.datm7.GSWP3.0.5d.v2.c180716/cpl_bypass_full"
+        elif mettype == "crujra":
+            subdir = "atm/datm7/atm_forcing.CRUJRA_trendy_2025/cpl_bypass_full"
+        else:
+            subdir = "atm/datm7"
+        self.metdir_entry.delete(0, tk.END)
+        self.metdir_entry.insert(0, os.path.join(self.inputdata, subdir))
+
+    def on_mettype_selected(self, event=None):
+        mettype = self.mettype_var.get()
+        # Example logic: set subdirectory based on mettype
+        if mettype == "era5-daymet":
+            subdir = "atm/datm7/Daymet_ERA5_TESSFA2/cpl_bypass_full"
+        elif mettype == "gswp3":
+            subdir = "atm/datm7/atm_forcing.datm7.GSWP3.0.5d.v2.c180716/cpl_bypass_full"
+        elif mettype == "crujra":
+            subdir = "atm/datm7/atm_forcing.CRUJRA_trendy_2025/cpl_bypass_full"
+        else:
+            subdir = "atm/datm7"
+        self.metdir_entry.delete(0, tk.END)
+        self.metdir_entry.insert(0, os.path.join(self.inputdata,subdir))
+
+    def run_in_docker_container(self):
+        def docker_task():
+            container_name = "e3sm_gui"
+            workdir = "/code/elm-olmt/runscripts"
+            image_name = "elmv3"  # Change to your image name
+            try:
+                subprocess.run(["docker", "rm", "-f", container_name], check=False)
+                subprocess.run(
+                    ["docker", "run", "-d", "--name", container_name, "--hostname=docker", "--user", "modeluser",
+                     "-v", "/Users/zdr/models:/code",
+                     "-v", "/Users/zdr/models/inputdata:/inputdata",
+                     "-v", "elmoutput:/output",
+                     image_name, "tail", "-f", "/dev/null"],
+                    check=True
+                )
+                subprocess.run(
+                    ["docker", "exec", "-w", workdir, container_name, "python", "run_GUI.py"],
+                    check=True
+                )
+            except Exception as e:
+                print(f"Failed to start or exec in Docker container: {e}")
+
+        threading.Thread(target=docker_task, daemon=True).start()
+
 
 def get_configuration():
     #Opens the configuration GUI, waits for the user to input values and click Save,
@@ -444,14 +865,44 @@ def get_configuration():
     # Get the configuration result
     config = gui.result
     
+
+    hostname = simpledialog.askstring("Remote Host", "Enter your remote hostname:")
+    if hostname:
+        remote_path = simpledialog.askstring("Remote Path", "Enter remote path for config.pkl:", initialvalue="~/config.pkl", parent=root)
+        if remote_path:
+            send_config_to_remote_with_root("./temp/config.pkl", remote_path, hostname, root)
+
     # Destroy the hidden root and return the configuration
     root.destroy()
+
     return config
+
+#Function to send the configuration file to a remote server using SSH and SFTP
+def send_config_to_remote_with_root(local_path, remote_path, hostname, parent):
+    import paramiko
+    username = simpledialog.askstring("Remote Username", "Enter your remote username:", parent=parent)
+    if username is None:
+        return
+    password = simpledialog.askstring("Remote Password", "Enter your remote password:", show="*", parent=parent)
+    if password is None:
+        return
+    try:
+        ssh = paramiko.SSHClient()
+        ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+        ssh.connect(hostname, username=username, password=password)
+        sftp = ssh.open_sftp()
+        sftp.put(local_path, remote_path)
+        sftp.close()
+        ssh.close()
+        messagebox.showinfo("Success", f"File sent to {hostname}:{remote_path}", parent=parent)
+    except Exception as e:
+        messagebox.showerror("Error", f"Failed to send file:\n{e}", parent=parent)
 
 
 if __name__ == "__main__":
     config = get_configuration()
   
     # Save config as a pickle file
-    with open("./temp/config.pkl", "wb") as f:
-        pickle.dump(config, f, protocol=pickle.HIGHEST_PROTOCOL)
+    #with open("./temp/config.pkl", "wb") as f:
+    #    pickle.dump(config, f, protocol=pickle.HIGHEST_PROTOCOL)
+

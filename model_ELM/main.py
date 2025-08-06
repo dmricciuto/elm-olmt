@@ -275,7 +275,7 @@ class ELMcase():
       self.has_finidat=True
 
 #-----------------------------------------------------------------------------------------
-  def create_case(self, machine='',casename=''):
+  def create_case(self, machine='',casename='', remove=False):
     if (casename == ''):
       #construct default casename
       if (self.site == ''):
@@ -288,12 +288,16 @@ class ELMcase():
     self.casedir = os.path.abspath(self.caseroot+'/'+self.casename)
     #TODO - replace with a prompt that automacially deletes after 10 seconds
     if (os.path.exists(self.casedir)):
-      print('Warning:  Case directory exists')
-      var = input('proceed (p), remove old (r), or exit (x)? ')
-      if var[0] == 'r':
-        os.system('rm -rf '+self.casedir)
-      if var[0] == 'x':
-         sys.exit(1)    
+      if (not remove):
+        print('Warning:  Case directory exists')
+        var = input('proceed (p), remove old (r), or exit (x)? ')
+        if var[0] == 'r':
+          os.system('rm -rf '+self.casedir)
+        if var[0] == 'x':
+          sys.exit(1)
+      else:
+        print('Removing old case directory: '+self.casedir)
+        os.system('rm -rf '+self.casedir)    
     print("CASE directory is: "+self.casedir)
     #create the case
     walltime=24
@@ -592,7 +596,7 @@ class ELMcase():
                 +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
-            'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global']
+            'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global','variable']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
