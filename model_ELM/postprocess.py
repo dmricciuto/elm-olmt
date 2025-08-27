@@ -153,15 +153,15 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
 
     if (myoutput[var.split('_pft')[0]][:].ndim == 4):
       #2D output with vertical structure
-      values = myoutput[var.split('_pft')[0]][:,index,yindex,xindex]
+      values = myoutput[var.split('_pft')[0]][:,index,yindex,xindex]*factor
     elif (myoutput[var.split('_pft')[0]][:].ndim == 3):
       #2D output or 1D output with vertical structure (currently assumes 1D)
-      values = myoutput[var.split('_pft')[0]][:,index,gindex]
+      values = myoutput[var.split('_pft')[0]][:,index,gindex]*factor
     else:
       #1D output (unstructured grid)
-      values = myoutput[var.split('_pft')[0]][:,gindex]
+      values = myoutput[var.split('_pft')[0]][:,gindex]*factor
       if ('_pft' in var):  #PFT-level output
-          values = myoutput[var.split('_pft')[0]][:,index]
+          values = myoutput[var.split('_pft')[0]][:,index]*factor
 
     if (dailytomonthly and hist_nhtfrq == -24):
       values_out = do_dailytomonthly(values)

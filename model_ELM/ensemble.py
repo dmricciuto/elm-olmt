@@ -3,6 +3,7 @@
 import os, sys, csv, time, math
 import numpy as np
 import datetime
+import matplotlib.pyplot as plt
 
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
@@ -275,11 +276,11 @@ def ensemble_copy(self, ens_num):
          myvar = self.getncvar(finidat_file_new, v)
          myvar = parm_values[pnum] * myvar
          ierr = self.putncvar(finidat_file_new, v, myvar)
-    elif (p == 'lai'):
+    elif (p == 'MONTHLY_LAI' or p == 'ORGANIC' or p == 'PCT_SAND' or p == 'PCT_CLAY'):
       myfile = surffile
-      param = self.getncvar(myfile, 'MONTHLY_LAI')
-      param[:,:,:,:] = parm_values[pnum]
-      ierr = self.putncvar(myfile, 'MONTHLY_LAI', param)
+      param = self.getncvar(myfile, p)
+      param[:] = parm_values[pnum]
+      ierr = self.putncvar(myfile, p, param)
     elif (p != 'co2'):
       if (p in CNP_parms):
          myfile= CNPfile
@@ -341,6 +342,67 @@ def ensemble_copy(self, ens_num):
   #  ierr = self.putncvar(myfile, 'fates_seed_alloc', param)      
   #  ierr = self.putncvar(myfile, 'fates_seed_alloc_mature', param2)
 
+def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1):
+    UQ_output = './UQ_output/' + self.casename + '/ensemble'
+    os.makedirs(UQ_output, exist_ok=True)  # Ensures the directory exists
+    """
+    Plots percentiles (99th, 95th, 75th, 50th, 25th, 5th, and 1st) for ensemble data.
+    
+    Parameters:
+        data (numpy.ndarray): 2D array of ensemble data (shape: [ensemble_size, num_time_steps]).
+        x_axis (list or numpy.ndarray): x-axis values (e.g., time).
+        output_file (str): Path to save the plot.
+    """
+    # Percentiles to calculate
+    data=self.output[myvar].transpose()
+
+    # Calculate percentiles along the ensemble axis
+    percentile_values = np.nanpercentile(data, percentiles, axis=0)
+
+    # Define line styles for each percentile
+    # (Use the same style for matching pairs: 1/99, 5/95, 25/75, and make 50 bold)
+    line_styles = {
+        1:  {'linestyle': '--', 'color': 'black',  'linewidth': 2},
+        99: {'linestyle': '--', 'color': 'black',  'linewidth': 2},
+        5:  {'linestyle': '-.', 'color': 'black', 'linewidth': 2},
+        95: {'linestyle': '-.', 'color': 'black', 'linewidth': 2},
+        25: {'linestyle': ':',  'color': 'black','linewidth': 2},
+        75: {'linestyle': ':',  'color': 'black','linewidth': 2},
+        50: {'linestyle': '-',  'color': 'black',   'linewidth': 3},  # Bold line
+    }
+
+    # Choose x-axis: months if postproc_freq is monthly, else use taxis as is
+    if getattr(self, 'postproc_freq', None) == 'monthly':
+        months = np.arange(1, len(self.output['taxis']) + 1)
+        x_axis = months
+        x_label = "Month"
+    else:
+        x_axis = self.output['taxis']
+        x_label = "Time Step"
+
+    y_label = myvar
+    # Plot each percentile
+    plt.figure(figsize=(10, 6))
+    for i, p in enumerate(percentiles):
+        style = line_styles[p]
+        plt.plot(x_axis,
+                 percentile_values[i, :],
+                 linestyle=style['linestyle'],
+                 color=style['color'],
+                 linewidth=style['linewidth'],
+                 label=f'{p}th Percentile')
+
+    # Add labels and legend
+    plt.xlabel(x_label)
+    plt.ylabel(y_label)
+    plt.title("Ensemble Percentiles")
+    plt.legend()
+    plt.grid(True)
+
+    # Save the plot
+    plt.tight_layout()
+    plt.savefig(UQ_output+f'/{myvar}_percentiles.png', bbox_inches='tight')
+    plt.close()
 
 
 ### END ###

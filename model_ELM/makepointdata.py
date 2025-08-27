@@ -84,6 +84,15 @@ def subset_netcdf(self, index, input_file, output_file, keep2d=False):
             else:
                 var_subset = var_data.isel(lsmlat=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
                                            lsmlon=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
+        elif ('lat' in var_data.dims and 'lon' in var_data.dims):
+            if keep2d:
+                lat_indices = [lat for lat, lon in index]
+                lon_indices = [lon for lat, lon in index]
+                var_subset = var_data.isel(lat=slice(min(lat_indices), max(lat_indices)),
+                                           lon=slice(min(lon_indices), max(lon_indices)))
+            else:
+                var_subset = var_data.isel(lat=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
+                                           lon=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
         elif ('ni' in var_data.dims and 'nj' in var_data.dims):
             #Domain file
             if keep2d:
@@ -130,7 +139,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
     #Figure out which type of file
     isdomain=False
     ispftdyn=False
-    if ('domain' in filename):
+    if ('domain' in filename.split('/')[-1]):
         print('Creating domain data from ', filename)
         lonvar = 'xc'
         latvar = 'yc'
@@ -139,7 +148,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         #Save mask for other datasets
         self.mask_grid = mydata['mask'][:].copy()
         isdomain=True
-    elif ('landuse' in filename or 'pftdyn' in filename):
+    elif ('landuse' in filename.split('/')[-1] or 'pftdyn' in filename.split('/')[-1]):
         infile = self.pftdyn_global
         outfile = self.OLMTdir+'/temp/surfdata.pftdyn.nc'
         print('Creating land use data from ', filename)
@@ -207,12 +216,18 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         ds.close()
         os.system('mv '+outfile+'.tmp '+outfile)
     elif (len(self.point_list) > 0):
-        point_lats = np.array([lat for lat, lon in self.point_list])
-        point_lons = np.array([lon for lat, lon in self.point_list])
+        # If only one point and humhol is True, duplicate the lat/lon
+        if len(self.point_list) == 1 and getattr(self, 'humhol', False):
+            lat, lon = self.point_list[0]
+            point_lats = np.array([lat, lat])
+            point_lons = np.array([lon, lon])
+        else:
+            point_lats = np.array([lat for lat, lon in self.point_list])
+            point_lons = np.array([lon for lat, lon in self.point_list])
         point_lons[point_lons > 180] -= 360
         index = self.get_pointindices_list(point_lats, point_lons, mydata[latvar][:], \
                 mydata[lonvar][:], mask_grid=self.mask_grid)
-        self.subset_netcdf(index, infile,  outfile)
+        self.subset_netcdf(index, infile,  outfile, keep2d = False)
         ds = xr.open_dataset(outfile, mode='r+')
         if (not isdomain):
             if (pft >=0):
@@ -221,6 +236,10 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 pct_pft = np.zeros(npfts, float)
                 pct_pft[pft] = 100.0
                 pct_nat_pft = xr.DataArray(pct_pft, dims=['natpft'])
+                ds = self.setpfts(ds, pct_nat_pft);
+            if (self.humhol):
+                #If humhol, zero other land units but keep nat pfts as is
+                pct_nat_pft = ds['PCT_NAT_PFT']
                 ds = self.setpfts(ds, pct_nat_pft);
         #if (isdomain):
         #    for p in range(0,len(mylat)):

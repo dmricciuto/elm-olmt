@@ -3,8 +3,8 @@ import os
 from netCDF4 import Dataset
 
 def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', myobsdir=''):
-  myvars = ['TBOT','FSDS','WS','RAIN','VPD','NEE','GPP','ER','EFLX_LH_TOT','FSH']
-  myvars   = ['FPSN','FSH','EFLX_LH_TOT']
+  #myvars = ['TBOT','FSDS','WS','RAIN','VPD','NEE','GPP','ER','EFLX_LH_TOT','FSH']
+  #myvars   = ['FPSN','FSH','EFLX_LH_TOT']
 
   myobsfiles = os.listdir(myobsdir+'/'+tstep+'/')
 
@@ -17,7 +17,7 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
   if (tstep == 'monthly'):
     nstep = 12
   elif (tstep == 'daily'):
-    nstep = 366
+    nstep = 365
 
   for v in range(0,len(vars_elm)):
       if fluxnet_var == vars_elm[v]:
@@ -61,12 +61,14 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
                     if (h.strip() == vars_unc[vnum]):
                       tempob_err = float(myvals[thiscol])
                     if (h.strip() == vars_qc[vnum]):
-                      if float(myvals[thiscol]) > 0.8:
-                        isgood=True  #only advance if quality flag > 80%
+                      if float(myvals[thiscol]) > 0.8 and int(myvals[0][4:8]) != 229:
+                        isgood=True  #only advance if quality flag > 80, not leap day%
                     thiscol=thiscol+1
                   if (isgood):
                     myobs[thisob]     = tempob
                     myobs_err[thisob] = tempob_err
+                    if fluxnet_var == 'FPSN' or fluxnet_var == 'GPP':
+                       myobs_err[thisob] = max(myobs_err[thisob], 1.0)
                   else:
                     myobs[thisob] = -9999
                     myobs_err[thisob] = -9999
@@ -74,3 +76,9 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
             thisrow=thisrow+1
         self.obs[vars_elm[vnum]]=myobs
         self.obs_err[vars_elm[vnum]]=myobs_err
+        if (tstep == 'daily'):
+           #Shift obs by 1 day (Model timestamp repsresents previous day)
+           self.obs[vars_elm[vnum]] = np.roll(self.obs[vars_elm[vnum]], 1)
+           self.obs_err[vars_elm[vnum]] = np.roll(self.obs_err[vars_elm[vnum]], 1)
+        print(vars_elm[vnum]+' observations read for '+site+' for '+str(ystart)+' to '+str(yend))
+        myobs_in.close()

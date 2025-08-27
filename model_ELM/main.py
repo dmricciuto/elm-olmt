@@ -17,7 +17,7 @@ class ELMcase():
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', project = '',\
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
-            point_list=[], namelist_options=[],casename='',mpilib=''):
+            point_list=[], namelist_options=[],casename='',mpilib='', olmtdir=''):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -34,7 +34,10 @@ class ELMcase():
         self.runroot=runroot
         self.caseroot=caseroot
         self.exeroot=exeroot
-        self.OLMTdir = os.getcwd()+'/..'
+        if olmtdir == '':
+            self.OLMTdir = os.getcwd()+'/..'
+        else:
+            self.OLMTdir = olmtdir
         #Set default resolution (site or regional)
         self.site=site
         if (res == ''):
@@ -221,6 +224,15 @@ class ELMcase():
     print('Parameter file: '+self.paramfile)
     #Copy the parameter file to the temp directory 
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
+    if hasattr(self, 'add_parameter') and self.add_parameter:
+      import netCDF4
+      param_path = self.OLMTdir + '/temp/clm_params.nc'
+      with netCDF4.Dataset(param_path, 'a') as nc:
+        for key, value in self.add_parameter.items():
+          # Assume variable does not exist and is scalar
+          dtype = 'f4' if isinstance(value, float) else 'i4'  
+          nc.createVariable(key, dtype, ())
+          nc.variables[key][...] = value
     #TODO - add metadata to the copied file about original filename
 
   def set_CNP_param_file(self,filename=''):
@@ -342,10 +354,16 @@ class ELMcase():
     pftdynfile=''
     if ('domainfile' in self.case_options.keys()):
         domainfile = self.case_options['domainfile']
+    elif ('fatmlndfrc' in self.case_options.keys()):
+        domainfile = self.case_options['fatmlndfrc']
     if ('surffile' in self.case_options.keys()):
         surffile = self.case_options['surffile']
+    elif ('fsurdat' in self.case_options.keys()):
+        surffile = self.case_options['fsurdat']
     if ('pftdynfile' in self.case_options.keys()):
         pftdynfile = self.case_options['pftdynfile']
+    elif ('flanduse_timeseries' in self.case_options.keys()):
+        pftdynfile = self.case_options['flanduse_timeseries']
     if (domainfile == '' and makedomain):
       self.makepointdata(self.domain_global)
     if (surffile == '' and makesurfdat):
@@ -465,7 +483,7 @@ class ELMcase():
     if ('PHS' in self.compset):
         self.xmlchange('ELM_BLDNML_OPTS',append='-hydrstress')
     #if ('CROP' in self.compset):
-    #    self.xmlchange('ELM_BLDNML_OPTS',append='-crop')
+    #   self.xmlchange('ELM_BLDNML_OPTS',append='-crop')
     self.xmlchange('RUN_STARTDATE',value=str(self.startyear)+'-01-01')
     #turn off archiving
     self.xmlchange('DOUT_S',value='FALSE')
@@ -524,10 +542,14 @@ class ELMcase():
         print(result.stderr)
         sys.exit(1)
     #get the default parameter files for the case
-    self.set_param_file()
     if ('FATES' in self.compset or 'ED' in self.compset):
         self.set_fates_param_file()
-    self.set_CNP_param_file()
+        self.set_param_file()
+    else:
+        if (not 'paramfile' in self.case_options.keys()):
+            self.set_param_file()
+    if (not 'fsoilordercon' in self.case_options.keys()):
+        self.set_CNP_param_file()
     #get the default surface and domain files (to pass to makepointdata)
     #Note:  This requires setting a supported resolution
     if ('surffile_global' in self.case_options.keys()):
@@ -549,10 +571,16 @@ class ELMcase():
     pftdynfile=''
     if ('surffile' in self.case_options):
         surffile = self.case_options['surffile']
+    elif ('fsurdat' in self.case_options):
+        surffile = self.case_options['fsurdat']
     if ('domainfile' in self.case_options):
         domainfile = self.case_options['domainfile']
+    elif ('fatmlndfrc' in self.case_options):
+        domainfile = self.case_options['fatmlndfrc']
     if ('pftdynfile' in self.case_options):
         pftdynfile = self.case_options['pftdynfile']
+    elif ('flanduse_timeseries' in self.case_options):
+        pftdynfile = self.case_options['flanduse_timeseries']
     if (surffile==''):
         surffile = self.rundir+'/surfdata.nc'
     if (pftdynfile==''):
@@ -569,8 +597,10 @@ class ELMcase():
       self.set_histvars()
     else:
       self.set_histvars(spinup=True)
-    self.customize_namelist(variable='paramfile',value="'"+self.rundir+"/clm_params.nc'")
-    self.customize_namelist(variable='fsoilordercon',value="'"+self.rundir+"/CNP_parameters.nc'")
+    if (not 'paramfile' in self.case_options.keys()):
+        self.customize_namelist(variable='paramfile',value="'"+self.rundir+"/clm_params.nc'")
+    if (not 'fsoilordercon' in self.case_options.keys()):
+      self.customize_namelist(variable='fsoilordercon',value="'"+self.rundir+"/CNP_parameters.nc'")
     #Fates options - TODO add nutrient/parteh options
     if ('ED' in self.compset or 'FATES' in self.compset):
         if 'CN' in self.nutrients:
@@ -595,8 +625,9 @@ class ELMcase():
         self.customize_namelist(variable='aero_file', value="'"+self.inputdata_path+"/atm/cam/chem/" \
                 +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
-    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
-            'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global','variable']
+    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','fates_paramfile', \
+            'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
+              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'variable']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
@@ -700,13 +731,19 @@ class ELMcase():
           self.modify_datm_streamfiles()
       #Copy customized parameter, surface and domain files to run directory
       os.system('mkdir -p '+self.OLMTdir+'/temp')
-      os.system('cp '+self.OLMTdir+'/temp/*param*.nc '+self.rundir)
-      if (not 'domainfile' in self.case_options.keys()):
+      if (not 'paramfile' in self.case_options.keys()):
+        os.system('cp '+self.OLMTdir+'/temp/clm_params.nc '+self.rundir)
+      if (not 'fsoilordercon' in self.case_options.keys()):
+        os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
+      if ('FATES' in self.compset or 'ED' in self.compset) and (not 'fates_paramfile' in self.case_options.keys()):
+        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.nc '+self.rundir)
+      if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)
-      if (not 'surffile' in self.case_options.keys()):
+      if (not 'surffile' in self.case_options.keys() and not 'fsurdat' in self.case_options.keys()):
          cmd = 'cp '+self.OLMTdir+'/temp/surfdata.nc '+self.rundir
          execute = subprocess.call(cmd, shell=True)
-      if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn)):
+      if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn) \
+        and not 'flanduse_timeseries' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/surfdata.pftdyn.nc '+self.rundir)
 
   def modify_datm_streamfiles(self):
