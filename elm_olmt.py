@@ -36,7 +36,11 @@ def load_config(config_file):
                         cfg[section][key] = [float(x) for x in items]
                     except ValueError:
                         if 'variables' in key:
-                            cfg[section][key] = [str(x) for x in items]
+                            # If items is a single string, make it a list of one string
+                            if len(items) == 1 and isinstance(items[0], str) and ',' not in value:
+                                cfg[section][key] = [items[0]]
+                            else:
+                                cfg[section][key] = [str(x) for x in items]
                         else:
                             # Keep as comma-separated string for string lists
                             if 'hist_fincl' in key:
@@ -56,8 +60,15 @@ def main():
     parser = argparse.ArgumentParser(description='Run ELM BGC simulations')
     parser.add_argument('--config', '-c', default='run_config.cfg',
                        help='Configuration file (default: run_config.cfg)')
+    parser.add_argument('--gui', action='store_true', help='Launch GUI to create configuration')
     args = parser.parse_args()
-    
+
+    if args.gui:
+        import subprocess
+        subprocess.run([sys.executable, 'GUI_experimental.py'])
+        print('GUI launched. Exiting.')
+        return
+
     # Load configuration
     cfg = load_config(args.config)
     
@@ -78,8 +89,9 @@ def main():
     # Extract configuration values
     runtype = cfg['simulation']['runtype']
     mettype = cfg['simulation']['mettype']
-    case_suffix = cfg['simulation']['case_suffix']
-    
+    metdir = cfg['simulation'].get('metdir', '')
+    case_suffix = cfg['simulation'].get('case_suffix', '')
+
     # Site configuration
     if runtype == 'site':
         sites = cfg['simulation']['sites']
@@ -107,16 +119,16 @@ def main():
     soil_decomp = cfg['biogeochemistry'].get('soil_decomp','')
     
     # FATES options
-    use_fates = False
-    if ('fates' in cfg):
-        use_fates = cfg['fates'].get('use_fates', False)
-        if use_fates:
-            if 'fates_pft' not in cfg['fates']:
-                raise ValueError("FATES PFT configuration missing in the config file.")
-            else:
-                fates_pft = cfg['fates']['fates_pft']
-            pft_duplicates = cft['fates'].get('pft_duplicates', 1)
-    
+    use_fates = cfg['biogeochemistry'].get('use_fates', False)
+    if use_fates:
+        if 'fates_pft' not in cfg['fates']:
+            raise ValueError("FATES PFT configuration missing in the config file.")
+        else:
+            fates_pft = cfg['fates']['fates_pft']
+        pft_duplicates = cft['fates'].get('pft_duplicates', 1)
+    # Crop options
+    use_crop = cfg['biogeochemistry'].get('use_crop', False)
+
     # Run lengths
     nyears_ad = cfg['run_lengths'].get('nyears_ad', 0)
     nyears_final = cfg['run_lengths'].get('nyears_final', 0)
@@ -228,6 +240,8 @@ def main():
     compset_base=nutrients+nutrient_comp+soil_decomp+'BC'
     if (use_fates):
         compset_base='ELMFATES'
+    if (use_crop):
+        compset_base='ELMCNCROP'
     compset_type="I"
     if (use_cpl_bypass):
         compset_type='ICB'
@@ -362,8 +376,7 @@ def main():
         if ('phase2' in suffix[c]):
             #Set the starting year from the last case
             cases[c].startyear = cases[c-1].startyear+cases[c-1].run_n
-        if ('metdir' in cases[c].case_options.keys()):
-            metdir = cases[c].case_options['metdir']
+        if (metdir != ''):
             cases[c].get_forcing(mettype=mettype, metdir=metdir)
         else:
             cases[c].get_forcing(mettype=mettype)

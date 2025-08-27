@@ -38,13 +38,12 @@ def get_machine_info(machine_name=''):
         rootdir = os.environ['HOME']+'/models'
         inputdata = rootdir + '/inputdata'
         machine = 'linux-generic'
-    elif ('docker' in machine_name):
+    else:
+        if (not 'docker' in machine_name):
+            print('Machine not detected.  Assuming docker')
         rootdir = '/output'
         inputdata = '/inputdata'
         machine = 'docker'
-    else:
-        print('Error:  Machine not detected.  Please specify machine name')
-        sys.exit(1)
     return machine, rootdir, inputdata, queue, project, hostname
 
 #Function to get the available site groups
@@ -74,11 +73,10 @@ def get_sitegroups(inputdata, sftp=None):
     return prefixes
 
 
-def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None):
+def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
     base = inputdata + '/lnd/clm2/PTCLM/'
     siteinfo = {}
     # Helper to read lines from local or remote file
-    print(sftp)
     def readlines(path):
         if sftp is not None:
             with sftp.open(path, 'r') as f:
@@ -91,15 +89,21 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None):
     sitedata_path = base + sitegroup + '_sitedata.txt'
     lines = readlines(sitedata_path)
     snum = 0
+    if(use_crop):
+        npfts = 15
+    else:
+        npfts = 17
     for s in lines:
         if snum > 0:
             sitename = s.split(',')[0]
             siteinfo[sitename] = {}
             siteinfo[sitename]['lon'] = float(s.split(',')[3])
             siteinfo[sitename]['lat'] = float(s.split(',')[4])
-            siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([17], float)
+            siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([npfts], float)
             siteinfo[sitename]['PCT_SAND'] = -999
             siteinfo[sitename]['PCT_CLAY'] = -999
+            if(use_crop):
+                siteinfo[sitename]['PCT_CFT'] = np.zeros([36],float)
         snum += 1
 
     # pftdata
@@ -113,7 +117,14 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None):
                 pindex = int(s[:-1].split(',')[p * 2 + 2])
                 ppct = float(s[:-1].split(',')[p * 2 + 1])
                 if ppct > 0:
-                    siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
+                    #siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
+                    if(use_crop):
+                        if (pindex < 15):
+                            siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
+                        else:
+                            siteinfo[sitename]['PCT_CFT'][pindex - 15] = ppct
+                    else:
+                        siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
         snum += 1
 
     # soildata

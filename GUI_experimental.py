@@ -1,19 +1,24 @@
 import os
+from platform import machine
 import tkinter as tk
 from tkinter import ttk, messagebox, scrolledtext, filedialog
 import numpy as np
 import tkinter.simpledialog as simpledialog
 from OLMTutils import get_machine_info, get_site_info, get_sitegroups
 import mapselect
-import pickle
+#import pickle
 import subprocess
 import threading
 
 class E3SMConfigurator(tk.Toplevel):   #Tk):
     def __init__(self, master=None):
         super().__init__(master)
+        self.selected_site_indices = []
+        self.selected_site_names = []  # Track selected site names for persistence
+        self._last_tab_index = 0  # Track previous tab index for selection persistence
+        self._restoring_selection = False
         self.title("E3SM GUI Configurator")
-        self.geometry("1200x900")
+        self.geometry("1300x900")
         self.result = None
         self.ssh = None
         self.sftp = None
@@ -24,9 +29,13 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
         # Execute get_machine_info to get defaults
         self.machine, self.rootdir, self.inputdata, self.queue, self.project, self.hostname = \
-		get_machine_info(machine_name='docker')
-        self.sitegroups = get_sitegroups(os.environ['HOME']+'/models/inputdata')
-        self.siteinfo = get_site_info(os.environ['HOME']+'/models/inputdata')
+		get_machine_info()
+        if self.machine == 'docker':
+            self.sitegroups = get_sitegroups(os.environ['HOME']+'/models/inputdata')
+            self.siteinfo = get_site_info(os.environ['HOME']+'/models/inputdata')
+        else:
+            self.sitegroups = get_sitegroups(self.inputdata)
+            self.siteinfo = get_site_info(self.inputdata)
 
         inputdata = self.inputdata
         modelroot = '/code/E3SM'
@@ -105,7 +114,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         # Row 3:  queue and machine
         tk.Label(top_frame, text="Machine:").grid(row=3, column=0, sticky="w", padx=5, pady=5)
         self.machine_var = tk.StringVar(value=self.machine)
-        machine_options = ["baseline", "chrysalis", "pm-cpu", "docker"]
+        machine_options = ["cades-baseline", "chrysalis", "pm-cpu", "docker"]
         self.machine_menu = ttk.Combobox(top_frame, textvariable=self.machine_var, values=machine_options, state="readonly")
         self.machine_menu.grid(row=3, column=1, padx=5, pady=5)
         self.machine_menu.bind("<<ComboboxSelected>>", self.on_machine_selected)
@@ -118,6 +127,15 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.login_btn = tk.Button(top_frame, text="Login", command=self.remote_login)
         self.login_btn.grid(row=3, column=2, padx=5, pady=5)
 
+        # Row 4: Remote OLMT Path (initially disabled)
+        tk.Label(top_frame, text="Remote OLMT Path:").grid(row=4, column=0, sticky="w", padx=5, pady=5)
+        self.remote_olmt_var = tk.StringVar()
+        self.remote_olmt_entry = tk.Entry(top_frame, textvariable=self.remote_olmt_var, width=45, state="disabled")
+        self.remote_olmt_entry.grid(row=4, column=1, padx=5, pady=5)
+        self.browse_remote_olmt_btn = tk.Button(top_frame, text="Browse", state="disabled",
+                                        command=lambda: self.browse_remote_directory(self.remote_olmt_entry))
+        self.browse_remote_olmt_btn.grid(row=4, column=2, padx=5, pady=5)
+
         # Notebook for other options
         self.notebook = ttk.Notebook(self)
         self.req_frame = ttk.Frame(self.notebook)
@@ -129,14 +147,47 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.create_required_inputs(self.req_frame)
         self.create_ensemble_options(self.ens_frame)
 
-        # Save/Print button at the bottom
-        save_btn = tk.Button(self, text="Save Configuration", command=self.save_configuration)
-        save_btn.pack(side=tk.BOTTOM, pady=10)
+        # Bind tab change event to preserve/restore site selections
+        self.notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
+    
+        # Frame for bottom buttons
+        bottom_btn_frame = tk.Frame(self)
+        bottom_btn_frame.pack(side=tk.BOTTOM, pady=10)
 
-        run_docker_btn = tk.Button(self, text="Run in Docker", command=self.run_in_docker_container)
-        run_docker_btn.pack(side=tk.BOTTOM, pady=5)
+        save_btn = tk.Button(bottom_btn_frame, text="Save Configuration", command=self.save_configuration)
+        save_btn.pack(side=tk.LEFT, padx=10)
+
+        run_docker_btn = tk.Button(bottom_btn_frame, text="Run", command=self.run_button_action)
+        run_docker_btn.pack(side=tk.LEFT, padx=10)
+
 
         self.use_cpl_bypass_var.trace_add("write", lambda *args: self.update_metdir_visibility(top_frame))
+
+
+    def on_site_selection(self, event=None):
+        print(self._restoring_selection)
+        if self._restoring_selection:
+            return
+        self.selected_site_names = [self.site_menu.get(i) for i in self.site_menu.curselection()]
+        print("Selected sites:")
+        print(self.selected_site_names)
+
+
+    def on_tab_changed(self, event=None):
+        current_tab = self.notebook.index(self.notebook.select())
+        if (current_tab != 0):
+            self._restoring_selection = True
+        # Only restore selection when returning to Required Inputs tab (tab 0)
+        if current_tab == 0 and hasattr(self, 'site_menu'):
+            self._restoring_selection = True
+            self.site_menu.selection_clear(0, tk.END)
+            site_list = [self.site_menu.get(i) for i in range(self.site_menu.size())]
+            for name in self.selected_site_names:
+                if name in site_list:
+                    idx = site_list.index(name)
+                    self.site_menu.selection_set(idx)
+            self._restoring_selection = False
+        self._last_tab_index = current_tab
 
     def browse_directory(self, entry):
       directory = filedialog.askdirectory(initialdir=entry.get() or "/")
@@ -187,6 +238,8 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
              self.site_menu.insert(tk.END, option)
              #self.site_menu.pack(padx=10, pady=10)
         self.site_menu.grid(row=1, column=1, padx=5, pady=5)
+        self.site_menu.bind("<<ListboxSelect>>", self.on_site_selection)
+        
         # Add "Show Sites on Map" button
         self.show_sites_btn = tk.Button(self.sites_frame, text="Show Sites on Map", command=self.show_sites_on_map)
         self.show_sites_btn.grid(row=2, column=0, columnspan=2, pady=5)
@@ -257,10 +310,11 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
         # --- Resolution ---
         tk.Label(parent, text="Resolution:").grid(row=row, column=0, sticky="w", padx=5, pady=5)
-        self.resolution_var = tk.StringVar(value="r05_r05")
-        resolution_options = ["r05_r05", "hcru_hcru", "f09_f09"]
+        self.resolution_var = tk.StringVar(value="hcru_hcru")
+        resolution_options = ["hcru_hcru", "r05_r05","f09_f09", "TESSFA2_4km"]
         self.resolution_menu = ttk.Combobox(parent, textvariable=self.resolution_var, values=resolution_options, state="readonly")
         self.resolution_menu.grid(row=row, column=1, padx=5, pady=5)
+        self.resolution_menu.bind("<<ComboboxSelected>>", self.on_resolution_selected)
         row += 1
 
         # --- Boolean Options ---
@@ -322,7 +376,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
     def open_map_selector(self):
         """Open the Cartopy map selector and update the lat/lon entries with the selection."""
-        def update_bounds(min_lat, max_lat, min_lon, max_lon):
+        def update_bounds(min_lon, max_lon, min_lat, max_lat):
             self.lat_min_entry.delete(0, tk.END)
             self.lat_min_entry.insert(0, f"{min_lat:.2f}")
             self.lat_max_entry.delete(0, tk.END)
@@ -347,7 +401,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         # Pass initial bounds to the map selector
         mapselect.CartopyMapSelector(
             update_bounds,
-            initial_bounds=(min_lat, max_lat, min_lon, max_lon)
+            initial_bounds=(min_lon, max_lon, min_lat, max_lat)
         )
 
     def show_sites_on_map(self):
@@ -364,6 +418,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             if lat is not None and lon is not None:
                 sites.append({"name": sitename, "lat": lat, "lon": lon})
                 name_to_index[sitename] = idx
+        self.selected_site_names = [self.site_menu.get(i) for i in self.site_menu.curselection()]
 
         def update_selected_sites(selected_sites):
             # selected_sites is a list of site dicts
@@ -416,7 +471,12 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             new_site_list = list(self.siteinfo.keys())
             self.site_menu.delete(0, tk.END)
             for option in new_site_list:
-              self.site_menu.insert(tk.END, option)
+                self.site_menu.insert(tk.END, option)
+            # Restore selection after updating site list
+            for name in self.selected_site_names:
+                if name in new_site_list:
+                    idx = new_site_list.index(name)
+                    self.site_menu.selection_set(idx)
 
     def update_sp_fields(self):
         """
@@ -501,26 +561,34 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         config["case_suffix"] = self.case_suffix_entry.get()
 
         if config["runtype"] == "site":
-            config["site"] = [self.site_menu.get(i) for i in self.site_menu.curselection()]
+            config["sites"] = [self.site_menu.get(i) for i in self.site_menu.curselection()]
             config["sitegroup"] = self.sitegroup_var.get()
             config["numproc"] = 1
         elif config["runtype"] == "latlon_bbox":
             config["lat_bounds"] = [self.lat_min_entry.get(), self.lat_max_entry.get()]
             config["lon_bounds"] = [self.lon_min_entry.get(), self.lon_max_entry.get()]
             config["numproc"] = int(self.numproc_entry.get())
+            config["name"] = self.region_var.get()
         else:
             config["numproc"] = 1
 
-        config["resolution"] = self.resolution_var.get()
+        config["res"] = self.resolution_var.get()
         config["use_cpl_bypass"] = self.use_cpl_bypass_var.get()
         config["use_SP"] = self.use_sp_var.get()
         config["use_fates"] = self.use_fates_var.get()
-        config["fates_nutrient"] = self.fates_nutrient_var.get()
+        if config["use_fates"]:
+            config["fates_nutrient"] = self.fates_nutrient_var.get()
+            config["fates_pft"] = 1 #self.fates_pft_var.get()
+
 
         if config["use_SP"]:
-            config["sp_years"] = self.sp_years_entry.get()
-            config["sp_start_year"] = self.sp_start_entry.get()
+            config["nutrients"] = 'none'
+            config["nyears"] = self.sp_years_entry.get()
+            config["startyear"] = self.sp_start_entry.get()
         else:
+            config["nutrients"] = 'CNP'
+            config["nutrient_comp"] = 'RD'
+            config["soil_decomp"] = 'CTC'
             config["nyears_ad"] = self.nyears_ad_entry.get()
             config["nyears_final"] = self.nyears_final_entry.get()
             config["nyears_trans"] = self.nyears_trans_entry.get()
@@ -544,26 +612,97 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         config["metdir"] = self.metdir_entry.get() if self.use_cpl_bypass_var.get() else ""
         
         # Ensemble options
-        ens = {}
-        ens["parm_list"] = self.parm_list_entry.get()
-        ens["nsamples"] = self.nsamples_entry.get()
-        ens["np_ensemble"] = self.np_ensemble_entry.get()
-        ens["ensemble_file"] = self.ensemble_file_entry.get()
-        ens["postproc_vars"] = self.postproc_vars_text.get("1.0", tk.END).strip()
-        ens["postproc_startyear"] = self.postproc_start_entry.get()
-        ens["postproc_endyear"] = self.postproc_end_entry.get()
-        ens["postproc_freq"] = self.postproc_freq_var.get()
-
-        config["ensemble_options"] = ens
+        config["parm_list"] = self.parm_list_entry.get()
+        config["nsamples"] = self.nsamples_entry.get()
+        config["np_ensemble"] = self.np_ensemble_entry.get()
+        config["ensemble_file"] = self.ensemble_file_entry.get()
+        config["postproc_variables"] = self.postproc_vars_text.get("1.0", tk.END).strip()
+        config["postproc_startyear"] = self.postproc_start_entry.get()
+        config["postproc_endyear"] = self.postproc_end_entry.get()
+        config["postproc_frequency"] = self.postproc_freq_var.get()
 
         self.result = config
         # Save config as a pickle file
-        with open("./temp/config.pkl", "wb") as f:
-            pickle.dump(config, f, protocol=pickle.HIGHEST_PROTOCOL)
-            # Close the file
-            f.close()
+        #local_path = "./temp/config.pkl"
+        #with open(local_path, "wb") as f:
+        #    pickle.dump(config, f, protocol=pickle.HIGHEST_PROTOCOL)
+        #Save .cfg file
+        local_path = "./config_files/config_gui.cfg"
+        self.save_cfg_file(config, local_path)
 
-        messagebox.showinfo("Configuration Saved", "Configuration saved successfully!")
+
+        # If logged in to a remote host, send the file
+        if self.sftp is not None and self.ssh is not None:
+            # Choose a remote path, e.g., home directory
+            remote_path = os.path.join(self.remote_olmt_entry.get(), "config_files/config_gui.cfg")
+            try:
+                self.sftp.put(local_path, remote_path)
+                messagebox.showinfo("Configuration Saved", f"Configuration saved and sent to remote: {remote_path}")
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to send config to remote:\n{e}")
+        else:
+            messagebox.showinfo("Configuration Saved", "Configuration saved successfully!")
+    
+    def save_cfg_file(self, config, filename="./temp/config.cfg"):
+        def write_section(f, section, data):
+            filtered = {k: v for k, v in data.items() if v not in [None, '', [], {}]}
+            if section == "case_options":
+                filtered = {k: v for k, v in filtered.items() if k != "variable"}
+            if not filtered:
+                return
+            f.write(f"[{section}]\n")
+            for key, value in filtered.items():
+                if isinstance(value, list):
+                    value = ', '.join(str(v) for v in value)
+                f.write(f"{key.replace('postproc_','')} = {value}\n")
+            f.write("\n")
+
+        with open(filename, "w") as f:
+            # Machine section
+            machine_keys = ["machine", "modelroot", "exeroot", "queue", "project", "inputdata", "caseroot", "runroot"]
+            machine_section = {k: config[k] for k in machine_keys if k in config}
+            write_section(f, "machine", machine_section)
+
+            # Simulation section
+            sim_keys = ["runtype", "case_suffix", "sites", "sitegroup", "res", "mettype", "use_cpl_bypass", "lat_bounds", \
+                        "lon_bounds", "numproc", "metdir", "name"]
+            sim_section = {k: config[k] for k in sim_keys if k in config}
+            write_section(f, "simulation", sim_section)
+
+            # Biogeochemistry section
+            bgc_keys = ["nutrients", "nutrient_comp", "soil_decomp", "use_fates", "fates_pft", "pft_duplicates", "use_crop"]
+            bgc_section = {k: config[k] for k in bgc_keys if k in config}
+            write_section(f, "biogeochemistry", bgc_section)
+
+            # Run lengths section
+            runlen_keys = ["nyears_ad", "nyears_final", "nyears_trans", "trans_startyear", "nyears", "startyear"]
+            runlen_section = {k: config[k] for k in runlen_keys if k in config}
+            write_section(f, "run_lengths", runlen_section)
+
+            # Case options section
+            if "case_options" in config:
+                write_section(f, "case_options", config["case_options"])
+
+            # Ensemble section
+            ensemble_keys = ["parm_list", "nsamples", "np_ensemble", "ensemble_file"]
+            parm_list = config.get("parm_list", "")
+            ensemble_section = {}
+            if parm_list:
+                ensemble_section = {k: config[k] for k in ensemble_keys if k in config and config[k] not in [None, '', [], {}]}
+            elif "parm_list" in config and config["parm_list"]:
+                ensemble_section["parm_list"] = config["parm_list"]
+            write_section(f, "ensemble", ensemble_section)
+
+            # Postprocessing section
+            postproc_keys = ["postproc_variables", "postproc_startyear", "postproc_endyear", "postproc_frequency"]
+            postproc_section = {k: config[k] for k in postproc_keys if k in config}
+            if (parm_list):
+                write_section(f, "postprocessing", postproc_section)
+
+            # Observations section (if present)
+            if "observations" in config:
+                write_section(f, "observations", config["observations"])
+
 
     def on_close(self):
         # In case the user closes the window via the window manager,
@@ -575,8 +714,53 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.result = {}
         self.destroy()
 
+    def on_resolution_selected(self, event=None):
+        resolution = self.resolution_var.get()
+        if resolution == "TESSFA2_4km":
+            # Hide region selection
+            self.region_label.grid_remove()
+            self.region_menu.grid_remove()
+            inputdata = self.inputdata_entry.get()+'/lnd/clm2/surfdata_map'
+            inputdata_local = inputdata+'/lnd/clm2/surfdata_map'
+            if (self.machine == 'docker'):
+                inputdata = self.inputdata_entry.get()+'/lnd/clm2/surfdata_map'
+                inputdata_local = os.path.join(os.environ['HOME'], 'models/inputdata/lnd/clm2/surfdata_map')
+            # Set custom surface and domain files (update paths as needed)
+            surffile = "SEBOX1_surfdata.TES_SE.4km.1d.NLCD.c250202.nc"
+            domainfile = "SEBOX1_domain.lnd.TES_SE.4km.1d.c250201.nc"
+            # Optionally update case_options
+            case_options_text = self.case_options_text.get("1.0", tk.END)
+            if "surffile_global" not in case_options_text:
+                self.case_options_text.insert(tk.END, f"\nsurffile_global: {inputdata}/{surffile}")
+            if "domainfile_global" not in case_options_text:
+                self.case_options_text.insert(tk.END, f"\ndomainfile_global: {inputdata}/{domainfile}")
+            # Read domain file for bounds
+            try:
+                import netCDF4
+                ds = netCDF4.Dataset(f"{inputdata_local}/{domainfile}")
+                lats = ds.variables['yc'][:]
+                lons = ds.variables['xc'][:]
+                lat_min, lat_max = float(lats.min()), float(lats.max())
+                lon_min, lon_max = float(lons.min()), float(lons.max())
+                ds.close()
+                self.lat_min_entry.delete(0, tk.END)
+                self.lat_min_entry.insert(0, str(lat_min))
+                self.lat_max_entry.delete(0, tk.END)
+                self.lat_max_entry.insert(0, str(lat_max))
+                self.lon_min_entry.delete(0, tk.END)
+                self.lon_min_entry.insert(0, str(lon_min))
+                self.lon_max_entry.delete(0, tk.END)
+                self.lon_max_entry.insert(0, str(lon_max))
+            except Exception as e:
+                messagebox.showerror("Error", f"Failed to read domain file:\n{e}", parent=self)
+        else:
+            # Restore region selection
+            self.region_label.grid()
+            self.region_menu.grid()
+            
     def on_region_selected(self, event=None):
         region = self.region_var.get()
+        
         if region in self.REGION_BOUNDS:
             lon_min, lon_max, lat_min, lat_max = self.REGION_BOUNDS[region]
             self.lat_min_entry.delete(0, tk.END)
@@ -620,6 +804,10 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             self.login_btn.config(text="Logout")
             messagebox.showinfo("Success", f"Logged in to {self.hostname}", parent=self)
             self.remote_homedir = self.sftp.normalize('.')
+            self.remote_olmt_var.set(os.path.join(self.remote_homedir, "elm-olmt"))
+            self.remote_olmt_entry.config(state="normal")
+            self.browse_remote_olmt_btn.config(state="normal")
+
             # --- Update modelroot entry on login ---
             self.modelroot_entry.delete(0, tk.END)
             self.modelroot_entry.insert(0, os.path.join(self.remote_homedir, 'models/E3SM'))
@@ -654,6 +842,9 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
             self.ssh = None
         self.logged_in = False
         self.login_btn.config(text="Login")
+        self.remote_olmt_var.set("")
+        self.remote_olmt_entry.config(state="disabled")
+        self.browse_remote_olmt_btn.config(state="disabled")
         messagebox.showinfo("Logged out", "Disconnected from remote host.", parent=self)
 
     def browse_local_directory(self, entry):
@@ -738,22 +929,23 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         """
         Use remote browse if logged in, otherwise use local browse.
         """
-        print(self.sftp)
         if self.sftp:
             self.browse_remote_directory(entry)
         else:
             if (self.machine_var.get() == "docker"):
                 # For Docker, use local paths for inputdata and modelroot
                 if ('inputdata' in entry.get()):
+                    old_path = entry.get()
+                    old_path = old_path.replace('/inputdata', os.path.join(os.environ['HOME'], 'models/inputdata'))
                     entry.delete(0, tk.END)
-                    entry.insert(0, os.path.join(os.environ['HOME'], 'models/inputdata'))
+                    entry.insert(0, old_path)
                     self.browse_local_directory(entry)
                     new_path = entry.get()
                     entry.delete(0, tk.END)
                     entry.insert(0, new_path.replace(os.path.join(os.environ['HOME'], 'models/inputdata'), '/inputdata'))
                 elif ('/code/' in entry.get()):
                     old_path = entry.get()
-                    old_path.replace('/code', os.path.join(os.environ['HOME'], 'models'))
+                    old_path = old_path.replace('/code', os.path.join(os.environ['HOME'], 'models'))
                     entry.delete(0, tk.END)
                     entry.insert(0, old_path)
                     self.browse_local_directory(entry)
@@ -815,6 +1007,12 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
         self.metdir_entry.delete(0, tk.END)
         self.metdir_entry.insert(0, os.path.join(self.inputdata,subdir))
 
+    def run_button_action(self):
+        if self.ssh is not None:
+            self.run_remote_gui()
+        else:
+            self.run_in_docker_container()
+
     def run_in_docker_container(self):
         def docker_task():
             container_name = "e3sm_gui"
@@ -839,6 +1037,69 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
         threading.Thread(target=docker_task, daemon=True).start()
 
+    def run_remote_gui(self):
+        import paramiko
+        import tkinter as tk
+        from tkinter import scrolledtext, simpledialog, messagebox
+
+        remote_olmt = self.remote_olmt_entry.get()
+        # Use bash -l -c to ensure login shell and environment
+        command = f"cd {remote_olmt}/runscripts && bash -l -c 'python -u run_GUI.py'"
+
+        username = simpledialog.askstring("Remote Username", "Enter your remote username:", parent=self)
+        if username is None:
+            return
+        password = simpledialog.askstring("Remote Password", "Enter your remote password:", show="*", parent=self)
+        if password is None:
+            return
+
+        def remote_task(output_widget):
+            try:
+                ssh = paramiko.SSHClient()
+                ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+                ssh.connect(self.hostname, username=username, password=password)
+                # Request a PTY for live output
+                stdin, stdout, stderr = ssh.exec_command(command, get_pty=True)
+                while True:
+                    line = stdout.readline()
+                    if not line:
+                        break
+                    self.safe_after(0, lambda l=line: output_widget.insert(tk.END, l))
+                    self.safe_after(0, output_widget.see, tk.END)
+                err = stderr.read().decode()
+                if err:
+                    self.safe_after(0, lambda: output_widget.insert(tk.END, "\n[stderr]\n" + err))
+                    self.safe_after(0, output_widget.see, tk.END)
+                self.safe_after(0, lambda: output_widget.insert(tk.END, "\n[Process finished]\n"))
+                self.safe_after(0, output_widget.see, tk.END)
+                ssh.close()
+            except Exception as e:
+                self.safe_after(0, lambda: output_widget.insert(tk.END, f"\n[Error] {e}\n"))
+                self.safe_after(0, output_widget.see, tk.END)
+
+        # Create the output window
+        win = tk.Toplevel(self)
+        win.title("Remote Command Output")
+        win.geometry("900x500")
+        output_widget = scrolledtext.ScrolledText(win, width=110, height=30)
+        output_widget.pack(fill="both", expand=True)
+        output_widget.insert(tk.END, f"Running remote command:\n{command}\n\n")
+
+        import threading
+        threading.Thread(target=remote_task, args=(output_widget,), daemon=True).start()
+
+    def is_ssh_alive(self):
+        try:
+            transport = self.ssh.get_transport() if self.ssh else None
+            return transport and transport.is_active()
+        except Exception:
+            return False
+
+    def safe_after(self, ms, func, *args, **kwargs):
+        try:
+            self.after(ms, func, *args, **kwargs)
+        except RuntimeError:
+            pass
 
 def get_configuration():
     #Opens the configuration GUI, waits for the user to input values and click Save,
@@ -866,13 +1127,13 @@ def get_configuration():
     config = gui.result
     
 
-    hostname = simpledialog.askstring("Remote Host", "Enter your remote hostname:")
-    if hostname:
-        remote_path = simpledialog.askstring("Remote Path", "Enter remote path for config.pkl:", initialvalue="~/config.pkl", parent=root)
-        if remote_path:
-            send_config_to_remote_with_root("./temp/config.pkl", remote_path, hostname, root)
-
-    # Destroy the hidden root and return the configuration
+    #hostname = simpledialog.askstring("Remote Host", "Enter your remote hostname:")
+    #if hostname:
+    #    remote_path = simpledialog.askstring("Remote Path", "Enter remote path for config.pkl:", initialvalue="~/config.pkl", parent=root)
+    #    if remote_path:
+    #        send_config_to_remote_with_root("./temp/config.pkl", remote_path, hostname, root)
+    #
+    ## Destroy the hidden root and return the configuration
     root.destroy()
 
     return config
