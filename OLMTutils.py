@@ -34,6 +34,12 @@ def get_machine_info(machine_name=''):
         hostname = 'saul-p1.nersc.gov'
         queue = 'regular'
         project = 'e3sm'
+    elif  ('compy' in machine_name):
+        rootdir = '/compyfs/'+os.environ['USER']+'/e3sm_scratch'
+        inputdata = '/compyfs/inputdata'
+        machine = 'compy'
+        queue = 'slurm'
+        project = 'e3sm'
     elif ('ubuntu' in machine_name or 'linux-generic' in machine_name):
         rootdir = os.environ['HOME']+'/models'
         inputdata = rootdir + '/inputdata'

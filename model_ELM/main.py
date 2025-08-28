@@ -149,6 +149,9 @@ class ELMcase():
         self.queue='regular'
     if ('chrysalis' in self.machine):
         self.queue='compute'
+    if ('compy' in self.machine):
+        self.project='e3sm'
+        self.queue='slurm'
     if self.queue == '':
         self.queue='batch'
 

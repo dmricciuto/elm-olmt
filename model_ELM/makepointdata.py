@@ -174,6 +174,18 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None):
     
     return ds
 
+def setcfts(self, ds, pct_cft, zerootherlandunits=True):
+    #Set the CFTs as desired, zero out other landunits
+    #Assign PCT_CFT (should work whether 2, 3 or 4 dimensions)
+    ds['PCT_CFT'] = ds['PCT_CFT'] * 0 + pct_cft.broadcast_like(ds['PCT_CFT'])
+    #Assume we want to zero the other land units
+    if (zerootherlandunits):
+        ds['PCT_CROP'][:] = 100.0
+        print('Zeroing out other landunits')
+        nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_NATVEG','PCT_GLACIER']
+        for v in nonveg:
+            ds[v][:] = 0.0
+    return ds
             
 def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
     #Extract surface, domain, or pftdyn data from a given regional or global file.
@@ -240,6 +252,10 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 ds = self.setpfts(ds, pct_nat_pft);
             print('Setting PFT_NAT_PFT to: ', self.siteinfo['PCT_NAT_PFT'])
             if (not ispftdyn):
+                if (sum(self.siteinfo['PCT_CFT']) >= 0):
+                    pct_cft = xr.DataArray(self.siteinfo['PCT_CFT'], dims=['cft'])
+                    ds = self.setcfts(ds, pct_cft);
+                    print('Setting %CFT to ',self.siteinfo['PCT_CFT'])
                 if (self.siteinfo['PCT_SAND'] >= 0):
                     # Use .values to modify underlying data directly
                     ds['PCT_SAND'].values[:] = self.siteinfo['PCT_SAND']
