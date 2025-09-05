@@ -735,7 +735,7 @@ class ELMcase():
         os.system('cp '+self.OLMTdir+'/temp/clm_params.nc '+self.rundir)
       if (not 'fsoilordercon' in self.case_options.keys()):
         os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
-      if ('FATES' in self.compset or 'ED' in self.compset) and (not 'fates_paramfile' in self.case_options.keys()):
+      if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
         os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.nc '+self.rundir)
       if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)

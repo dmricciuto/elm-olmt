@@ -63,6 +63,8 @@ def main():
     parser.add_argument('--gui', action='store_true', help='Launch GUI to create configuration')
     args = parser.parse_args()
 
+    print('\n')
+    print(f"    *** OLMT ***")
     if args.gui:
         import subprocess
         subprocess.run([sys.executable, 'GUI_experimental.py'])
@@ -71,11 +73,13 @@ def main():
 
     # Load configuration
     cfg = load_config(args.config)
+    print(f"Loaded configuration from {args.config}")
     
     # Get machine info
     machine_name = cfg['machine'].get('machine_name', '')
     machine, rootdir, inputdata, queue, project, hostname = \
         get_machine_info(machine_name=machine_name)
+    print('Machine: '+machine+'\n')
     
     # Override machine defaults with config values if provided
     queue = cfg['machine'].get('queue', queue)
@@ -85,6 +89,10 @@ def main():
     runroot = cfg['machine'].get('runroot', rootdir + '/e3sm_run')
     modelroot = cfg['machine'].get('modelroot', '')
     exeroot = cfg['machine'].get('exeroot', '')
+    print('Run root directory:  '+runroot)
+    print('Case root directory: '+caseroot)
+    print('Input data directory: '+inputdata)
+    print('Model root directory: '+modelroot+'\n')
 
     # Extract configuration values
     runtype = cfg['simulation']['runtype']
@@ -113,10 +121,11 @@ def main():
     res = cfg['simulation']['res']
     
     # Biogeochemistry options
-   
     nutrients = cfg['biogeochemistry']['nutrients']
     nutrient_comp = cfg['biogeochemistry'].get('nutrient_comp','')
     soil_decomp = cfg['biogeochemistry'].get('soil_decomp','')
+    print(f"Running {runtype} simulation with {nutrients} nutrients")
+    #print('\n')
     
     # FATES options
     use_fates = cfg['biogeochemistry'].get('use_fates', False)
@@ -125,7 +134,8 @@ def main():
             raise ValueError("FATES PFT configuration missing in the config file.")
         else:
             fates_pft = cfg['fates']['fates_pft']
-        pft_duplicates = cft['fates'].get('pft_duplicates', 1)
+        pft_duplicates = cfg['fates'].get('pft_duplicates', 1)
+
     # Crop options
     use_crop = cfg['biogeochemistry'].get('use_crop', False)
 
@@ -138,7 +148,6 @@ def main():
     run_startyear = cfg['run_lengths'].get('trans_startyear', 1850)
     if (nutrients == 'none'):
         run_startyear = cfg['run_lengths'].get('startyear', run_startyear)
-
 
     # Post-processing
     if ('postprocessing' in cfg):
@@ -160,7 +169,7 @@ def main():
     # Treatment options
     #nyears_treatment = cfg['treatments']['nyears_treatment']
 
-    #Observations 
+    # Observations 
     has_obs = False
     if ('observations' in cfg):
         obs_dir = cfg['observations']['location']
@@ -189,14 +198,11 @@ def main():
         treatment_options = cfg['treatment_options'].copy()
         nyears_treatment = cfg['treatment_options']['nyears']
     
-    print(f"Loaded configuration from {args.config}")
-    print(f"Running {runtype} simulation with {nutrients} nutrients")
-    
-    print('\n')
-    #Wipe the temp directory
+    # Wipe the temp directory
+    #APW this might be  throwing an error where temp doesn't exist (but also when trying to copy files to temp) 
     os.system('rm temp/*')
     if (runtype == 'site'):
-        #Check to see if all reqested sites exist
+        # Check to see if all reqested sites exist
         if not isinstance(sites,list):
             sites=[sites]
 
@@ -231,11 +237,12 @@ def main():
             print('Lat: ', lat_bounds)
             print('Lon: ', lon_bounds)
 
-    #Construct the list of compsets and suppring information
-    compset_type="I"
-    if (use_cpl_bypass):
-        compset_type='ICB'
-    #Construct the list of compsets and supporting information
+    #APW: looks duplicated below, commenting out here
+    ##Construct the list of compsets and suppring information
+    #compset_type="I"
+    #if (use_cpl_bypass):
+    #    compset_type='ICB'
+    # Construct the list of compsets and supporting information
     twophase=False
     compset_base=nutrients+nutrient_comp+soil_decomp+'BC'
     if (use_fates):
@@ -246,7 +253,7 @@ def main():
     if (use_cpl_bypass):
         compset_type='ICB'
     elif ((mettype != 'site' or 'PR-LUQ' in sites) and nyears_trans != 0):
-        twophase=True       #if using DATM and reanalysis, split into 2 cases
+        twophase=True       # if using DATM and reanalysis, split into 2 cases
 
     #TODO - move construction of compset lists to a function (in OLMTinfo)
     compsets=[]
@@ -289,7 +296,7 @@ def main():
     if (parm_list != ''):
         ensemble=True
 
-    #Add treatment cases
+    # Add treatment cases
     if ('suffix' in treatment_options.keys()):
         for t in range(0,len(treatment_options['suffix'])):
             nyears.append(nyears_treatment)
@@ -298,12 +305,6 @@ def main():
             compsets.append(compsets[-1])
             suffix.append(treatment_options['suffix'][t])
             startyear.append(startyear_treatment)
-
-    print('Machine: '+machine)
-    print('Run root directory:  '+runroot)
-    print('Case root directory: '+caseroot)
-    print('Input data directory: '+inputdata)
-    print('Model root directory: '+modelroot+'\n')
 
     print('\nELM simulation info:')
     multisite_scripts=[]
@@ -339,31 +340,32 @@ def main():
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir)
 
-        #Create the case
+        # Create the case
         cases[c].create_case()
         cases[c].case_options={}
         if (site != ''):
             cases[c].siteinfo = siteinfo[site]
 
-        #Get the namelist options for this case
+        # Get the namelist options for this case
         for key in case_options.keys():
             if isinstance(case_options[key], list):
                 cases[c].case_options[key] = case_options[key][c]
             else:
                 cases[c].case_options[key] = case_options[key]
 
-        #Add the treatment options (must be list format)
+        # Add the treatment options (must be list format)
         if (istreatment[c]):
             for key in treatment_options.keys():
                 cases[c].case_options[key] = treatment_options[key][c-ncases_pretreatment]
-        #Other options
+        # Other options
         cases[c].nutrients = nutrients
         cases[c].nutrient_comp = nutrient_comp
         cases[c].soil_decomp = soil_decomp
         if (use_fates):
             cases[c].fates_pft=fates_pft
             cases[c].pft_duplicates = pft_duplicates
-        #Set the custom parameter files
+
+        # Set the custom parameter files
         if ('fates_paramfile' in case_options):
             cases[c].fates_paramfile = case_options['fates_paramfile']
         if ('paramfile' in case_options):
@@ -371,20 +373,20 @@ def main():
         if ('add_parameter' in cfg):
             cases[c].add_parameter = add_parameter
 
-        #Get forcing information
+        # Get forcing information
         print('Getting forcing information')
         if ('phase2' in suffix[c]):
-            #Set the starting year from the last case
+            # Set the starting year from the last case
             cases[c].startyear = cases[c-1].startyear+cases[c-1].run_n
         if (metdir != ''):
             cases[c].get_forcing(mettype=mettype, metdir=metdir)
         else:
             cases[c].get_forcing(mettype=mettype)
 
-        #Set the initial data file (if depends on previous case)
+        # Set the initial data file (if depends on previous case)
         cases[c].dependcase=''
         if (depends[c] >= 0):
-            #Set the iniial data file from the last year of the prev case
+            # Set the iniial data file from the last year of the prev case
             finidat_year = cases[depends[c]].run_n+1
             if ('20TR' in cases[depends[c]].compset or 'trans' in cases[depends[c]].compset):
                 finidat_year = 1850+cases[depends[c]].run_n
@@ -392,13 +394,13 @@ def main():
                   finidat_year=finidat_year)
             cases[c].dependcase = cases[depends[c]].casename
 
-        #Set postprocessing variables (final case or treatment case)
+        # Set postprocessing variables (final case or treatment case)
         if (c == ncases-1 or istreatment[c]) and 'postprocessing' in cfg:
             cases[c].postproc_vars = postproc_vars
             cases[c].postproc_startyear = postproc_startyear
             cases[c].postproc_endyear = postproc_endyear
             cases[c].postproc_freq = postproc_freq
-            #Also get the observations if requested, use postproc
+            # Also get the observations if requested, use postproc
             if (has_obs and site != ''):
                 cases[c].obs = {}
                 cases[c].obs_err = {}
@@ -412,37 +414,37 @@ def main():
         else:
             cases[c].postproc_vars=[]
 
-        #Set up the case (surface, domain and pftdata)
+        # Set up the case (surface, domain and pftdata)
         print('Setting up case for site: '+site)
         cases[c].setup_case()
         if (c == 0):
-            #Get the surface and domain data 
+            # Get the surface and domain data 
             cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
         if (ensemble):
             if (site == sites[0] and c == 0):
-                #Get the ensemble file from the first site and case
+                # Get the ensemble file from the first site and case
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
                     ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err)
                 ensemble_file = cases[c].ensemble_file
             else:
-                #Use the ensemble file for subsequent cases and sites
+                # Use the ensemble file for subsequent cases and sites
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
                     ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err)
         if ('20TR' in compsets[c] and not use_fates):
-            #Get the dynamic PFT data
+            # Get the dynamic PFT data
             cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
             cases[c].setup_domain_surfdata(makepftdyn=True)
 
-        #Build the case
+        # Build the case
         print('Building case')
         cases[c].build_case()
     
-        #Submit the case
+        # Submit the case
         print('Submitting case')
         jobnum_depend=-1
         if (depends[c] >= 0):
             jobnum_depend = jobnum[depends[c]]
-        #Set exeroot for all subsequent cases/sites so we don't have to rebuild
+        # Set exeroot for all subsequent cases/sites so we don't have to rebuild
         if (depends[c] < 0 and site == sites[0]):
             exeroot = cases[c].exeroot
         if (ensemble):
@@ -451,12 +453,12 @@ def main():
                 ensemble=ensemble,multisite_script=multisite_scripts[c])
         else:
             if (site == sites[0]):
-                #Always use the multi-site script even for one site
+                # Always use the multi-site script even for one site
                 multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
             if (site == sites[nsites-1]):
                 jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
                     ensemble=ensemble,multisite_script=multisite_scripts[c])
-        #Return to script directory
+        # Return to script directory
         os.chdir(scriptdir)
 
 

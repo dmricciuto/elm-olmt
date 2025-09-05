@@ -1,6 +1,6 @@
 # directories for temporary storage / user customisation
 scripts/
-temp/
+temp/*
 plots/
 UQ_output/
 srcmods*
@@ -8,6 +8,11 @@ run_logs_archive/
 pklfiles/
 runscripts/archive
 runscripts/multisite
+config_files/*
+
+# files to retain in directories to otherwise ignore (e.g. example files)
+!temp/.gitkeep    # retains an empty directory 
+!config_files/BGC_site.cfg
 
 # files created by OLMT executions
 run.*
@@ -15,5 +20,6 @@ run.*
 *.run.o*
 slurm-*.out
 mcsamples*.txt
+create_newcase.log
 
 # user defined files
