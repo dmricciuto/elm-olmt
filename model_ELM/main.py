@@ -12,6 +12,15 @@ from .netcdf4_functions import *
 from datetime import datetime
 import xarray as xr
 
+def smart_loadtxt(filename):
+    # Try comma first, then whitespace
+    with open(filename) as f:
+        first_line = f.readline()
+    if ',' in first_line:
+        return np.loadtxt(filename, delimiter=',')
+    else:
+        return np.loadtxt(filename)
+
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', project = '',\
@@ -112,7 +121,7 @@ class ELMcase():
       create_samples(self, sampletype=sampletype, parm_list=parm_list,nsamples=nsamples)
     else:
       self.ensemble_file = ensemble_file
-      self.samples = np.transpose(np.loadtxt(ensemble_file))
+      self.samples = np.transpose(smart_loadtxt(ensemble_file))
       self.nsamples = np.shape(self.samples)[1]
     self.np_ensemble=np_ensemble
     create_ensemble_script(self)
@@ -167,7 +176,7 @@ class ELMcase():
           print('Setting met type to gswp3-daymet4')
           self.forcing='gswp3-daymet4'
           self.metdir='/gpfs/wolf2/cades/cli185/proj-shared/zdr/Daymet_GSWP3_4KM_TESSFA'
-        elif (mettype == 'era5-daymet4'):
+        elif ('era5-daymet' in mettype):
           print('Setting met type to era5-daymet4')
           self.forcing = 'era5-daymet4'
           self.metdir = '/gpfs/wolf2/cades/cli185/proj-shared/zdr/Daymet_ERA5_TESSFA2'
@@ -325,9 +334,12 @@ class ELMcase():
       cmd = cmd+' --compiler '+self.compiler
     if (self.mpilib != ''):
       cmd = cmd+' --mpilib '+self.mpilib
+    if (self.queue != ''):
+      cmd = cmd+' --queue '+self.queue
     #ADD MPILIB OPTION HERE
     cmd = cmd+' > '+self.OLMTdir+'/create_newcase.log'
     os.chdir(self.modelroot+'/cime/scripts')
+
     result = subprocess.run(cmd, stdout=subprocess.PIPE, \
             stderr=subprocess.PIPE, text=True, shell=True)
     if (result.returncode > 0):
@@ -396,10 +408,10 @@ class ELMcase():
             years.append(int(f.split('/')[-1].split('-')[0]))
         self.met_startyear = min(years)
         self.met_endyear   = max(years)
-      if (self.met_endyear-self.met_startyear+1 > 20):
-          self.met_endyear_spinup = self.met_startyear+20-1
-      else:
-          self.met_endyear_spinup = self.met_endyear
+      #if (self.met_endyear-self.met_startyear+1 > 20):
+      #    self.met_endyear_spinup = self.met_startyear+20-1
+      #else:
+      self.met_endyear_spinup = self.met_endyear
     else:
         #Assume reanalysis
         self.met_startyear = 1901

@@ -24,6 +24,9 @@ parser.add_option("--UQ_only", dest="UQ_only", default=False, \
 myfile=open('pklfiles/'+options.case+'.pkl','rb')
 mycase=pickle.load(myfile)
 
+#mycase.postproc_startyear = 2010
+#mycase.postproc_freq = 'monthly'
+
 mycase.output = {}
 #get the node file and parse
 def get_nodelist():
@@ -185,10 +188,10 @@ if (mycase.postproc_vars != []):
     #run MCMC
     #Set intial values for parameters
     if (mycase.obs):
-        parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
+        #parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
         #Run MCMC for the observation variables
         obs_mcmc = [v for v in mycase.postproc_vars if v in mycase.obs.keys()]
-        mycase.MCMC(parms, obs_mcmc, 100000)
+        mycase.MCMC_emcee(obs_mcmc,nwalkers=24,nsteps=10000)
 
         #Save postprocessed output
         mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')

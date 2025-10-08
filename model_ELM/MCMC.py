@@ -7,266 +7,236 @@ matplotlib.use('Agg')
 import matplotlib.mlab as mlab
 import matplotlib.pyplot as plt
 from optparse import OptionParser
+import multiprocessing
+import emcee
+import time
+import corner
+import netCDF4 as nc
+import shutil
 
-def calc_posterior(self,parms,myvars):
-    #Calculate the posterior (prior and log likelihood)
-    line = 0
+
+def sample_from_prior(pmin, pmax, nsamples):
+    nparms = len(pmin)
     #Uniform priors
+    samples = np.random.uniform(low=np.array(pmin), high=np.array(pmax), \
+        size=(nsamples,nparms))
+    return samples
+
+
+def log_posterior(parms, sites, myvars, pmin, pmax, obs, obs_err, nparms_ensemble, nerr_parms, run_surrogate):
+    # Uniform priors
     prior = 1.0
-    for j in range(0,self.nparms_ensemble):
-        if (parms[j] < self.ensemble_pmin[j] or parms[j] > \
-                self.ensemble_pmax[j]):
+    for j in range(nparms_ensemble):
+        if (parms[j] < pmin[j] or parms[j] > pmax[j]):
             prior = 0.0
     post = prior
-    if (prior > 0.0):
-      output = self.run_surrogate(parms.reshape(1, -1), myvars)
-      #output['NEEdiff'] = output['NEEdiff']*24*3600*365/9
-      for v in myvars:
-        myoutput = output[v].flatten()
-        myobs    = np.array(self.obs[v]).flatten()
-        myerr    = np.array(self.obs_err[v]).flatten()
-        for n in range(0,len(myoutput)):
-            if ((myobs[n]) > -9000 and myerr[n] > 0):
-                resid = (myoutput[n] - myobs[n])
-                ri = (resid/myerr[n])**2
-                li = -1.0 * np.log(2.0*np.pi)/2.0 - \
-                     np.log(myerr[n]) - ri/2.0
-                post = post + li
-                #print(v,n,myoutput[n],myobs[n],post)
+    if prior > 0.0:
+        parms_model = parms[0:(nparms_ensemble - nerr_parms)]
+        for s in sites:
+            output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
+            for v in myvars:
+                myoutput = output[v].flatten()
+                myobs    = np.array(obs[s][v]).flatten()
+                myerr    = np.array(obs_err[s][v]).flatten()
+                # Mask out invalid observations
+                mask = (myobs > -9000) & (myerr > 0)
+                #mask = mask & (np.arange(len(myobs)) % 12 > 2) & (np.arange(len(myobs)) % 12 < 11)  # mask out winter months
+                if (nerr_parms > 0):
+                    myerr[mask] = parms[-len(myvars)+myvars.index(v)]
+                # Vectorized calculation
+                resid = myoutput[mask] - myobs[mask]
+                ri = (resid / myerr[mask]) ** 2
+                li = -0.5 * np.log(2.0 * np.pi) - np.log(myerr[mask]) - 0.5 * ri
+                post += np.sum(li)
     else:
         post = -9999999
-        output={}
-    #print(post)
-    return(post, output)
+    return post
 
 #-------------------------------- MCMC ------------------------------------------------------
 
-def MCMC(self, parms, myvars, nevals, type='uniform', nburn=1000, burnsteps=10, default_output=[]):
-    UQ_output='./UQ_output/'+self.casename
-    print(os.path.abspath(UQ_output))
-    #Metropolis-Hastings Markov Chain Monte Carlo with adaptive sampling
-    post_best = -99999
-    post_last = -99999
-    accepted_step = 0
-    accepted_tot  = 0
-    nparms     = self.nparms_ensemble
-    #parms      = np.zeros(nparms)
-    parm_step  = np.zeros(nparms)
-    chain      = np.zeros((nparms+1,nevals))
-    chain_prop = np.zeros((nparms,nevals))
-    chain_burn = np.zeros((nparms,nevals))
-    output     = {}
-    self.nobs  = {}
-    for v in myvars:
-      self.nobs[v] = len(self.output[v])
-      output[v]     = np.zeros((self.nobs[v],nevals))
-    mycov      = np.zeros((nparms,nparms))
-    for p in range(0,nparms):
-        #Starting step size = 1% of prior range
-        #parm_step[p] = 2.4**2/nparms * (model.pmax[p]-model.pmin[p])
-        parm_step[p] = 0.05 * (self.ensemble_pmax[p]-self.ensemble_pmin[p])
-        #parms[p] = np.random.uniform(parms[p]-parm_step[p],parms[p]+parm_step[p],1)
-        #parms[p] = self.pdef[p]
-        #parms_sens = np.copy(parms)
-        #vary this parameter by one step
-        #parms_sens[p] = parms_sens[p]+parm_step[p]
-        #post_sens = calc_posterior(parms_sens)
-        #use 1D sensitivities to decrease the step sizes accordingly
-        #print p, np.absolute(post_def - post_sens)
-        #if (np.absolute(post_def - post_sens) > 1.0):
-        #    parm_step[p] = parm_step[p]/(np.absolute(post_def - post_sens))
-    for i in range(0,nparms):
-        mycov[i,i] = parm_step[i]**2
-
-    parm_last = parms
-    scalefac = 1.0
-
-    for i in range(0,nevals):
-
-         #update proposal step size
-        if (i > 0 and (i % nburn) == 0 and i < burnsteps*nburn):
-            acc_ratio = float(accepted_step) / nburn
-            mycov_step = np.cov(chain_prop[0:nparms,accepted_tot- \
-                                              accepted_step:accepted_tot])
-            mycov_chain = np.cov(chain_burn[0:nparms,int(accepted_tot/4):accepted_tot])
-            thisscalefac = 1.0
-            #Compute scaling factors for step sizes based on acceptance ratio
-            if (acc_ratio <= 0.2):
-                thisscalefac = max(acc_ratio/0.3, 0.15)
-            elif (acc_ratio > 0.4):
-                thisscalefac = min(acc_ratio/0.3, 2.5)
-            scalefac = scalefac * thisscalefac
-            #Calculate covariance matrix of recent samples
-            for j in range(0,nparms):
-                for k in range(0,nparms):
-                    if (acc_ratio > 0.05):
-                        mycov[j,k] = mycov_chain[j,k] * scalefac
-                            #if (j == k):
-                            #mycov[j,k] =
-                                #scalefac* max(mycov_chain[j,j] / \
-                                       #  mycov_step[j,j], 1) * mycov_step[j,j]
-                    else:
-                        #if (j == k):
-                        mycov[j,k] = thisscalefac * mycov[j,k]
-                    #if (j == k):
-                    #    print(j, scalefac,mycov[j,j]/(parm_step[j]**2))
-
-
-            #print('BURNSTEP', i/nburn, acc_ratio, thisscalefac, scalefac)
-            mycov_step = np.cov(chain_prop[0:nparms,accepted_tot- \
-                                                  accepted_step:accepted_tot])
-            #print(np.corrcoef(chain[0:4,i-nburn:i]))
-            accepted_step = 0
-    
-    
-        if (i == burnsteps*nburn):
-            #Parameter chain plots
-            for p in range(0,nparms):
-                fig = plt.figure()
-                xchain = np.cumsum(np.ones(int(nburn*burnsteps)))
-                plt.plot(xchain, chain[p,0:int(nburn*burnsteps)])
-                plt.xlabel('Evaluations')
-                plt.ylabel(self.ensemble_parms[p])
-                if not os.path.exists(UQ_output+'/MCMC_output/plots/chains'):
-                    os.makedirs(UQ_output+'/MCMC_output/plots/chains')
-                plt.savefig(UQ_output+'/MCMC_output/plots/chains/burnin_chain_'+self.ensemble_parms[p]+'.pdf')
-                plt.close(fig) 
-    
-        #get proposal step
-        parms = np.random.multivariate_normal(parm_last, mycov)
-   
-        #------- run the model and calculate log likelihood -------------------
-        thisoutput={}
-        post, thisoutput = calc_posterior(self,parms,myvars)
-        #determine whether proposal step is accepted
-        if ( (post - post_last < np.log(random.uniform(0,1)))):
-            #if not accepted, go back to previous step
-            for j in range(0,nparms):
-                parms[j] = parm_last[j]
+def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
+    nsites = len(self.all_sites)
+    sites = self.all_sites
+    pmin, pmax, nparms_ensemble = self.ensemble_pmin, self.ensemble_pmax, \
+        self.nparms_ensemble
+    run_surrogate = {}
+    obs = {}
+    obs_err = {}
+    thiscase={}
+    for s in sites:
+        if s == sites[0]:
+            obs[s] = self.obs.copy()
+            obs_err[s] = self.obs_err.copy()
+            run_surrogate[s] = self.run_surrogate
         else:
-            #proposal step is accepted
-            post_last = post
-            accepted_tot = accepted_tot+1
-            accepted_step = accepted_step+1
-            chain_prop[0:nparms,accepted_tot] = parms-parm_last
-            chain_burn[0:nparms,accepted_tot] = parms
-            parm_last = parms
-            thisoutput_last = thisoutput.copy()
-            #keep track of best solution so far
-            if (post > post_best):
-                post_best = post
-                parms_best = parms
-                #print(post_best)
-                output_best = thisoutput
+            from model_ELM import ELMcase
+            #Get the case objects for other sites
+            thiscase[s] = ELMcase(casename=self.casename.replace(self.site, s))
+            run_surrogate[s] = thiscase[s].run_surrogate
+            obs[s] = thiscase[s].obs.copy()
+            obs_err[s] = thiscase[s].obs_err.copy()
 
-        #populate the chain matrix
-        for j in range(0,nparms):
-            chain[j][i] = parms[j]
-        chain[nparms][i] = post_last
+    #Add parameters to estimate observation error stddev
+    nerr_parms = 0    
+    ensemble_parms = self.ensemble_parms.copy()
+    if (fit_error):
+        print("Fitting observation error parameters")
         for v in myvars:
-            if (post > -9000000):
-              output[v][:,i] = thisoutput[v][:]
-            else:
-              output[v][:,i] = thisoutput_last[v][:]
-        #if (i % 1000 == 0):
-        #    print(' -- '+str(i)+' --\n')
+            #Using the first site to set prior bounds
+            mask = (obs[sites[0]][v] > -9000) & (obs_err[sites[0]][v] > 0)
+            max_obs = max([np.max(np.abs(obs[sites[0]][v][mask])), 0.01])
+            err_prior_min = 0.0
+            err_prior_max = 0.25 * max_obs
 
-    #print("Computing statistics")
-    chain_afterburn = chain[0:nparms,int(nburn*burnsteps):]
-    chain_sorted = chain_afterburn
-    output_sorted={}
-    for v in myvars:
-      output_sorted[v] = output[v][0:self.nobs[v],int(nburn*burnsteps):]
-      output_sorted[v].sort()
+            # Add error parameter to prior ranges and names
+            pmin = np.append(pmin, err_prior_min)
+            pmax = np.append(pmax, err_prior_max)
+            ensemble_parms = ensemble_parms + ['sigma_'+v]
+            nparms_ensemble = len(ensemble_parms)
+            nerr_parms = nerr_parms+1
 
-    np.savetxt(UQ_output+'/MCMC_output/MCMC_chain.txt', np.transpose(chain_afterburn))
-    #Print out some statistics
-    parm_best=open(UQ_output+'/MCMC_output/parms_best.txt','w')
-    for p in range(0,len(parms_best)):
-      parm_best.write(self.ensemble_parms[p]+' '+str(self.ensemble_pfts[p])+' '+str(parms_best[p])+'\n')
-    parm_best.close()
-    #np.savetxt(UQ_output+'/MCMC_output/correlation_matrix.txt',np.corrcoef(chain_afterburn))
+    # Initialize walkers in the prior space
+    p0 = sample_from_prior(pmin, pmax, nwalkers)
 
-    #parameter correlation plots (threshold correlations)
-    #corr_thresh = 0.8
-    #for p1 in range(0,nparms-1):
-    #  for p2 in range(p1+1,nparms):
-    #    if (abs(parmcorr[p1,p2]) > corr_thresh):
-    #      fig = plt.figure()
-    #      plt.hexbin(chain_afterburn[p1,:],chain_afterburn[p2,:])
-    #      cbar = plt.colorbar()
-    #      cbar.set_label('bin count')
-    #      plt.xlabel(self.ensemble_parms[p1])
-    #      plt.ylabel(self.ensemble_parms[p2])
-    #
-    #      plt.suptitle('r = '+str(parmcorr[p1,p2]))
-    #      if not os.path.exists(UQ_output+'/MCMC_output/plots/corr'):
-    #           os.makedirs(UQ_output+'/MCMC_output/plots/corr')
-    #      plt.savefig(UQ_output+'/MCMC_output/plots/corr/corr_'+self.ensemble_parms[p1]+'_'+model.parm_names[p2]+'.pdf')
-    #      plt.close(fig)
-    #Parameter chain plots
-    for p in range(0,nparms):
-        fig = plt.figure()
-        xchain = np.cumsum(np.ones(nevals-int(nburn*burnsteps)))
-        plt.plot(xchain, chain_afterburn[p,:])
-        plt.xlabel('Evaluations')
-        plt.ylabel(self.ensemble_parms[p])
-        if not os.path.exists(UQ_output+'/MCMC_output/plots/chains'):
-            os.makedirs(UQ_output+'/MCMC_output/plots/chains')
-        plt.savefig(UQ_output+'/MCMC_output/plots/chains/chain_'+self.ensemble_parms[p]+'.pdf')
-        plt.close(fig)
+    # Set up the sampler and run MCMC
+    with multiprocessing.Pool() as pool:
+        sampler = emcee.EnsembleSampler(
+            nwalkers,
+            nparms_ensemble,
+            log_posterior,
+            args=(sites, myvars, pmin, pmax, obs, obs_err, nparms_ensemble, nerr_parms, run_surrogate),
+            #pool=pool
+        )
+        sampler.run_mcmc(p0, nsteps, progress=True)
 
-    chain_sorted.sort()
-    parm95=open(UQ_output+'/MCMC_output/parms_95pctconf.txt','w')
-    for p in range(0,nparms):
-        parm95.write(str(self.ensemble_parms[p])+' '+ \
-        str(chain_sorted[p,int(0.025*(nevals-nburn*burnsteps))])+' '+ \
-        str(chain_sorted[p,int(0.975*(nevals-nburn*burnsteps))])+'\n')
-    parm95.close()
-    print("Ratio of accepted steps to total steps:")
-    print(float(accepted_tot)/nevals)
-    out95=open(UQ_output+'/MCMC_output/outputs_95pctconf.txt','w')
-    for v in myvars:
-      for p in range(0,self.nobs[v]):
-        out95.write(v+' '+str(output_sorted[v][p,int(0.025*(nevals-nburn*burnsteps))])+' '+ \
-        str(output_sorted[v][p,int(0.975*(nevals-nburn*burnsteps))])+'\n')
-    out95.close()
-    #make parameter histogram plots
-    for p in range(0,nparms):
-        fig = plt.figure()
-        n, bins, patches = plt.hist(chain_afterburn[p,:],25)
-        plt.xlabel(self.ensemble_parms[p])
+    #Get the samples, likelihoods and best parameters
+    n_model_parms = len(ensemble_parms) - nerr_parms
+    samples = sampler.get_chain(discard=nsteps//5, thin=5, flat=True)
+    log_probs = sampler.get_log_prob(discard=nsteps//5, thin=5, flat=True)
+    best_idx = np.argmax(log_probs)
+    best_parms = samples[best_idx, :n_model_parms]
+    print("Mean of each parameter:")
+    print(np.mean(samples, axis=0))
+    print("Standard deviation of each parameter:")
+    print(np.std(samples, axis=0))
+    print("Best-fit parameters:")
+    print(best_parms)
+    if (fit_error):
+        best_err_parms = samples[best_idx, n_model_parms:]
+        print("Best-fit error parameters:")
+        print(best_err_parms)
+
+    # Plot histograms for each parameter
+    outdir = './UQ_output/'+self.casename+'/MCMC_output/plots/pdfs'
+    os.makedirs(outdir, exist_ok=True)
+    for i in range(samples.shape[1]):
+        plt.figure()
+        plt.hist(samples[:, i], bins=25, density=True, alpha=0.7)
+        plt.xlabel(ensemble_parms[i])
         plt.ylabel('Probability Density')
-        if not os.path.exists(UQ_output+'/MCMC_output/plots/pdfs'):
-            os.makedirs(UQ_output+'/MCMC_output/plots/pdfs')
-        plt.savefig(UQ_output+'/MCMC_output/plots/pdfs/'+self.ensemble_parms[p]+'.pdf')
-        plt.close(fig)
+        plt.title(f'Posterior of {ensemble_parms[i]}')
+        plt.savefig(f'{outdir}/{ensemble_parms[i]}'+'.png')
+        plt.close()
 
-    #make prediction plots
-    for v in myvars:
-      fig = plt.figure()
-      ax=fig.add_subplot(111)
-      x = np.cumsum(np.ones([self.nobs[v]],float))
-      obs_plot = np.array(self.obs[v].copy())
-      obs_plot[obs_plot < -9000] = np.NaN
-      obs_err_plot = np.array(self.obs_err[v].copy())
-      obs_err_plot[obs_err_plot < -9000] = np.NaN
-      ax.errorbar(x,obs_plot, yerr=obs_err_plot, label='Observations')
-      ax.plot(x,output_best[v].flatten(),'r', label = 'Model best')
-      ax.plot(x,output_sorted[v][:,int(0.025*(nevals-nburn*burnsteps))].flatten(), \
-                 'k--', label='Model 95% CI')
-      ax.plot(x,output_sorted[v][:,int(0.975*(nevals-nburn*burnsteps))].flatten(),'k--')
-      #if (options.parm_default != ''):
-      #  ax.plot(x,default_output[thisob], 'g', label='Default')
-      #  #plt.xlabel(model.xlabel)
-      #  #plt.ylabel(model.ylabel)
-      box = ax.get_position()
-      ax.set_position([box.x0,box.y0,box.width*0.8,box.height])
-      ax.legend(loc='center left', bbox_to_anchor=(1,0.5), fontsize='small')
-      if not os.path.exists(UQ_output+'/MCMC_output/plots/predictions'):
-        os.makedirs(UQ_output+'/MCMC_output/plots/predictions')
-      plt.savefig(UQ_output+'/MCMC_output/plots/predictions/Predictions_'+v+'.pdf')
-      plt.close(fig)
-    return parms_best
+    n_samples = samples.shape[0]
+    for s in sites:
+        output_dict = {v: [] for v in myvars}
+        for i in range(n_samples):
+            parms_model = samples[i, :nparms_ensemble - nerr_parms]
+            output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
+            for v in myvars:
+                output_dict[v].append(output[v].flatten())
 
+        # Convert lists to arrays
+        for v in myvars:
+            output_dict[v] = np.array(output_dict[v])  # shape: (n_samples, n_obs)
+
+        # Plot predictions with 95% confidence intervals
+        outdir_pred = './UQ_output/' + self.casename.replace(self.site, s) + '/MCMC_output/plots/predictions'
+        os.makedirs(outdir_pred, exist_ok=True)
+        for v in myvars:
+            # Compute percentiles
+            lower = np.percentile(output_dict[v], 2.5, axis=0)
+            upper = np.percentile(output_dict[v], 97.5, axis=0)
+            median = np.percentile(output_dict[v], 50, axis=0)
+            x = np.arange(len(median))
+            obs_plot = np.array(obs[s][v].copy())
+            obs_plot[obs_plot < -9000] = np.NaN
+            obs_err_plot = np.array(obs_err[s][v].copy())
+            obs_err_plot[obs_err_plot < -9000] = np.NaN
+            if (fit_error):
+                err_idx = ensemble_parms.index('sigma_'+v)
+                obs_err_plot[obs_err_plot > -9000] = best_err_parms[err_idx - n_model_parms]
+
+            plt.figure()
+            plt.fill_between(x, lower, upper, color='gray', alpha=0.5, label='95% CI')
+            plt.plot(x, median, 'r', label='Model median')
+            plt.errorbar(x, obs_plot, yerr=obs_err_plot, fmt='o', label='Observations')
+            plt.xlabel('Time')
+            plt.ylabel(v)
+            plt.title(f'Posterior predictive for {v}')
+            plt.legend()
+            plt.savefig(f'{outdir_pred}/Predictions_{v}_posterior.png')
+            plt.close()
+
+    #Create corner plot for model parameters only
+    samples_model = samples[:, :n_model_parms]
+    labels_model = ensemble_parms[:n_model_parms]
+
+    fig = corner.corner(
+        samples_model,
+        labels=labels_model,
+        show_titles=True,
+        title_fmt=".2f",
+        plot_density=True,
+        plot_contours=True,
+        title_kwargs={"fontsize": 10}
+    )
+    # Add R^2 values to off-diagonal plots
+    axes = np.array(fig.axes).reshape((n_model_parms, n_model_parms))
+    for i in range(n_model_parms):
+        for j in range(i):
+            x = samples_model[:, j]
+            y = samples_model[:, i]
+            r2 = np.corrcoef(x, y)[0, 1] ** 2
+            ax = axes[i, j]
+            ax.annotate(f"$R^2$={r2:.2f}", xy=(0.7, 0.9), xycoords="axes fraction", fontsize=11, color="blue")
+    outdir_corner = './UQ_output/' + self.casename + '/MCMC_output/plots/corner'
+    os.makedirs(outdir_corner, exist_ok=True)
+    fig.savefig(f"{outdir_corner}/corner_plot.png")
+    plt.close(fig)
+
+    # Write best parameters to ELM netCDF parameter file and text file
+    out_nc = './UQ_output/' + self.casename + '/MCMC_output/clm_params_best.nc'
+    write_best_params_to_clm(self, best_parms, labels_model, out_nc)
+    # Also save best parameters in a simple text file
+    out_txt = './UQ_output/' + self.casename + '/MCMC_output/best_params.txt'
+    with open(out_txt, 'w') as f:
+        for i, pname in enumerate(labels_model):
+            f.write(f"{pname} {best_parms[i]}\n")
+    
+def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
+    # Path to template parameter file (first ensemble member)
+    template_nc = os.path.join(self.runroot, 'UQ', self.casename, 'g00001', 'clm_params_00001.nc')
+    # Copy template to output location
+    shutil.copy(template_nc, out_nc_path)
+
+    # Open the copied NetCDF file for modification
+    with nc.Dataset(out_nc_path, 'r+') as ds:
+        for i, pname in enumerate(labels_model):
+            pft_idx = self.ensemble_pfts[i]
+            # Try to update the variable
+            if pname in ds.variables:
+                var = ds.variables[pname]
+                if pft_idx is not None and var.ndim == 1:
+                    # Assume first dimension is PFT
+                    var[pft_idx] = best_parms[i]
+                elif pft_idx is not None and var.ndim == 2:
+                    # Assume second dimension is PFT
+                    var[..., pft_idx] = best_parms[i]
+                else:
+                    var[:] = best_parms[i]
+            else:
+                print(f"Warning: Parameter {pname} not found in NetCDF file.")
+    print(f"Best-fit parameters written to {out_nc_path}")
 

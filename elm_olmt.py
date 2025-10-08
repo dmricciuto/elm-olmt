@@ -23,7 +23,18 @@ def load_config(config_file):
             # Handle different data types
             if value.lower() in ['true', 'false']:
                 cfg[section][key] = value.lower() == 'true'
-            elif ',' in value:
+            elif not ',' in value:
+                # Handle single values
+                if value.isdigit():
+                    cfg[section][key] = int(value)
+                elif value.replace('.', '').replace('-', '').isdigit():
+                    cfg[section][key] = float(value)
+                else:
+                    if 'variables' in key:
+                        cfg[section][key] = [value] 
+                    else:
+                        cfg[section][key] = value if value else None
+            else:
                 # Handle comma-separated lists
                 items = [x.strip().strip('\'"') for x in value.split(',')]
                 # Try to convert to numeric types
@@ -35,25 +46,14 @@ def load_config(config_file):
                         # Try float
                         cfg[section][key] = [float(x) for x in items]
                     except ValueError:
-                        if 'variables' in key:
-                            # If items is a single string, make it a list of one string
-                            if len(items) == 1 and isinstance(items[0], str) and ',' not in value:
-                                cfg[section][key] = [items[0]]
-                            else:
-                                cfg[section][key] = [str(x) for x in items]
+                        if 'variables' in key or 'sites' in key:
+                            cfg[section][key] = [str(x) for x in items]
                         else:
-                            # Keep as comma-separated string for string lists
+                            # Keep as comma-separated string for string lists (except sites)
                             if 'hist_fincl' in key:
                                 # Special handling for hist_fincl to keep quotes
                                 items = [f"'{x}'" for x in items]
-                            cfg[section][key] = ', '.join(items)
-            elif value.isdigit():
-                cfg[section][key] = int(value)
-            elif value.replace('.', '').replace('-', '').isdigit():
-                cfg[section][key] = float(value)
-            else:
-                cfg[section][key] = value if value else None
-    
+                            cfg[section][key] = ', '.join(items)    
     return cfg
 
 def main():
@@ -130,12 +130,11 @@ def main():
     # FATES options
     use_fates = cfg['biogeochemistry'].get('use_fates', False)
     if use_fates:
-        if 'fates_pft' not in cfg['fates']:
+        if 'fates_pft' not in cfg['biogeochemistry']:
             raise ValueError("FATES PFT configuration missing in the config file.")
         else:
-            fates_pft = cfg['fates']['fates_pft']
-        pft_duplicates = cfg['fates'].get('pft_duplicates', 1)
-
+            fates_pft = cfg['biogeochemistry']['fates_pft']
+        pft_duplicates = cfg['biogeochemistry'].get('pft_duplicates', 1)
     # Crop options
     use_crop = cfg['biogeochemistry'].get('use_crop', False)
 
@@ -339,6 +338,9 @@ def main():
             res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir)
+        #Save the other site names in first site's cases (for use in multi-site calibration)
+        if site == sites[0]:
+            cases[c].all_sites = [s for s in sites]
 
         # Create the case
         cases[c].create_case()
@@ -413,6 +415,7 @@ def main():
                         yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir)
         else:
             cases[c].postproc_vars=[]
+        print('Postproc_vars: '+str(cases[c].postproc_vars))
 
         # Set up the case (surface, domain and pftdata)
         print('Setting up case for site: '+site)

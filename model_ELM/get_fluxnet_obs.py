@@ -2,7 +2,7 @@ import numpy as np
 import os
 from netCDF4 import Dataset
 
-def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', myobsdir=''):
+def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', myobsdir='', valid_months=[]):
   #myvars = ['TBOT','FSDS','WS','RAIN','VPD','NEE','GPP','ER','EFLX_LH_TOT','FSH']
   #myvars   = ['FPSN','FSH','EFLX_LH_TOT']
 
@@ -41,6 +41,7 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
           myobs_input.close
           nrows = thisrow-1
 
+        print(ystart, yend)
         nrows = (yend-ystart+1)*nstep
         myobs = np.zeros([nrows],float)
         myobs_err = np.zeros([nrows],float)
@@ -61,7 +62,8 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
                     if (h.strip() == vars_unc[vnum]):
                       tempob_err = float(myvals[thiscol])
                     if (h.strip() == vars_qc[vnum]):
-                      if float(myvals[thiscol]) > 0.8 and int(myvals[0][4:8]) != 229:
+                      #if float(myvals[thiscol]) > 0.8 and int(myvals[0][4:8]) != 229:
+                      if int(myvals[0][4:8]) != 229:
                         isgood=True  #only advance if quality flag > 80, not leap day%
                     thiscol=thiscol+1
                   if (isgood):
@@ -69,16 +71,29 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
                     myobs_err[thisob] = tempob_err
                     if fluxnet_var == 'FPSN' or fluxnet_var == 'GPP':
                        myobs_err[thisob] = max(myobs_err[thisob], 1.0)
+                    if fluxnet_var == 'EFLX_LH_TOT':
+                       myobs_err[thisob] = max(myobs_err[thisob], 10.0)  
                   else:
                     myobs[thisob] = -9999
                     myobs_err[thisob] = -9999
-                  thisob=thisob+1
+                  if (int(myvals[0][4:8]) != 229):
+                    #only increment if not leap day
+                    thisob=thisob+1
             thisrow=thisrow+1
         self.obs[vars_elm[vnum]]=myobs
         self.obs_err[vars_elm[vnum]]=myobs_err
+        if (tstep == 'monthly' and valid_months != []):
+            print('Masking out months not in valid_months')
+            nmonths = len(self.obs[vars_elm[vnum]])
+            nyrs = int(nmonths/12)
+            mymask = np.zeros([nmonths],bool)
+            for m in valid_months:
+              for y in range(0,nyrs):
+                mymask[y*12+(m-1)] = True
+            self.obs[vars_elm[vnum]][~mymask] = -9999
+            self.obs_err[vars_elm[vnum]][~mymask] = -9999
         if (tstep == 'daily'):
            #Shift obs by 1 day (Model timestamp repsresents previous day)
            self.obs[vars_elm[vnum]] = np.roll(self.obs[vars_elm[vnum]], 1)
            self.obs_err[vars_elm[vnum]] = np.roll(self.obs_err[vars_elm[vnum]], 1)
-        print(vars_elm[vnum]+' observations read for '+site+' for '+str(ystart)+' to '+str(yend))
-        myobs_in.close()
+   

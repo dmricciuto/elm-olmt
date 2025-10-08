@@ -46,7 +46,7 @@ def create_samples(self,sampletype='monte_carlo',nsamples=100,parm_list=''):
     os.system('mkdir -p parm_samples')
     np.savetxt(self.ensemble_file,np.transpose(self.samples))
 
-def create_ensemble_script(self, walltime=6):
+def create_ensemble_script(self, walltime=24):
     #Create the PBS script we will submit to run the ensemble
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
@@ -84,7 +84,7 @@ def create_ensemble_script(self, walltime=6):
     os.system('chmod u+x case.submit_ensemble')
     self.rundir_UQ = self.runroot+'/UQ/'+self.casename
 
-def create_multisite_script(self,sites,scriptdir, walltime=6):
+def create_multisite_script(self,sites,scriptdir, walltime=24):
     #Create the PBS script we will submit to run multiple sites
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
@@ -138,7 +138,8 @@ def create_multisite_script(self,sites,scriptdir, walltime=6):
                 myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
                     self.finidat+' --var '+var+' --val '+value+'\n')
       if (self.noslurm):
-        myfile.write(self.exeroot+'/e3sm.exe > '+self.rundir+'/e3sm_log.txt &\n\n')
+        myfile.write('mpiexec -n '+str(self.np)+' '+self.exeroot+'/e3sm.exe > '+ \
+           self.rundir+'/e3sm_log.txt &\n\n')
       else:
         myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
                 self.rundir+'/e3sm_log.txt &\n\n')
