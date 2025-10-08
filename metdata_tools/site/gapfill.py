@@ -3,7 +3,7 @@ import numpy as np
 
 def diurnal_mean(var, window=10, npd=24):
 
-  diurnal_mean = np.zeros([365,npd], np.float)
+  diurnal_mean = np.zeros([365,npd], float)
   for d in range(0,365):
     for h in range(0,npd):
       diurnal_mean[d,h] = np.nanmean(var[max(d-window,0)*npd+h:min(d+window,364)*npd+h:npd])

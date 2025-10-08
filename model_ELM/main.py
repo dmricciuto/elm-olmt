@@ -376,6 +376,8 @@ class ELMcase():
         pftdynfile = self.case_options['pftdynfile']
     elif ('flanduse_timeseries' in self.case_options.keys()):
         pftdynfile = self.case_options['flanduse_timeseries']
+        if pftdynfile == '':
+            self.nopftdyn = True
     if (domainfile == '' and makedomain):
       self.makepointdata(self.domain_global)
     if (surffile == '' and makesurfdat):

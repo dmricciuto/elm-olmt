@@ -33,7 +33,10 @@ def load_config(config_file):
                     if 'variables' in key:
                         cfg[section][key] = [value] 
                     else:
-                        cfg[section][key] = value if value else None
+                        if value:
+                            cfg[section][key] = value 
+                        else:
+                            cfg[section][key] = ''
             else:
                 # Handle comma-separated lists
                 items = [x.strip().strip('\'"') for x in value.split(',')]
