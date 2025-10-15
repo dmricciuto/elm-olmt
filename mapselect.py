@@ -53,7 +53,8 @@ class CartopyMapSelector:
                 self.ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
         else:
             # Default: whole globe
-            self.ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
+            self.ax.set_extent(initial_bounds if initial_bounds else [-180, 180, -90, 90], crs=ccrs.PlateCarree())
+            #self.ax.set_extent([-180, 180, -90, 90], crs=ccrs.PlateCarree())
 
         # Overlay Cartopy features.
         self.ax.add_feature(cfeature.LAND, facecolor='lightgray')
@@ -75,12 +76,14 @@ class CartopyMapSelector:
         gl.ylocator = mticker.FixedLocator(range(-90, 91, 15))
 
         # Create the interactive RectangleSelector with customized rectangle properties.
+        minspanx = 0.01 * abs(initial_bounds[1] - initial_bounds[0]) if initial_bounds else 5
+        minspany = 0.01 * abs(initial_bounds[3] - initial_bounds[2]) if initial_bounds else 5
         rectprops = dict(facecolor='red', edgecolor='red', alpha=0.5, fill=True, zorder=1000)
         self.rectangle_selector = RectangleSelector(
             self.ax, self.onselect,
             useblit=False,          # Disable blitting for better compatibility.
             button=[1],             # Left mouse button only.
-            minspanx=5, minspany=5,
+            minspanx=minspanx, minspany=minspany,
             spancoords='data',
             interactive=True,
             props=rectprops
@@ -88,10 +91,10 @@ class CartopyMapSelector:
 
         # If initial_bounds are provided, draw the rectangle and set selected_bounds
         if initial_bounds is not None:
-            min_lat, max_lat, min_lon, max_lon = initial_bounds
+            min_lon, max_lon, min_lat, max_lat = initial_bounds
             # Draw rectangle: RectangleSelector expects (x1, y1, x2, y2)
             self.rectangle_selector.extents = (min_lon, max_lon, min_lat, max_lat)
-            self.selected_bounds = (min_lat, max_lat, min_lon, max_lon)
+            self.selected_bounds = (min_lon, max_lon, min_lat, max_lat)
 
         # Embed the Matplotlib figure in the Tkinter Toplevel window.
         self.canvas = FigureCanvasTkAgg(self.fig, master=self.top)
@@ -155,8 +158,11 @@ class CartopyMapSelector:
         # Sort the coordinates to determine bounds.
         min_lon, max_lon = sorted([x1, x2])
         min_lat, max_lat = sorted([y1, y2])
-        self.selected_bounds = (min_lat, max_lat, min_lon, max_lon)
+        self.selected_bounds = (min_lon, max_lon, min_lat, max_lat)
         print("Selection updated:", self.selected_bounds)
+        # Keep the rectangle visible
+        self.rectangle_selector.extents = (min_lon, max_lon, min_lat, max_lat)
+        self.canvas.draw_idle()
 
     def on_click(self, event):
         if event.inaxes != self.ax:
@@ -202,7 +208,7 @@ class CartopyMapSelector:
             self.callback(selected)
         elif self.selected_bounds is not None and self.sites:
             # User drew a box and sites are present: return all sites in the box
-            min_lat, max_lat, min_lon, max_lon = self.selected_bounds
+            min_lon, max_lon, min_lat, max_lat = self.selected_bounds
             selected = []
             for site in self.sites:
                 lat = site["lat"]
@@ -249,7 +255,7 @@ class ExampleApp(tk.Tk):
 
     def open_map_selector(self):
         """Open the Cartopy map selector and update the lat/lon entries with the selection."""
-        def update_bounds(min_lat, max_lat, min_lon, max_lon):
+        def update_bounds(min_lon, max_lon, min_lat, max_lat):
             self.lat_min_entry.delete(0, tk.END)
             self.lat_min_entry.insert(0, f"{min_lat:.2f}")
             self.lat_max_entry.delete(0, tk.END)

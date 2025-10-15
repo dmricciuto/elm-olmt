@@ -43,7 +43,7 @@ else:
             dailytomonthly = True
         elif (mycase.postproc_freq.lower() == 'annual'):
             annualmean = True
-        mycase.postproc(v, index=0, gindex=0, startyear=mycase.postproc_startyear, \
+        mycase.postprocess(v, index=0, gindex=0, startyear=mycase.postproc_startyear, \
                 endyear=mycase.postproc_endyear, hnum=hnum, \
                 dailytomonthly=dailytomonthly, annualmean=annualmean,  \
                 meanseasonalcycle=meanseasonalcycle, xindex=0,yindex=0, plot=True)

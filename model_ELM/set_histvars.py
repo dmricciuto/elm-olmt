@@ -4,7 +4,7 @@ import numpy
 
 def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
    if (spinup>0):
-      var_list_spinup = ['PPOOL', 'EFLX_LH_TOT', 'RETRANSN', 'PCO2', 'PBOT', 'NDEP_TO_SMINN', 'OCDEP', \
+      var_list_spinup = ['PPOOL', 'EFLX_LH_TOT', 'RETRANSN', 'PCO2', 'PBOT', 'TBOT','FSDS','NDEP_TO_SMINN', 'OCDEP', \
                     'BCDEP', 'COL_FIRE_CLOSS', 'HDM', 'LNFM', 'NEE', 'GPP', 'FPSN', 'AR', 'HR', \
                     'MR', 'GR', 'ER', 'NPP', 'TLAI', 'SOIL3C', 'TOTSOMC', 'TOTSOMC_1m', 'LEAFC', \
                     'DEADSTEMC', 'DEADCROOTC', 'FROOTC', 'LIVESTEMC', 'LIVECROOTC', 'TOTVEGC', 'N_ALLOMETRY','P_ALLOMETRY',\
@@ -12,7 +12,7 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                     'QRUNOFF', 'FPI', 'FPI_vr', 'FPG', 'FPI_P','FPI_P_vr', 'FPG_P', 'CPOOL','NPOOL', 'PPOOL', 'SMINN', 'HR_vr']
       if ('ICBELMBC' in self.compset):
         var_list_spinup = ['FPSN','TLAI','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','RH2M','TSA','FSDS','FLDS','PBOT', \
-                         'WIND','BTRAN','DAYL','T10','QBOT']
+                         'WIND','BTRAN','DAYL','T10','QBOT','TBOT']
 
 
      #if (self.C14):
@@ -38,8 +38,9 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
           self.customize_namelist(variable='hist_nhtfrq',value=str(self.nyears_spinup*-8760)+','+str(self.nyears_spinup*-8760))
       else:
         if (not self.postproc_vars):
-          self.customize_namelist(variable='hist_mfilt',value='365')
-          self.customize_namelist(variable='hist_nhtfrq',value='-24')
+          #Annual output if no postproc vars
+          self.customize_namelist(variable='hist_mfilt',value='1')
+          self.customize_namelist(variable='hist_nhtfrq',value='-8760')
         else:
           vst_pp=''
           vst_pp_pft=''
