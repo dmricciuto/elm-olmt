@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import sys
+import re, sys
 import model_ELM
 from OLMTutils import get_machine_info, get_site_info, get_point_list, get_default_diag_vars
 import os
@@ -9,17 +9,20 @@ import argparse
 
 def load_config(config_file):
     """Load configuration from file and return as dictionary"""
-    config = configparser.ConfigParser()
+    config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
     config.read(config_file)
     
     # Convert to nested dictionary for easier access
     cfg = {}
     for section in config.sections():
         cfg[section] = {}
-        for key, value in config.items(section):
+        for key, value in config.items(section, raw=False):
             # Strip quotes from the value first
             value = value.strip().strip('\'"')
-            
+            # Skip conversion for specific keys
+            if key == 'startdate_add_co2':
+                cfg[section][key] = str(value)
+                continue
             # Handle different data types
             if value.lower() in ['true', 'false']:
                 cfg[section][key] = value.lower() == 'true'
@@ -56,8 +59,63 @@ def load_config(config_file):
                             if 'hist_fincl' in key:
                                 # Special handling for hist_fincl to keep quotes
                                 items = [f"'{x}'" for x in items]
-                            cfg[section][key] = ', '.join(items)    
+                            cfg[section][key] = ', '.join(items)
+            elif value.isdigit():
+                cfg[section][key] = int(value)
+            elif value.replace('.', '').replace('-', '').isdigit():
+                cfg[section][key] = float(value)
+            else:
+                cfg[section][key] = value if value else None
+
+    cfg = resolve_placeholders(cfg)
     return cfg
+
+
+def resolve_placeholders(cfg):
+    """Resolve %(variable)s placeholders in the configuration dictionary."""
+    placeholder_pattern = re.compile(r"%\(([^)]+)\)s")
+    
+    for section, options in cfg.items():
+        for key, value in options.items():
+            if isinstance(value, str):
+                # Replace placeholders in the string
+                matches = placeholder_pattern.findall(value)
+                for match in matches:
+                    # Look for the variable in all sections
+                    replacement = None
+                    for sec, opts in cfg.items():
+                        if match in opts:
+                            replacement = opts[match]
+                            break
+                    if replacement is not None:
+                        value = value.replace(f"%({match})s", str(replacement))
+                cfg[section][key] = value
+    return cfg
+
+def process_treatment_options(cfg):
+    """Process treatment options and create lists for each treatment."""
+    treatments = []
+    treatment_data = {}
+
+    # Extract global options from the [treatment_options] section
+    global_options = cfg.get('treatment_options', {})
+
+    # Iterate through all sections to find treatment-specific options
+    for section in cfg:
+        # Skip the [treatment_options] section
+        if section == 'treatment_options':
+            continue
+
+        # Process sections that start with "treatment"
+        if section.startswith('treatment'):
+            treatment_name = cfg[section].get('name', f"Unnamed_{section}")
+            treatments.append(treatment_name)
+            treatment_data[treatment_name] = global_options.copy()  # Start with global options
+
+            # Add case-specific options from the current treatment section
+            for key, value in cfg[section].items():
+                treatment_data[treatment_name][key] = value
+    return treatments, treatment_data
 
 def main():
     parser = argparse.ArgumentParser(description='Run ELM BGC simulations')
@@ -154,9 +212,9 @@ def main():
     # Post-processing
     if ('postprocessing' in cfg):
         postproc_vars = cfg['postprocessing'].get('variables', get_default_diag_vars(nutrients, use_fates))
-        postproc_startyear = cfg['postprocessing']['startyear']
-        postproc_endyear = cfg['postprocessing']['endyear']
-        postproc_freq = cfg['postprocessing']['frequency']
+        postproc_startyear = cfg['postprocessing'].get('startyear', 1850)
+        postproc_endyear = cfg['postprocessing'].get('endyear', 2014)
+        postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
 
     # Ensemble options
     if ('ensemble' in cfg):
@@ -167,9 +225,6 @@ def main():
             ensemble_file = cfg['ensemble'].get('ensemble_file','')
     else:
         parm_list = ''
-
-    # Treatment options
-    #nyears_treatment = cfg['treatments']['nyears_treatment']
 
     # Observations 
     has_obs = False
@@ -192,14 +247,18 @@ def main():
     
     if 'case_options' in cfg:
         case_options = cfg['case_options'].copy()
+        #print('Case options:')
+        #for key, value in case_options.items():
+        #    print(f"  {key}: {value}")  
    
     if 'add_parameter' in cfg:
         add_parameter = cfg['add_parameter'].copy()
 
     if 'treatment_options' in cfg:
-        treatment_options = cfg['treatment_options'].copy()
-        nyears_treatment = cfg['treatment_options']['nyears']
-    
+        treatments, treatment_options = process_treatment_options(cfg)
+    else:
+        treatments = []
+        
     # Wipe the temp directory
     #APW this might be  throwing an error where temp doesn't exist (but also when trying to copy files to temp) 
     os.system('rm temp/*')
@@ -299,14 +358,13 @@ def main():
         ensemble=True
 
     # Add treatment cases
-    if ('suffix' in treatment_options.keys()):
-        for t in range(0,len(treatment_options['suffix'])):
-            nyears.append(nyears_treatment)
-            istreatment = np.append(istreatment, 1)
-            depends = np.append(depends, ncases_pretreatment-1)
-            compsets.append(compsets[-1])
-            suffix.append(treatment_options['suffix'][t])
-            startyear.append(startyear_treatment)
+    for t in treatments:
+        nyears.append(treatment_options[t]['nyears'])
+        istreatment = np.append(istreatment, 1)
+        depends = np.append(depends, ncases_pretreatment-1)
+        compsets.append(compsets[-1])
+        suffix.append(treatment_options[t]['name'])
+        startyear.append(run_startyear+nyears_trans)
 
     print('\nELM simulation info:')
     multisite_scripts=[]
@@ -317,8 +375,8 @@ def main():
             print('   Simulation length:        '+str(nyears[c]))
         multisite_scripts.append('')
         if (istreatment[c]):
-            print('   Treatment:                '+ \
-                    treatment_options['suffix'][c-ncases_pretreatment])
+            tname = suffix[c]
+            print('   Treatment:                '+tname)
         print('\n')
     if (ensemble):
         print('Ensemble size:  '+str(nsamples))
@@ -360,8 +418,9 @@ def main():
 
         # Add the treatment options (must be list format)
         if (istreatment[c]):
-            for key in treatment_options.keys():
-                cases[c].case_options[key] = treatment_options[key][c-ncases_pretreatment]
+            tname = suffix[c]
+            for key in treatment_options[tname].keys():
+                cases[c].case_options[key] = treatment_options[tname][key]
         # Other options
         cases[c].nutrients = nutrients
         cases[c].nutrient_comp = nutrient_comp
@@ -383,6 +442,10 @@ def main():
         if ('phase2' in suffix[c]):
             # Set the starting year from the last case
             cases[c].startyear = cases[c-1].startyear+cases[c-1].run_n
+        if (istreatment[c]):
+            tname = suffix[c]
+            if 'metdir' in treatment_options[tname].keys():
+                metdir = treatment_options[tname]['metdir']
         if (metdir != ''):
             cases[c].get_forcing(mettype=mettype, metdir=metdir)
         else:

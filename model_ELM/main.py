@@ -641,13 +641,13 @@ class ELMcase():
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
-              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'variable']
+              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'variable', 'name', 'nyears']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
             if (isinstance(self.case_options[key], str) and not ('hist_' in key) \
                     and not '.true.' in self.case_options[key] and \
-                    not '.false.' in self.case_options[key] and not ('add_co2' in key)):
+                    not '.false.' in self.case_options[key] and (key != 'add_co2')):
                 #Make these strings
                 self.customize_namelist(variable=key,value="'"+self.case_options[key]+"'")
             else:
