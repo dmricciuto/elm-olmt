@@ -60,12 +60,6 @@ def load_config(config_file):
                                 # Special handling for hist_fincl to keep quotes
                                 items = [f"'{x}'" for x in items]
                             cfg[section][key] = ', '.join(items)
-            elif value.isdigit():
-                cfg[section][key] = int(value)
-            elif value.replace('.', '').replace('-', '').isdigit():
-                cfg[section][key] = float(value)
-            else:
-                cfg[section][key] = value if value else None
 
     cfg = resolve_placeholders(cfg)
     return cfg
