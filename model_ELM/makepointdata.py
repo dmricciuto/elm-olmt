@@ -72,7 +72,7 @@ def subset_netcdf(self, index, input_file, output_file, keep2d=False):
     # Load the input NetCDF file
     original_ds = xr.open_dataset(input_file, mode='r')
     #subset_ds = xr.Dataset()
-    print(index, input_file)
+    #print(index, input_file)
     # Select the variable and apply subsetting if specified
     for var_name, var_data in original_ds.data_vars.items():
         if ('lsmlat' in var_data.dims and 'lsmlon' in var_data.dims):

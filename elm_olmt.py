@@ -246,7 +246,15 @@ def main():
         #    print(f"  {key}: {value}")  
    
     if 'parameters' in cfg:
-        add_parameter = cfg['parameters'].copy()
+        all_parameters = cfg['parameters'].copy()
+        # Split parameters into ELM and FATES based on prefix
+        add_parameter = {}
+        add_fates_parameter = {}
+        for key, value in all_parameters.items():
+            if key.startswith('fates_'):
+                add_fates_parameter[key] = value
+            else:
+                add_parameter[key] = value
 
     if 'treatment_options' in cfg:
         treatments, treatment_options = process_treatment_options(cfg)
@@ -430,6 +438,7 @@ def main():
             cases[c].paramfile = case_options['paramfile']
         if 'parameters' in cfg:
             cases[c].add_parameter = add_parameter
+            cases[c].add_fates_parameter = add_fates_parameter
 
         # Get forcing information
         print('Getting forcing information')

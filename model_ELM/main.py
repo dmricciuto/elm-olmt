@@ -225,6 +225,107 @@ class ELMcase():
             value = line.split('=')[1]
     return value[:-1]   #avoid new line character
 
+  def modify_parameter_file(self, param_file_path, parameters, file_description="parameter"):
+    """
+    Modify parameters in a NetCDF parameter file.
+    """
+    import netCDF4
+    from datetime import datetime
+    
+    with netCDF4.Dataset(param_file_path, 'a') as nc:
+        for key, value in parameters.items():
+            if key in nc.variables:
+                # Parameter exists - modify it
+                print(f"Modifying existing {file_description}: {key}")
+                
+                # Check dimensions of the variable
+                var = nc.variables[key]
+                var_dims = var.dimensions  
+                var_shape = var.shape
+
+                if isinstance(value, list):
+                    # Handle list: indices and values
+                    if len(value) % 2 != 0:
+                        print(f"Warning: {key} list has odd length, ignoring last element")
+                    # Check if first index is -1 (set all indices)
+                    if len(value) >= 2 and int(value[0]) == -1:
+                        if len(value) > 2:
+                            print(f"Error: {key} has index -1 but more than 2 values in list. Use [-1, value] only.")
+                            continue
+                        # Set all indices to the same value
+                        all_value = value[1]
+                        print(f"  Setting all indices = {all_value}")
+                        nc.variables[key][...] = all_value
+                    else:
+                        # Check if variable is 2D
+                        if len(var_shape) == 2:
+                            # 2D parameter: expect pairs of [index1, index2, value]
+                            if len(value) % 3 != 0:
+                                print(f"Error: {key} is 2D but values not in groups of 3 [index1, index2, value]")
+                                continue
+                            for i in range(0, len(value), 3):
+                                if i + 2 >= len(value):
+                                    break
+                                idx1 = int(value[i])
+                                idx2 = int(value[i+1]) 
+                                param_value = value[i+2]
+                                if idx1 < 0 or idx2 < 0:
+                                    print(f"Error: {key} has negative indices [{idx1}, {idx2}]. Use -1 only to set all.")
+                                    continue
+                                if idx1 >= var_shape[0] or idx2 >= var_shape[1]:
+                                    print(f"Error: {key} indices [{idx1}, {idx2}] exceed dimensions {var_shape}")
+                                    continue
+                                print(f"  Setting [{idx1}, {idx2}] = {param_value}")
+                                nc.variables[key][idx1, idx2] = param_value
+                        elif len(var_shape) == 1:
+                            # 1D parameter: expect pairs of [index, value]
+                            for i in range(0, len(value)-1, 2):
+                                idx = int(value[i])
+                                param_value = value[i+1]
+                                if idx < 0:
+                                    print(f"Error: {key} has negative index {idx}. Use -1 only to set all.")
+                                    continue
+                                if idx >= var_shape[0]:
+                                    print(f"Error: {key} index {idx} exceeds dimension {var_shape[0]}")
+                                    continue
+                                print(f"  Setting index {idx} = {param_value}")
+                                nc.variables[key][idx] = param_value
+                        else:
+                            print(f"Error: {key} has {len(var_shape)}D shape - only 1D and 2D parameters supported")
+                            continue
+                else:
+                    # Scalar value - set all elements
+                    nc.variables[key][...] = value
+            else:
+                # Parameter doesn't exist - create it
+                print(f"Creating new {file_description}: {key}")
+                if isinstance(value, list):
+                    print(f"Warning: Cannot create new parameter {key} with index-specific values. Use scalar for new parameters.")
+                    continue
+                dtype = 'f4' if isinstance(value, float) else 'i4'  
+                nc.createVariable(key, dtype, ())
+                nc.variables[key][...] = value
+        
+        # Add metadata about original filename and modifications
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Update global attributes
+        nc.setncattr(f'original_{file_description.replace(" ", "_")}_file', 
+                    getattr(self, 'paramfile' if 'parameter' in file_description else 'fates_paramfile', 'unknown'))
+        nc.setncattr('modified_by_OLMT', timestamp)
+        nc.setncattr('case_name', getattr(self, 'casename', 'unknown'))
+        
+        modified_params = ', '.join(parameters.keys())
+        nc.setncattr(f'modified_{file_description.replace(" ", "_")}s', modified_params)
+        
+        # Update or add history attribute
+        original_file = getattr(self, 'paramfile' if 'parameter' in file_description else 'fates_paramfile', 'unknown')
+        history_entry = f"{timestamp}: Modified {file_description}s by OLMT from {original_file}"
+        if hasattr(nc, 'history'):
+            nc.setncattr('history', nc.getncattr('history') + '\n' + history_entry)
+        else:
+            nc.setncattr('history', history_entry)
+
   def set_param_file(self):
     #set the ELM parameter file
     if (self.paramfile == ''):
@@ -235,68 +336,8 @@ class ELMcase():
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
-      import netCDF4
-      param_path = self.OLMTdir + '/temp/clm_params.nc'
-      with netCDF4.Dataset(param_path, 'a') as nc:
-        for key, value in self.add_parameter.items():
-          if key in nc.variables:
-            # Parameter exists - modify it
-            print(f"Modifying existing parameter: {key}")
-            if isinstance(value, list):
-              # Handle list: odd indices are PFTs, even indices are values
-              if len(value) % 2 != 0:
-                print(f"Warning: {key} list has odd length, ignoring last element")
-              # Check if first PFT index is -1 (set all indices)
-              if len(value) >= 2 and int(value[0]) == -1:
-                if len(value) > 2:
-                  print(f"Error: {key} has PFT index -1 but more than 2 values in list. Use [-1, value] only.")
-                  continue
-                # If PFT index is -1, set all indices to the same value
-                all_value = value[1]
-                print(f"  Setting all PFTs = {all_value}")
-                nc.variables[key][...] = all_value
-              else:
-                # Normal PFT-specific assignment
-                for i in range(0, len(value)-1, 2):
-                  pft_idx = int(value[i])      # PFT index
-                  if pft_idx < 0:
-                    print(f"Error: {key} has negative PFT index {pft_idx}. Use -1 only to set all PFTs.")
-                    continue
-                  pft_value = value[i+1]       # Value for that PFT
-                  print(f"  Setting PFT {pft_idx} = {pft_value}")
-                  nc.variables[key][pft_idx] = pft_value
-            else:
-              # Scalar value - set all elements
-              nc.variables[key][...] = value
-          else:
-            # Parameter doesn't exist - create it
-            print(f"Creating new parameter: {key}")
-            if isinstance(value, list):
-              print(f"Warning: Cannot create new parameter {key} with PFT-specific values. Use scalar for new parameters.")
-              continue
-            dtype = 'f4' if isinstance(value, float) else 'i4'  
-            nc.createVariable(key, dtype, ())
-            nc.variables[key][...] = value
-        
-        # Add metadata about original filename and modifications
-        from datetime import datetime
-        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-        
-        # Update global attributes
-        nc.setncattr('original_paramfile', self.paramfile)
-        nc.setncattr('modified_by_OLMT', timestamp)
-        nc.setncattr('case_name', getattr(self, 'casename', 'unknown'))
-        
-        if hasattr(self, 'add_parameter') and self.add_parameter:
-            modified_params = ', '.join(self.add_parameter.keys())
-            nc.setncattr('modified_parameters', modified_params)
-        
-        # Update or add history attribute
-        history_entry = f"{timestamp}: Modified by OLMT from {self.paramfile}"
-        if hasattr(nc, 'history'):
-            nc.setncattr('history', nc.getncattr('history') + '\n' + history_entry)
-        else:
-            nc.setncattr('history', history_entry)
+        param_path = self.OLMTdir + '/temp/clm_params.nc'
+        self.modify_parameter_file(param_path, self.add_parameter, "parameter")
 
   def set_CNP_param_file(self,filename=''):
     if (filename == ''):
@@ -336,6 +377,11 @@ class ELMcase():
         else:
             os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
                 self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')
+
+    # Apply FATES parameter modifications
+    if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
+        fates_param_path = self.OLMTdir + '/temp/fates_paramfile.nc'
+        self.modify_parameter_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
 
   def set_finidat_file(self, finidat_case='', finidat_year=0, finidat=''):
       if (finidat_case != ''):
@@ -614,8 +660,8 @@ class ELMcase():
         self.set_fates_param_file()
         self.set_param_file()
     else:
-        if (not 'paramfile' in self.case_options.keys()):
-            self.set_param_file()
+        #if (not 'paramfile' in self.case_options.keys()):
+        self.set_param_file()
     if (not 'fsoilordercon' in self.case_options.keys()):
         self.set_CNP_param_file()
     #get the default surface and domain files (to pass to makepointdata)
@@ -665,8 +711,8 @@ class ELMcase():
       self.set_histvars()
     else:
       self.set_histvars(spinup=True)
-    if (not 'paramfile' in self.case_options.keys()):
-        self.customize_namelist(variable='paramfile',value="'"+self.rundir+"/clm_params.nc'")
+    #if (not 'paramfile' in self.case_options.keys()):
+    self.customize_namelist(variable='paramfile',value="'"+self.rundir+"/clm_params.nc'")
     if (not 'fsoilordercon' in self.case_options.keys()):
       self.customize_namelist(variable='fsoilordercon',value="'"+self.rundir+"/CNP_parameters.nc'")
     #Fates options - TODO add nutrient/parteh options
@@ -693,7 +739,7 @@ class ELMcase():
         self.customize_namelist(variable='aero_file', value="'"+self.inputdata_path+"/atm/cam/chem/" \
                 +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
-    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','fates_paramfile', \
+    keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
               'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'variable', 'name', 'nyears']
     #Custom namelist options
@@ -799,8 +845,8 @@ class ELMcase():
           self.modify_datm_streamfiles()
       #Copy customized parameter, surface and domain files to run directory
       os.system('mkdir -p '+self.OLMTdir+'/temp')
-      if (not 'paramfile' in self.case_options.keys()):
-        os.system('cp '+self.OLMTdir+'/temp/clm_params.nc '+self.rundir)
+      #if (not 'paramfile' in self.case_options.keys()):
+      os.system('cp '+self.OLMTdir+'/temp/clm_params.nc '+self.rundir)
       if (not 'fsoilordercon' in self.case_options.keys()):
         os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
       if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
