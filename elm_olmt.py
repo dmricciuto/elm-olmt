@@ -245,8 +245,8 @@ def main():
         #for key, value in case_options.items():
         #    print(f"  {key}: {value}")  
    
-    if 'add_parameter' in cfg:
-        add_parameter = cfg['add_parameter'].copy()
+    if 'parameters' in cfg:
+        add_parameter = cfg['parameters'].copy()
 
     if 'treatment_options' in cfg:
         treatments, treatment_options = process_treatment_options(cfg)
@@ -428,7 +428,7 @@ def main():
             cases[c].fates_paramfile = case_options['fates_paramfile']
         if ('paramfile' in case_options):
             cases[c].paramfile = case_options['paramfile']
-        if ('add_parameter' in cfg):
+        if 'parameters' in cfg:
             cases[c].add_parameter = add_parameter
 
         # Get forcing information

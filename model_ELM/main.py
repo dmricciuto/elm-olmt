@@ -233,16 +233,70 @@ class ELMcase():
     print('Parameter file: '+self.paramfile)
     #Copy the parameter file to the temp directory 
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
+
     if hasattr(self, 'add_parameter') and self.add_parameter:
       import netCDF4
       param_path = self.OLMTdir + '/temp/clm_params.nc'
       with netCDF4.Dataset(param_path, 'a') as nc:
         for key, value in self.add_parameter.items():
-          # Assume variable does not exist and is scalar
-          dtype = 'f4' if isinstance(value, float) else 'i4'  
-          nc.createVariable(key, dtype, ())
-          nc.variables[key][...] = value
-    #TODO - add metadata to the copied file about original filename
+          if key in nc.variables:
+            # Parameter exists - modify it
+            print(f"Modifying existing parameter: {key}")
+            if isinstance(value, list):
+              # Handle list: odd indices are PFTs, even indices are values
+              if len(value) % 2 != 0:
+                print(f"Warning: {key} list has odd length, ignoring last element")
+              # Check if first PFT index is -1 (set all indices)
+              if len(value) >= 2 and int(value[0]) == -1:
+                if len(value) > 2:
+                  print(f"Error: {key} has PFT index -1 but more than 2 values in list. Use [-1, value] only.")
+                  continue
+                # If PFT index is -1, set all indices to the same value
+                all_value = value[1]
+                print(f"  Setting all PFTs = {all_value}")
+                nc.variables[key][...] = all_value
+              else:
+                # Normal PFT-specific assignment
+                for i in range(0, len(value)-1, 2):
+                  pft_idx = int(value[i])      # PFT index
+                  if pft_idx < 0:
+                    print(f"Error: {key} has negative PFT index {pft_idx}. Use -1 only to set all PFTs.")
+                    continue
+                  pft_value = value[i+1]       # Value for that PFT
+                  print(f"  Setting PFT {pft_idx} = {pft_value}")
+                  nc.variables[key][pft_idx] = pft_value
+            else:
+              # Scalar value - set all elements
+              nc.variables[key][...] = value
+          else:
+            # Parameter doesn't exist - create it
+            print(f"Creating new parameter: {key}")
+            if isinstance(value, list):
+              print(f"Warning: Cannot create new parameter {key} with PFT-specific values. Use scalar for new parameters.")
+              continue
+            dtype = 'f4' if isinstance(value, float) else 'i4'  
+            nc.createVariable(key, dtype, ())
+            nc.variables[key][...] = value
+        
+        # Add metadata about original filename and modifications
+        from datetime import datetime
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+        # Update global attributes
+        nc.setncattr('original_paramfile', self.paramfile)
+        nc.setncattr('modified_by_OLMT', timestamp)
+        nc.setncattr('case_name', getattr(self, 'casename', 'unknown'))
+        
+        if hasattr(self, 'add_parameter') and self.add_parameter:
+            modified_params = ', '.join(self.add_parameter.keys())
+            nc.setncattr('modified_parameters', modified_params)
+        
+        # Update or add history attribute
+        history_entry = f"{timestamp}: Modified by OLMT from {self.paramfile}"
+        if hasattr(nc, 'history'):
+            nc.setncattr('history', nc.getncattr('history') + '\n' + history_entry)
+        else:
+            nc.setncattr('history', history_entry)
 
   def set_CNP_param_file(self,filename=''):
     if (filename == ''):
