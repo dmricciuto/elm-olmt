@@ -362,7 +362,7 @@ class ELMcase():
                         +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
                 fname_list.append(fname)
             # Open and concatenate along the 'fates_pft' dimension
-            datasets = [xr.open_dataset(f) for f in fname_list]
+            datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
             # Find variables that have 'fates_pft' as a dimension
             vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
             # Subset only those vars
@@ -373,7 +373,13 @@ class ELMcase():
             for var in vars_wo_fpft:
                 ds_concat[var] = datasets[0][var]  # Use first file's value
             ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
-            os.system('rm fates_paramfile_*.nc')
+            # Close datasets to free memory
+            for ds in datasets:
+                ds.close()
+            ds_concat.close()
+            # Clean up temporary files
+            for fname in fname_list:
+                os.remove(fname)
         else:
             os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
                 self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')

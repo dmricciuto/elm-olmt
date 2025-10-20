@@ -146,8 +146,10 @@ def create_multisite_script(self,sites,scriptdir, walltime=24):
     myfile.write('wait\n')
     myfile.write('cd '+self.OLMTdir+'\n')
     for s in sites:
+        # Check if it's a site run (single point simulation)
+        is_site_run = hasattr(self, 'site') and self.site != '' and self.site is not None
         if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename \
-            and not 'ad_spinup' in self.casename):
+            and not 'ad_spinup' in self.casename and is_site_run):
             #Assume this is a final spinup case, do spinup diagnostic plots
             myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
         elif self.postproc_vars:

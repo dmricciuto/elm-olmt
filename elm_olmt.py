@@ -206,8 +206,8 @@ def main():
     # Post-processing
     if ('postprocessing' in cfg):
         postproc_vars = cfg['postprocessing'].get('variables', get_default_diag_vars(nutrients, use_fates))
-        postproc_startyear = cfg['postprocessing'].get('startyear', 1850)
-        postproc_endyear = cfg['postprocessing'].get('endyear', 2014)
+        postproc_startyear = cfg['postprocessing'].get('startyear', run_startyear)
+        postproc_endyear = cfg['postprocessing'].get('endyear', run_startyear+nyears_trans-1)
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
 
     # Ensemble options

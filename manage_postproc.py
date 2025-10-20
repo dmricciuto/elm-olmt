@@ -32,9 +32,9 @@ if options.spinup:
 else:
     for v in mycase.postproc_vars:
         if ('_pft' in v):
-            hnum = 1 #Assume pft-level output is in h1 file
+            hnum = 2 #Assume pft-level output is in h2 file
         else:
-            hnum = 0
+            hnum = 1
         #Note, we assume daily outputs.
         annualmean = False
         dailytomonthly = False

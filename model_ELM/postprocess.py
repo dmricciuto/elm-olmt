@@ -40,7 +40,7 @@ def sorted_h0_files(directory):
 #Plot ad and final spinup together
 def plot_spinup(self, plotvars=[]):
     if not plotvars:
-        plotvars = ['NEE','TOTVEGC','TOTSOMC','GPP']
+        plotvars = ['NEE','TOTVEGC','TOTSOMC','GPP','NPP']
     fn_dir = self.rundir
     ad_dir = self.rundir.replace(self.casename,self.dependcase)
     print(fn_dir)
@@ -70,7 +70,7 @@ def plot_spinup(self, plotvars=[]):
         vals = ds_combined[v]
         vals_mean = vals.mean(dim=('lndgrid'))  # or 'gridcell' if applicable
         ylabel = v
-        if (v == 'NEE' or v == 'GPP'):
+        if (v == 'NEE' or v == 'GPP' or v == 'NPP'):
             #Convert to gC/m2/yr
             vals_mean=abs(vals_mean)*24*3600*365
         if (v == 'NEE'):
@@ -150,6 +150,13 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         else:
             units = 'g'+nutrient+'/m^2/day'
             factor = 24*3600
+    if (units == 'mm/s'):
+        if annualmean:
+            units = 'mm/yr'
+            factor = 24*3600*365.
+        else:
+            units = 'mm/day'
+            factor = 24*3600
 
     if (myoutput[var.split('_pft')[0]][:].ndim == 4):
       #2D output with vertical structure
@@ -191,9 +198,10 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         self.output['taxis'][t] = startyear+t/nperyear_out
     if (plot):
         os.system('mkdir -p '+self.rundir+'/../diagnostics')
-        plt.plot(self.output['taxis'],self.output[var_out]*factor,'k')
+        plt.plot(self.output['taxis'],self.output[var_out],'k')
         plt.ylabel(var_out+' ('+units+')')
         plt.xlabel('Years')
         plt.legend([var_out])
         plt.tight_layout()
         plt.savefig(self.rundir+'/../diagnostics/plot_'+var_out+'_'+str(startyear)+'-'+str(endyear)+'.png')
+        plt.close()

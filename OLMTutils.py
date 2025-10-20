@@ -166,7 +166,9 @@ def get_default_diag_vars(nutrients, use_fates):
     if (nutrients == 'none'):
         return ['TLAI','FPSN','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','SNOWDP','QRUNOFF','QDRAI','QOVER']
     else:
-        return ['NEE','NBP','TLAI','TOTSOMC','CWDC','TOTLITC','TOTECOSYSC','NPP','GPP','QVEGT','QVEGE','EFLX_LH_TOT']
+        return ['NEE','NBP','TLAI','TOTSOMC','CWDC','TOTLITC','TOTECOSYSC','NPP','GPP','QVEGT','QVEGE','EFLX_LH_TOT','TOTVEGC_ABG',\
+                'TOTVEGC','QOVER','QSOIL','XR','ER','AR','HR','FSH','SNOWDP','ZWT','CPOOL','NPOOL','PPOOL','FPG','FPI','NDEP_TO_SMINN', \
+                'NFIX_TO_SMINN','NEP','QDRAI','QRUNOFF']
 
 def docker_to_host_path(path):
     # Only translate if path starts with /inputdata
