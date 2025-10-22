@@ -138,6 +138,37 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
             siteinfo[sitename]['PCT_CLAY'] = float(s[:-1].split(',')[5])
         snum += 1
 
+    #Land use change information
+    for sitename in siteinfo.keys():
+        landuse_path = base + sitename + '_dynpftdata.txt'
+        if os.path.exists(landuse_path):
+            lines = readlines(landuse_path)
+            snum = 0
+            siteinfo[sitename]['transitions'] = {}
+            for s in lines:
+                if snum > 0:
+                    trans_year = s.split(',')[0]
+                    siteinfo[sitename]['transitions'][trans_year] = {}
+                    siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'] = np.zeros([npfts], float)
+                    for p in range(0, 5):
+                        pindex = int(s[:-1].split(',')[p * 2 + 2])
+                        ppct = float(s[:-1].split(',')[p * 2 + 1])
+                        harvpct = float(s[:-1].split(',')[11])
+                        if ppct > 0:
+                            if(use_crop):
+                                if (pindex < 15):
+                                    siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'][pindex] = ppct
+                                else:
+                                    siteinfo[sitename]['transitions'][trans_year]['PCT_CFT'][pindex - 15] = ppct
+                            else:
+                                siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'][pindex] = ppct
+                        siteinfo[sitename]['transitions'][trans_year]['HARVEST'] = harvpct
+                snum += 1
+        else:
+            siteinfo[sitename]['transitions'] = {}
+    
+
+
     return siteinfo
 
 def get_point_list(fname):

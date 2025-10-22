@@ -116,17 +116,43 @@ def subset_netcdf(self, index, input_file, output_file, keep2d=False):
         var_subset.to_netcdf(output_file,mode='a' if var_name != list(original_ds.data_vars)[0] else 'w')
     original_ds.close()
 
-def setpfts(self, ds, pct_pft, zerootherlandunits=True):
+def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None):
     #Set the PFTs as desired, zero out other landunits
-    #Assign PCT_NAT_PFT (should work whether 2, 3 or 4 dimensions)
-    ds['PCT_NAT_PFT'] = ds['PCT_NAT_PFT'] * 0 + pct_pft.broadcast_like(ds['PCT_NAT_PFT'])
+    #If year is specified, set PCT_NAT_PFT for that year and all years after
+    if year is not None and 'time' in ds.dims:
+        # Find the time index for the specified year
+        years = ds['time'].values
+        # Handle different time formats (years since reference, actual years, etc.)
+        if hasattr(ds['time'], 'units') and 'since' in ds['time'].units:
+            # Convert from time units to actual years
+            import pandas as pd
+            time_dates = pd.to_datetime(ds['time'].values, unit='D', origin=ds['time'].units.split('since')[1].strip())
+            actual_years = time_dates.year.values
+        else:
+            # Assume time values are already years
+            actual_years = years.astype(int)
+        # Find the index where year >= specified year
+        year_indices = np.where(actual_years >= year)[0]
+        if len(year_indices) == 0:
+            print(f"Warning: Year {year} not found in dataset. No PFT changes applied.")
+            return ds
+        print(f"Setting PFT transition in year {year}")
+        # Set PCT_NAT_PFT for the specified year and all years after
+        for time_idx in year_indices:
+            ds['PCT_NAT_PFT'][time_idx, :] = pct_pft.broadcast_like(ds['PCT_NAT_PFT'][time_idx, :])
+    else:
+        # Original behavior - set for all times/no time dimension
+        ds['PCT_NAT_PFT'] = ds['PCT_NAT_PFT'] * 0 + pct_pft.broadcast_like(ds['PCT_NAT_PFT'])
+        
     #Assume we want to zero the other land units
     if (zerootherlandunits):
         ds['PCT_NATVEG'][:] = 100.0
-        print('Zeroing out other landunits')
+        #print('Zeroing out other landunits')
         nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_CROP','PCT_GLACIER']
         for v in nonveg:
-            ds[v][:] = 0.0
+            if v in ds.variables:
+                ds[v][:] = 0.0
+    
     return ds
 
             
@@ -201,8 +227,22 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                   ds['APATITE_P'][:]   = 0.1
                   ds['SECONDARY_P'][:] = 1.0
                   ds['OCCLUDED_P'][:]  = 1.0
-
-            #else:  TODO - handle land use transitions
+            else:  #handle land use transitions
+                #zero harvest
+                ds['HARVEST_VH1'][:] = 0.0
+                ds['HARVEST_VH2'][:] = 0.0
+                ds['HARVEST_SH1'][:] = 0.0
+                ds['HARVEST_SH2'][:] = 0.0
+                ds['HARVEST_SH3'][:] = 0.0
+                #Apply transitions if given
+                years = ds['time'].values
+                for year in self.siteinfo['transitions'].keys():
+                    #Set PFTS for this year and all subsequent years
+                    pct_nat_pft = xr.DataArray(self.siteinfo['transitions'][year]['PCT_NAT_PFT'], dims=['natpft'])
+                    ds = self.setpfts(ds, pct_nat_pft, year=int(year))
+                    #Set harvest for this year
+                    year_indices = np.where(years == int(year))[0]
+                    ds['HARVEST_VH1'][year_indices] = self.siteinfo['transitions'][year]['HARVEST']
         #else:
         #    for p in range(0,len(mylat)):
         #        #Recenter on gridcell lat/lons

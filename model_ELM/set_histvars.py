@@ -75,8 +75,8 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
         #if ('US-SPR' in self.site):
         #    #For default SPRUCE run, set history variables
         #else:
-        self.customize_namelist(variable='hist_mfilt',value='365')
-        self.customize_namelist(variable='hist_nhtfrq',value='-24')
+        self.customize_namelist(variable='hist_mfilt',value='1')
+        self.customize_namelist(variable='hist_nhtfrq',value='-8760')
       else:
         #Write annual for all vars, requested postproc vars daily
         vst_pp=''
