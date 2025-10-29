@@ -2,7 +2,7 @@
 import re, sys
 import model_ELM
 from OLMTutils import get_machine_info, get_site_info, get_point_list, get_default_diag_vars
-import os
+import os, glob
 import numpy as np
 import configparser
 import argparse
@@ -10,6 +10,7 @@ import argparse
 def load_config(config_file):
     """Load configuration from file and return as dictionary"""
     config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
+    config.optionxform = str  # Preserve case of option names
     config.read(config_file)
     
     # Convert to nested dictionary for easier access
@@ -248,6 +249,9 @@ def main():
                 add_fates_parameter[key] = value
             else:
                 add_parameter[key] = value
+ 
+    if 'surface_data' in cfg:
+        add_surfdata = cfg['surface_data'].copy()
 
     if 'treatment_options' in cfg:
         treatments, treatment_options = process_treatment_options(cfg)
@@ -268,10 +272,18 @@ def main():
         postproc_startyear = cfg['postprocessing'].get('startyear', def_postproc_startyear)
         postproc_endyear = cfg['postprocessing'].get('endyear', def_postproc_endyear)
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
-        
-    # Wipe the temp directory
-    #APW this might be  throwing an error where temp doesn't exist (but also when trying to copy files to temp) 
-    os.system('rm temp/*')
+        postproc_pfts = cfg['postprocessing'].get('pfts', [0])
+
+    # Remove specific file types from temp directory
+    temp_dir = 'temp'
+    for pattern in ['*.nc', '*.tmp']:
+        files_to_remove = glob.glob(os.path.join(temp_dir, pattern))
+        for file_path in files_to_remove:
+            try:
+                os.remove(file_path)
+            except OSError as e:
+                print(f"Warning: Could not remove {file_path}: {e}")
+
     if (runtype == 'site'):
         # Check to see if all reqested sites exist
         if not isinstance(sites,list):
@@ -374,7 +386,7 @@ def main():
         depends = np.append(depends, ncases_pretreatment-1)
         compsets.append(compsets[-1])
         suffix.append(treatment_options[t]['name'])
-        startyear.append(run_startyear+nyears_trans)
+        startyear.append(startyear[ncases_pretreatment-1]+ nyears[ncases_pretreatment-1])
 
     print('\nELM simulation info:')
     multisite_scripts=[]
@@ -447,6 +459,8 @@ def main():
         if 'parameters' in cfg:
             cases[c].add_parameter = add_parameter
             cases[c].add_fates_parameter = add_fates_parameter
+        if 'surface_data' in cfg:
+            cases[c].add_surfdata = add_surfdata
 
         # Get forcing information
         print('Getting forcing information')
@@ -466,9 +480,7 @@ def main():
         cases[c].dependcase=''
         if (depends[c] >= 0):
             # Set the iniial data file from the last year of the prev case
-            finidat_year = cases[depends[c]].run_n+1
-            if ('20TR' in cases[depends[c]].compset or 'trans' in cases[depends[c]].compset):
-                finidat_year = 1850+cases[depends[c]].run_n
+            finidat_year = startyear[depends[c]]+nyears[depends[c]] 
             cases[c].set_finidat_file(finidat_case=cases[depends[c]].casename, \
                   finidat_year=finidat_year)
             cases[c].dependcase = cases[depends[c]].casename
@@ -479,6 +491,7 @@ def main():
             cases[c].postproc_startyear = postproc_startyear
             cases[c].postproc_endyear = postproc_endyear
             cases[c].postproc_freq = postproc_freq
+            cases[c].postproc_pfts = postproc_pfts
             # Also get the observations if requested, use postproc
             if (has_obs and site != ''):
                 cases[c].obs = {}
@@ -541,17 +554,7 @@ def main():
         # Return to script directory
         os.chdir(scriptdir)
 
-
-    #archive this script (based on name of first case)
-    #archive_fname='./archive/'+cases[0].casename.replace('_ad_spinup','')
-    #archive_fname=archive_fname.replace('1850','').replace('20TR','')+'_'+machine
-    #if (nsites > 1):
-    #    archive_fname = archive_fname.replace(site,'multisite')
-    #os.system('mkdir -p archive')
-    #if (ensemble):
-    #    archive_fname = archive_fname+'_ensemble'
-    #os.system('cp '+__file__+' '+archive_fname+'.py')
-
+    #Todo:  Multi-site/treatment postprocessing/analysis
 
 if __name__ == "__main__":
     main()

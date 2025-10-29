@@ -225,13 +225,12 @@ class ELMcase():
             value = line.split('=')[1]
     return value[:-1]   #avoid new line character
 
-  def modify_parameter_file(self, param_file_path, parameters, file_description="parameter"):
+  def modify_ncinput_file(self, param_file_path, parameters, file_description="parameter"):
     """
     Modify parameters in a NetCDF parameter file.
     """
     import netCDF4
     from datetime import datetime
-    
     with netCDF4.Dataset(param_file_path, 'a') as nc:
         for key, value in parameters.items():
             if key in nc.variables:
@@ -277,19 +276,27 @@ class ELMcase():
                                     continue
                                 print(f"  Setting [{idx1}, {idx2}] = {param_value}")
                                 nc.variables[key][idx1, idx2] = param_value
-                        elif len(var_shape) == 1:
+                        elif len(var_shape) == 1 or file_description == "surface data":
                             # 1D parameter: expect pairs of [index, value]
                             for i in range(0, len(value)-1, 2):
                                 idx = int(value[i])
                                 param_value = value[i+1]
-                                if idx < 0:
+                                if key == 'MONTHLY_LAI':
+                                    print(idx, param_value)
+                                    # Special handling for MONTHLY_LAI (set to same LAI for all months for a PFT)
+                                    nc.variables[key][:,idx,...] = param_value
+                                elif (key == 'PCT_NAT_PFT'):
+                                    # Special handling for PCT_NAT_PFT (set PFTs manually)
+                                    nc.variables[key][idx,...] = param_value  
+                                else:
+                                  if idx < 0:
                                     print(f"Error: {key} has negative index {idx}. Use -1 only to set all.")
                                     continue
-                                if idx >= var_shape[0]:
+                                  if idx >= var_shape[0]:
                                     print(f"Error: {key} index {idx} exceeds dimension {var_shape[0]}")
                                     continue
+                                  nc.variables[key][idx] = param_value
                                 print(f"  Setting index {idx} = {param_value}")
-                                nc.variables[key][idx] = param_value
                         else:
                             print(f"Error: {key} has {len(var_shape)}D shape - only 1D and 2D parameters supported")
                             continue
@@ -337,7 +344,7 @@ class ELMcase():
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
         param_path = self.OLMTdir + '/temp/clm_params.nc'
-        self.modify_parameter_file(param_path, self.add_parameter, "parameter")
+        self.modify_ncinput_file(param_path, self.add_parameter, "parameter")
 
   def set_CNP_param_file(self,filename=''):
     if (filename == ''):
@@ -387,7 +394,7 @@ class ELMcase():
     # Apply FATES parameter modifications
     if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
         fates_param_path = self.OLMTdir + '/temp/fates_paramfile.nc'
-        self.modify_parameter_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
+        self.modify_ncinput_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
 
   def set_finidat_file(self, finidat_case='', finidat_year=0, finidat=''):
       if (finidat_case != ''):

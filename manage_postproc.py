@@ -33,8 +33,10 @@ else:
     for v in mycase.postproc_vars:
         if ('_pft' in v):
             hnum = 2 #Assume pft-level output is in h2 file
+            myindex = list(mycase.postproc_pfts)
         else:
             hnum = 1
+            myindex = [0]
         #Note, we assume daily outputs.
         annualmean = False
         dailytomonthly = False
@@ -43,7 +45,8 @@ else:
             dailytomonthly = True
         elif (mycase.postproc_freq.lower() == 'annual'):
             annualmean = True
-        mycase.postprocess(v, index=0, gindex=0, startyear=mycase.postproc_startyear, \
+        for i in myindex:
+            mycase.postprocess(v, index=i, gindex=0, startyear=mycase.postproc_startyear, \
                 endyear=mycase.postproc_endyear, hnum=hnum, \
                 dailytomonthly=dailytomonthly, annualmean=annualmean,  \
                 meanseasonalcycle=meanseasonalcycle, xindex=0,yindex=0, plot=True)
