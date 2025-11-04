@@ -82,9 +82,12 @@ def create_ensemble_script(self, walltime=24):
     myfile.write('./manage_ensemble.py --case '+self.casename+'\n')
     myfile.close()  
     os.system('chmod u+x case.submit_ensemble')
-    self.rundir_UQ = self.runroot+'/UQ/'+self.casename
+    self.rundir_UQ = self.runroot+'/UQ/ensembles/'+self.casename
+    os.system('mkdir -p '+self.rundir_UQ)
+    self.UQ_output = self.runroot+'/UQ/analysis/'+self.casename
+    os.system('mkdir -p '+self.UQ_output)
 
-def create_multisite_script(self,sites,scriptdir, walltime=24):
+def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
     #Create the PBS script we will submit to run multiple sites
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
@@ -154,7 +157,11 @@ def create_multisite_script(self,sites,scriptdir, walltime=24):
             myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
         elif self.postproc_vars:
             #Do requested postprocessing and plotting
-            myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+'\n')
+            postproc_cmd = 'python manage_postproc.py --case '+self.casename.replace(sites[0],s)
+            myfile.write(postproc_cmd + '\n')
+            if cases_compare and cases_compare.strip() and s == sites[-1]:
+                postproc_cmd += ' --cases_compare "' + cases_compare + '"'
+                myfile.write(postproc_cmd + '\n')
     myfile.close()
     os.system('chmod u+x '+fname)
     return os.path.abspath('./'+fname)
@@ -165,7 +172,7 @@ def ensemble_copy(self, ens_num):
 
   # create ensemble directory from original case 
   orig_dir = str(os.path.abspath(self.runroot)+'/'+self.casename+'/run')
-  ens_dir  = str(os.path.abspath(self.runroot)+'/UQ/'+self.casename+'/g'+gst[1:])
+  ens_dir  = str(os.path.abspath(self.rundir_UQ)+'/g'+gst[1:])
 		
   os.system('mkdir -p '+ens_dir+'/timing/checkpoints')
   os.system('rm -f '+ens_dir+'/*.log.* '+ens_dir+'/*.nc '+ens_dir+'/rpointer*')
@@ -228,7 +235,7 @@ def ensemble_copy(self, ens_num):
                 myoutput.write(" fsurdat = '"+surffile_new+"'\n")
                 surffile = ens_dir+'/surfdata_'+gst[1:]+'.nc'
             elif ('finidat = ' in s and self.has_finidat):
-                finidat_file_path = os.path.abspath(self.runroot)+'/UQ/'+self.dependcase+'/g'+gst[1:]
+                finidat_file_path = os.path.abspath(self.rundir_UQ)+'/../'+self.dependcase+'/g'+gst[1:]
                 finidat_file_name = self.finidat.split('/')[-1]
                 #finidat_file_orig = self.finidat
                 finidat_file_new  = finidat_file_path+'/'+finidat_file_name 
@@ -346,7 +353,7 @@ def ensemble_copy(self, ens_num):
   #  ierr = self.putncvar(myfile, 'fates_seed_alloc_mature', param2)
 
 def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1):
-    UQ_output = './UQ_output/' + self.casename + '/ensemble'
+    UQ_output = self.UQ_output + '/ensemble'
     os.makedirs(UQ_output, exist_ok=True)  # Ensures the directory exists
     """
     Plots percentiles (99th, 95th, 75th, 50th, 25th, 5th, and 1st) for ensemble data.

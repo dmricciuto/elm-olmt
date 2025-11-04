@@ -84,7 +84,7 @@ def train_surrogate(self,myvars):
       print(qoi, np.corrcoef(ytrain.astype(float)[:,qoi], ypredict_train.astype(float)[:,qoi])[0,1]**2)
     print()
     print('Correlations for testing data: '+vname)
-    UQ_output = './UQ_output/'+self.casename+'/surrogate'
+    UQ_output = self.UQ_output + '/surrogate'
     os.system('mkdir -p '+UQ_output)
     for qoi in range(0,nqoi):
       rsq = np.corrcoef(yval.astype(float)[:,qoi], ypredict_val.astype(float)[:,qoi])[0,1]**2

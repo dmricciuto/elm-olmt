@@ -33,6 +33,10 @@ def log_posterior(parms, sites, myvars, pmin, pmax, obs, obs_err, nparms_ensembl
     if prior > 0.0:
         parms_model = parms[0:(nparms_ensemble - nerr_parms)]
         for s in sites:
+            # Check if site exists in run_surrogate dictionary
+            if s not in run_surrogate:
+                print(f"Warning: Site {s} not found in run_surrogate dictionary")
+                continue
             output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
             for v in myvars:
                 myoutput = output[v].flatten()
@@ -52,19 +56,46 @@ def log_posterior(parms, sites, myvars, pmin, pmax, obs, obs_err, nparms_ensembl
         post = -9999999
     return post
 
+# More sophisticated burn-in detection
+def estimate_burnin(sampler, labels_model):
+    """Estimate burn-in period using autocorrelation time"""
+    try:
+        # Get autocorrelation time
+        tau = sampler.get_autocorr_time(quiet=True)
+        max_tau = np.max(tau)
+        
+        # Rule of thumb: burn-in = 2 * max(autocorr_time)
+        burnin = int(2 * max_tau)
+        
+        print(f"Autocorrelation times: {tau}")
+        print(f"Estimated burn-in: {burnin} steps")
+        
+        return max(burnin, sampler.chain.shape[0] // 10)  # At least 10%
+        
+    except Exception as e:
+        print(f"Could not estimate autocorr time: {e}")
+        return sampler.chain.shape[0] // 3  # Fall back to 33%
+
 #-------------------------------- MCMC ------------------------------------------------------
 
-def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
-    nsites = len(self.all_sites)
-    sites = self.all_sites
+def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False):
+    # Check if all_sites is defined, otherwise use single site
+    if multisite and hasattr(self, 'all_sites') and self.all_sites is not None:
+        sites = self.all_sites
+        nsites = len(sites)
+    else:
+        sites = [self.site]
+        nsites = 1
+    
     pmin, pmax, nparms_ensemble = self.ensemble_pmin, self.ensemble_pmax, \
         self.nparms_ensemble
     run_surrogate = {}
     obs = {}
     obs_err = {}
     thiscase={}
+    
     for s in sites:
-        if s == sites[0]:
+        if s == self.site:
             obs[s] = self.obs.copy()
             obs_err[s] = self.obs_err.copy()
             run_surrogate[s] = self.run_surrogate
@@ -111,8 +142,13 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
 
     #Get the samples, likelihoods and best parameters
     n_model_parms = len(ensemble_parms) - nerr_parms
-    samples = sampler.get_chain(discard=nsteps//5, thin=5, flat=True)
-    log_probs = sampler.get_log_prob(discard=nsteps//5, thin=5, flat=True)
+
+    labels_model = ensemble_parms[:n_model_parms]
+    burnin = estimate_burnin(sampler, labels_model)
+    print(f"Using burn-in of {burnin} steps out of {nsteps} total steps ({burnin/nsteps*100:.1f}%)")
+    
+    samples = sampler.get_chain(discard=burnin, thin=5, flat=True)
+    log_probs = sampler.get_log_prob(discard=burnin, thin=5, flat=True)
     best_idx = np.argmax(log_probs)
     best_parms = samples[best_idx, :n_model_parms]
     print("Mean of each parameter:")
@@ -127,7 +163,10 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
         print(best_err_parms)
 
     # Plot histograms for each parameter
-    outdir = './UQ_output/'+self.casename+'/MCMC_output/plots/pdfs'
+    MCMC_out = self.UQ_output + '/MCMC_output/'
+    if (multisite):
+        MCMC_out = MCMC_out+'/multisite/'
+    outdir = MCMC_out+'/plots/pdfs'
     os.makedirs(outdir, exist_ok=True)
     for i in range(samples.shape[1]):
         plt.figure()
@@ -152,7 +191,10 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
             output_dict[v] = np.array(output_dict[v])  # shape: (n_samples, n_obs)
 
         # Plot predictions with 95% confidence intervals
-        outdir_pred = './UQ_output/' + self.casename.replace(self.site, s) + '/MCMC_output/plots/predictions'
+        if (multisite):
+            outdir_pred = MCMC_out+ 'plots/predictions/multisite/'+s
+        else:
+            outdir_pred = MCMC_out+ 'plots/predictions/'
         os.makedirs(outdir_pred, exist_ok=True)
         for v in myvars:
             # Compute percentiles
@@ -161,9 +203,9 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
             median = np.percentile(output_dict[v], 50, axis=0)
             x = np.arange(len(median))
             obs_plot = np.array(obs[s][v].copy())
-            obs_plot[obs_plot < -9000] = np.NaN
+            obs_plot[obs_plot < -9000] = np.nan
             obs_err_plot = np.array(obs_err[s][v].copy())
-            obs_err_plot[obs_err_plot < -9000] = np.NaN
+            obs_err_plot[obs_err_plot < -9000] = np.nan
             if (fit_error):
                 err_idx = ensemble_parms.index('sigma_'+v)
                 obs_err_plot[obs_err_plot > -9000] = best_err_parms[err_idx - n_model_parms]
@@ -181,7 +223,6 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
 
     #Create corner plot for model parameters only
     samples_model = samples[:, :n_model_parms]
-    labels_model = ensemble_parms[:n_model_parms]
 
     fig = corner.corner(
         samples_model,
@@ -201,23 +242,23 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True):
             r2 = np.corrcoef(x, y)[0, 1] ** 2
             ax = axes[i, j]
             ax.annotate(f"$R^2$={r2:.2f}", xy=(0.7, 0.9), xycoords="axes fraction", fontsize=11, color="blue")
-    outdir_corner = './UQ_output/' + self.casename + '/MCMC_output/plots/corner'
+    outdir_corner = MCMC_out + '/plots/corner'
     os.makedirs(outdir_corner, exist_ok=True)
     fig.savefig(f"{outdir_corner}/corner_plot.png")
     plt.close(fig)
 
     # Write best parameters to ELM netCDF parameter file and text file
-    out_nc = './UQ_output/' + self.casename + '/MCMC_output/clm_params_best.nc'
+    out_nc = self.UQ_output + '/MCMC_output/clm_params_best.nc'
     write_best_params_to_clm(self, best_parms, labels_model, out_nc)
     # Also save best parameters in a simple text file
-    out_txt = './UQ_output/' + self.casename + '/MCMC_output/best_params.txt'
+    out_txt = self.UQ_output + '/MCMC_output/best_params.txt'
     with open(out_txt, 'w') as f:
         for i, pname in enumerate(labels_model):
             f.write(f"{pname} {best_parms[i]}\n")
     
 def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
     # Path to template parameter file (first ensemble member)
-    template_nc = os.path.join(self.runroot, 'UQ', self.casename, 'g00001', 'clm_params_00001.nc')
+    template_nc = os.path.join(self.rundir_UQ, 'g00001', 'clm_params_00001.nc')
     # Copy template to output location
     shutil.copy(template_nc, out_nc_path)
 

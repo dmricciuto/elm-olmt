@@ -214,21 +214,6 @@ def main():
     else:
         parm_list = ''
 
-    # Observations 
-    has_obs = False
-    if ('observations' in cfg):
-        obs_dir = cfg['observations']['location']
-        obs_vars = cfg['observations']['variables']
-        # Ensure obs_vars is always a list
-        if isinstance(obs_vars, str):
-            obs_vars = [obs_vars]
-        elif not isinstance(obs_vars, list):
-            obs_vars = list(obs_vars)
-        obs_startyear = cfg['observations'].get('startyear', postproc_startyear)
-        obs_endyear   = cfg['observations'].get('endyear', postproc_endyear)
-        has_obs = True
-
-
     # Load case options and treatment options from config file
     case_options = {}
     treatment_options = {}
@@ -273,6 +258,22 @@ def main():
         postproc_endyear = cfg['postprocessing'].get('endyear', def_postproc_endyear)
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
         postproc_pfts = cfg['postprocessing'].get('pfts', [0])
+
+   # Observations 
+    has_obs = False
+    if ('observations' in cfg):
+        obs_dir = cfg['observations']['location']
+        obs_vars = cfg['observations']['variables']
+        # Ensure obs_vars is always a list
+        if isinstance(obs_vars, str):
+            obs_vars = [obs_vars]
+        elif not isinstance(obs_vars, list):
+            obs_vars = list(obs_vars)
+        obs_startyear = cfg['observations'].get('startyear', postproc_startyear)
+        obs_endyear   = cfg['observations'].get('endyear', postproc_endyear)
+        valid_months = cfg['observations'].get('months', list(range(1,13)))
+        has_obs = True
+
 
     # Remove specific file types from temp directory
     temp_dir = 'temp'
@@ -422,7 +423,7 @@ def main():
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir)
         #Save the other site names in first site's cases (for use in multi-site calibration)
-        if site == sites[0]:
+        if site == sites[-1]:
             cases[c].all_sites = [s for s in sites]
 
         # Create the case
@@ -479,11 +480,11 @@ def main():
         # Set the initial data file (if depends on previous case)
         cases[c].dependcase=''
         if (depends[c] >= 0):
-            # Set the iniial data file from the last year of the prev case
-            finidat_year = startyear[depends[c]]+nyears[depends[c]] 
+            cases[c].dependcase = cases[depends[c]].casename
+            # Set the initial data file from the last year of the prev case
+            finidat_year = startyear[depends[c]]+cases[depends[c]].run_n 
             cases[c].set_finidat_file(finidat_case=cases[depends[c]].casename, \
                   finidat_year=finidat_year)
-            cases[c].dependcase = cases[depends[c]].casename
 
         # Set postprocessing variables (final case or treatment case)
         if (c == ncases-1 or istreatment[c]) and 'postprocessing' in cfg:
@@ -502,7 +503,7 @@ def main():
                         cases[c].postproc_vars.append(v)
                     print('Getting observations for variable: '+v)
                     cases[c].get_fluxnet_obs(site=site,tstep=postproc_freq,ystart=obs_startyear, \
-                        yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir)
+                        yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months)
         else:
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))
@@ -540,17 +541,43 @@ def main():
         # Set exeroot for all subsequent cases/sites so we don't have to rebuild
         if (depends[c] < 0 and site == sites[0]):
             exeroot = cases[c].exeroot
+
+        # Determine cases_compare for postprocessing
+        cases_compare = ""
         if (ensemble):
             multisite_scripts[c] = cases[c].create_multisite_script([site], scriptdir)
             jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
                 ensemble=ensemble,multisite_script=multisite_scripts[c])
         else:
             if (site == sites[0]):
+                # Determine comparison cases
+                if len(treatments) > 0 and istreatment[c] and c == ncases-1:
+                    # Last treatment case - compare with all previous treatment cases
+                    treatment_cases = []
+                    for prev_c in range(ncases_pretreatment, c):
+                        if istreatment[prev_c]:
+                            treatment_cases.append(cases[prev_c].casename)
+                    if treatment_cases:
+                        cases_compare = ','.join(treatment_cases)
+                elif len(sites) > 1 and c == ncases-1:
+                    # Last site, last case - compare with other sites for same compset
+                    site_cases = []
+                    for other_site in sites[:-1]:  # All sites except the last one
+                        # Construct casename for this compset and other site
+                        other_casename = cases[c].casename.replace(site, other_site)
+                        site_cases.append(other_casename)
+                    if site_cases:
+                        cases_compare = ','.join(site_cases)
+                
                 # Always use the multi-site script even for one site
-                multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir)
+                multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir, cases_compare=cases_compare)
             if (site == sites[nsites-1]):
                 jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
                     ensemble=ensemble,multisite_script=multisite_scripts[c])
+            else:
+                #Create .pkl file for case (normally done with submission)
+                cases[c].create_pkl(outdir=cases[c].casedir)
+                cases[c].create_pkl(outdir=cases[c].OLMTdir+'/pklfiles')
         # Return to script directory
         os.chdir(scriptdir)
 

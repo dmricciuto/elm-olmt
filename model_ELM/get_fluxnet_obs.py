@@ -2,7 +2,17 @@ import numpy as np
 import os
 from netCDF4 import Dataset
 
-def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', myobsdir='', valid_months=[]):
+def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', \
+  myobsdir='', valid_months=None):
+  
+  # Ensure valid_months is a list of integers
+  if valid_months is None:
+      valid_months = list(range(1, 13))  # [1,2,3,4,5,6,7,8,9,10,11,12]
+  # Convert and validate
+  valid_months = [int(m) for m in valid_months if 1 <= int(m) <= 12]
+  if not valid_months:
+      raise ValueError("No valid months provided. Months must be integers between 1 and 12.")
+
   #myvars = ['TBOT','FSDS','WS','RAIN','VPD','NEE','GPP','ER','EFLX_LH_TOT','FSH']
   #myvars   = ['FPSN','FSH','EFLX_LH_TOT']
 
@@ -82,18 +92,31 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
             thisrow=thisrow+1
         self.obs[vars_elm[vnum]]=myobs
         self.obs_err[vars_elm[vnum]]=myobs_err
-        if (tstep == 'monthly' and valid_months != []):
-            print('Masking out months not in valid_months')
+        if (tstep == 'monthly'):
             nmonths = len(self.obs[vars_elm[vnum]])
-            nyrs = int(nmonths/12)
+            nyears = nmonths // 12
             mymask = np.zeros([nmonths],bool)
             for m in valid_months:
-              for y in range(0,nyrs):
+              for y in range(0,nyears):
                 mymask[y*12+(m-1)] = True
             self.obs[vars_elm[vnum]][~mymask] = -9999
             self.obs_err[vars_elm[vnum]][~mymask] = -9999
         if (tstep == 'daily'):
-           #Shift obs by 1 day (Model timestamp repsresents previous day)
-           self.obs[vars_elm[vnum]] = np.roll(self.obs[vars_elm[vnum]], 1)
-           self.obs_err[vars_elm[vnum]] = np.roll(self.obs_err[vars_elm[vnum]], 1)
-   
+            #Shift obs by 1 day (Model timestamp repsresents previous day)
+            self.obs[vars_elm[vnum]] = np.roll(self.obs[vars_elm[vnum]], 1)
+            self.obs_err[vars_elm[vnum]] = np.roll(self.obs_err[vars_elm[vnum]], 1)
+            #Mask days not in valid months
+            ndays = len(self.obs[vars_elm[vnum]]) 
+            nyears = ndays // 365
+            mymask = np.zeros([ndays],bool)
+            month_day_start = 0
+            month_day_end = ndaysm[0]
+            for m in range(1,13):
+              if (m in valid_months):
+                for y in range(0,nyears):
+                   for day in range(month_day_start, month_day_end):
+                        mymask[y*365+day] = True
+              month_day_start = month_day_start+ndaysm[m-1]
+              month_day_end   = month_day_start+ndaysm[min(m,11)]
+            self.obs[vars_elm[vnum]][~mymask] = -9999
+            self.obs_err[vars_elm[vnum]][~mymask] = -9999

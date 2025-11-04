@@ -40,7 +40,7 @@ def GSA(self, myvars, n_saltelli=8192):
 
     
 def plot_GSA(self, myvars):
-    UQ_output = './UQ_output/' + self.casename + '/GSA'
+    UQ_output = self.UQ_output + '/GSA'
     os.makedirs(UQ_output, exist_ok=True)  # Ensures the directory exists
     
     for v in myvars:

@@ -282,7 +282,6 @@ class ELMcase():
                                 idx = int(value[i])
                                 param_value = value[i+1]
                                 if key == 'MONTHLY_LAI':
-                                    print(idx, param_value)
                                     # Special handling for MONTHLY_LAI (set to same LAI for all months for a PFT)
                                     nc.variables[key][:,idx,...] = param_value
                                 elif (key == 'PCT_NAT_PFT'):

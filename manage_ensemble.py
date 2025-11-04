@@ -24,9 +24,6 @@ parser.add_option("--UQ_only", dest="UQ_only", default=False, \
 myfile=open('pklfiles/'+options.case+'.pkl','rb')
 mycase=pickle.load(myfile)
 
-#mycase.postproc_startyear = 2010
-#mycase.postproc_freq = 'monthly'
-
 mycase.output = {}
 #get the node file and parse
 def get_nodelist():
@@ -72,7 +69,7 @@ def get_node_submit(pactive,process_nodes,mynodes):
 def check_run_success(n):
     success=False
     jobst = str(100000+n)
-    rundir = mycase.runroot+'/UQ/'+mycase.casename+'/g'+jobst[1:]
+    rundir = mycase.rundir_UQ + '/g'+jobst[1:]
     yst = str(10000+mycase.startyear+mycase.run_n)[1:]
     #yst = '2010'
     if (os.path.isfile(rundir+'/'+mycase.casename+'.elm.r.'+yst+'-01-01-00000.nc')):
@@ -144,7 +141,7 @@ if (not options.UQ_only):
     pactive = active_processes(processes,process_jobnum,process_hang)
     if (sum(pactive) < int(mycase.np_ensemble)):
       jobst = str(100000+n_job)
-      rundir = mycase.runroot+'/UQ/'+mycase.casename+'/g'+jobst[1:]+'/'
+      rundir = mycase.rundir_UQ + '/g'+jobst[1:]+'/'
       log_file_path = f"{rundir}e3sm_log.txt"
       #Copy relevant files
       if not options.postproc_only:
@@ -182,17 +179,26 @@ if (mycase.postproc_vars != []):
     mycase.GSA(mycase.postproc_vars)
     mycase.plot_GSA(mycase.postproc_vars)
 
+    # Plot ensemble percentiles for each postprocessed variable
+    for var in mycase.postproc_vars:
+      mycase.plot_ensemble(var)
+    
     #Save postprocessed output
     mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
 
     #run MCMC
     #Set intial values for parameters
     if (mycase.obs):
-        #parms=((np.array(mycase.ensemble_pmax)+np.array(mycase.ensemble_pmin))/2)
         #Run MCMC for the observation variables
         obs_mcmc = [v for v in mycase.postproc_vars if v in mycase.obs.keys()]
-        mycase.MCMC_emcee(obs_mcmc,nwalkers=24,nsteps=10000)
-
+        # Always run single-site MCMC first
+        mycase.MCMC(obs_mcmc, nwalkers=24, nsteps=10000, multisite=False)
+        
+        # Check if multisite MCMC should be run
+        if hasattr(mycase, 'all_sites') and mycase.all_sites is not None and len(mycase.all_sites) > 1:
+            print(f"Running multisite MCMC for {len(mycase.all_sites)} sites: {mycase.all_sites}")
+            mycase.MCMC(obs_mcmc, nwalkers=24, nsteps=10000, multisite=True)
+            
         #Save postprocessed output
         mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
 

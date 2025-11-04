@@ -218,8 +218,8 @@ if (options.myseasonal):
 nvar = len(myvars)    
 x_toplot    = numpy.zeros([ncases, 2000000], float)
 data_toplot = numpy.zeros([ncases, nvar, 2000000], float)
-obs_toplot  = numpy.zeros([ncases, nvar, 2000000], float)+numpy.NaN
-err_toplot  = numpy.zeros([ncases, nvar, 2000000], float)+numpy.NaN
+obs_toplot  = numpy.zeros([ncases, nvar, 2000000], float)+numpy.nan
+err_toplot  = numpy.zeros([ncases, nvar, 2000000], float)+numpy.nan
 snum        = numpy.zeros([ncases], int)
 
 for c in range(0,ncases):
@@ -304,8 +304,8 @@ for c in range(0,ncases):
 
     #initialize data arrays
     mydata      = numpy.zeros([nvar,2000000], float)
-    myobs       = numpy.zeros([nvar,2000000], float)+numpy.NaN
-    myerr       = numpy.zeros([nvar,2000000], float)+numpy.NaN
+    myobs       = numpy.zeros([nvar,2000000], float)+numpy.nan
+    myerr       = numpy.zeros([nvar,2000000], float)+numpy.nan
     x           = numpy.zeros([2000000], float)
     nsteps=0
  
@@ -383,7 +383,7 @@ for c in range(0,ncases):
                                 elif (h.strip() == 'P_F' and 'RAIN' in myvars[v]):
                                     myobs[v,thisob/avpd_obs] = myobs[v,thisob/avpd_obs] +float(myvals[thiscol])/avpd_obs
                                 if myobs[v,int(thisob/avpd_obs)] < -4000:
-                                    myobs[v,int(thisob/avpd_obs)] = numpy.NaN
+                                    myobs[v,int(thisob/avpd_obs)] = numpy.nan
                                 thiscol=thiscol+1
                             thisob=thisob+1
                     thisrow = thisrow+1
@@ -441,7 +441,7 @@ for c in range(0,ncases):
                         if (v == 0 and m == 0):
                            print('Warning: '+myfile+' does not exist')
                         x[nsteps] = y+m/12.0
-                        mydata[v,nsteps] = numpy.NaN
+                        mydata[v,nsteps] = numpy.nan
                         if (y-1 < yend_all):
                             yend_all = y-1
                     nsteps = nsteps+1
@@ -547,7 +547,7 @@ for c in range(0,ncases):
                             for i in range(0,npf):
                                 myind=ylast*n*npf+(y-1)*npf+i
                                 x[myind] = ystart+(ylast*n*nypf+y*nypf) + nypf*(i*1.0-0.5)/npf
-                                mydata[v,myind] = numpy.NaN
+                                mydata[v,myind] = numpy.nan
                                 nsteps=nsteps+1 
                     else:	
                          if (v == 0):
@@ -558,7 +558,7 @@ for c in range(0,ncases):
                              if (n == nc-1):
                                  myind=ylast*n*npf+y*npf+i
                                  x[myind] = ystart+(ylast*n*nypf+y*nypf) + nypf*(i*1.0-0.5)/npf
-                                 mydata[v,myind] = numpy.NaN
+                                 mydata[v,myind] = numpy.nan
                                  nsteps=nsteps+1
 
     #perform averaging and write output files 
@@ -598,7 +598,7 @@ for c in range(0,ncases):
                 if (myct_obs[s] > 0):
                     mysum_obs[s] = mysum_obs[s]/myct_obs[s]
                 else:
-                    mysum_obs[s] = numpy.NaN
+                    mysum_obs[s] = numpy.nan
                 x_toplot[c,s] = s+1
                 obs_toplot[c, v, s] = mysum_obs[s]
                 data_toplot[c, v, s] = mysum[s]/myct[s]
@@ -620,7 +620,7 @@ for c in range(0,ncases):
                 if (mycount_obs[s] > 0):
                     mysum_obs[s] = mysum_obs[s]/mycount_obs[s]
                 else:
-                    mysum_obs[s] = numpy.NaN
+                    mysum_obs[s] = numpy.nan
                 x_toplot[c,s] = s+1.5
                 obs_toplot[c,v,s]  = mysum_obs[s]
                 data_toplot[c,v,s] = mysum[s]
