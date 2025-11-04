@@ -24,7 +24,6 @@ parser.add_option("--UQ_only", dest="UQ_only", default=False, \
 myfile=open('pklfiles/'+options.case+'.pkl','rb')
 mycase=pickle.load(myfile)
 
-mycase.output = {}
 #get the node file and parse
 def get_nodelist():
   mynodes=[]
@@ -127,6 +126,7 @@ def postprocess_ensemble(n):
 workdir = os.getcwd()
 
 if (not options.UQ_only):
+  mycase.output = {}
   processes=[]
   process_jobnum=[]
   process_hang=[]    #Keep track of how long process has been hanging

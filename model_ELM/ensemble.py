@@ -4,6 +4,7 @@ import os, sys, csv, time, math
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
+from netCDF4 import Dataset
 
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
@@ -27,12 +28,21 @@ def read_parm_list(self, parm_list=''):
         sys.exit(1)
     self.nparms_ensemble = len(self.ensemble_parms)
 
-#def get_default_parms(self):
-#    parm_file = Dataset(self.parm_file,'r')
-#    parms_def=[]
-#    for p in self.ensemble_parms:
-#        parms_def.append(parm_file[p][
+def get_default_parms(self):
+    parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
+    self.default_parms=[]
+    for i, p in enumerate(self.ensemble_parms):
+        param_var = parm_file[p]
+        # Check the dimensions of the parameter
+        if len(param_var.dimensions) == 0:
+            # Scalar parameter - no PFT indexing needed
+            self.default_parms.append(param_var[:])  # Read scalar value
+        else:
+            # Parameter has dimensions - use PFT indexing
+            pft_index = self.ensemble_pfts[i]
+            self.default_parms.append(param_var[pft_index])
     
+    parm_file.close()
 
 #Create the samples file
 def create_samples(self,sampletype='monte_carlo',nsamples=100,parm_list=''):

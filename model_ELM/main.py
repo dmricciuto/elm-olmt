@@ -125,6 +125,7 @@ class ELMcase():
       self.nsamples = np.shape(self.samples)[1]
     self.np_ensemble=np_ensemble
     create_ensemble_script(self)
+    self.get_default_parms()
     #Variables for surrogate model
     self.pscaler={}
     self.yscaler={}

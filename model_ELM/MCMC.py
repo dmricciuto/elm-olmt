@@ -180,6 +180,9 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
     n_samples = samples.shape[0]
     for s in sites:
         output_dict = {v: [] for v in myvars}
+        default_output_dict = {v: [] for v in myvars}  # ADD THIS: Store default predictions
+        
+        # Run MCMC samples through surrogate
         for i in range(n_samples):
             parms_model = samples[i, :nparms_ensemble - nerr_parms]
             output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
@@ -190,36 +193,250 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
         for v in myvars:
             output_dict[v] = np.array(output_dict[v])  # shape: (n_samples, n_obs)
 
-        # Plot predictions with 95% confidence intervals
-        if (multisite):
-            outdir_pred = MCMC_out+ 'plots/predictions/multisite/'+s
+        #Run default parameters through surrogate model
+        if hasattr(self, 'default_parms') and self.default_parms:
+            print(f"Running default parameters through surrogate model for site {s}")
+            try:
+                # Convert default_parms to the format expected by surrogate
+                default_parms_array = np.array(self.default_parms).reshape(1, -1)
+                default_output = run_surrogate[s](default_parms_array, myvars)
+                # Store default predictions
+                for v in myvars:
+                    default_output_dict[v] = default_output[v].flatten()
+            except Exception as e:
+                print(f"Error running default parameters through surrogate for site {s}: {e}")
+                # Set to None to indicate failure
+                for v in myvars:
+                    default_output_dict[v] = None
         else:
-            outdir_pred = MCMC_out+ 'plots/predictions/'
+            for v in myvars:
+                default_output_dict[v] = None
+
+        # Plot predictions with 95% confidence intervals AND default parameters
+        outdir_pred = MCMC_out + 'plots/predictions/'
+        if (multisite):
+            outdir_pred = outdir_pred+s
         os.makedirs(outdir_pred, exist_ok=True)
+        
         for v in myvars:
-            # Compute percentiles
+            # Compute percentiles from MCMC samples
             lower = np.percentile(output_dict[v], 2.5, axis=0)
             upper = np.percentile(output_dict[v], 97.5, axis=0)
             median = np.percentile(output_dict[v], 50, axis=0)
             x = np.arange(len(median))
+            
+            # Prepare observations
             obs_plot = np.array(obs[s][v].copy())
             obs_plot[obs_plot < -9000] = np.nan
             obs_err_plot = np.array(obs_err[s][v].copy())
             obs_err_plot[obs_err_plot < -9000] = np.nan
+            
             if (fit_error):
                 err_idx = ensemble_parms.index('sigma_'+v)
                 obs_err_plot[obs_err_plot > -9000] = best_err_parms[err_idx - n_model_parms]
 
-            plt.figure()
-            plt.fill_between(x, lower, upper, color='gray', alpha=0.5, label='95% CI')
-            plt.plot(x, median, 'r', label='Model median')
-            plt.errorbar(x, obs_plot, yerr=obs_err_plot, fmt='o', label='Observations')
-            plt.xlabel('Time')
-            plt.ylabel(v)
-            plt.title(f'Posterior predictive for {v}')
-            plt.legend()
-            plt.savefig(f'{outdir_pred}/Predictions_{v}_posterior.png')
+            # Create the plot
+            plt.figure(figsize=(12, 6))
+
+            # Plot MCMC uncertainty
+            plt.fill_between(x, lower, upper, color='gray', alpha=0.5, label='95% CI (MCMC)')
+            plt.plot(x, median, 'r-', linewidth=3, label='Model median (MCMC)')
+
+            #Plot default parameters if available 
+            if default_output_dict[v] is not None:
+                plt.plot(x, default_output_dict[v], 'k-', linewidth=3, 
+                        label='Default parameters', alpha=0.9)
+
+            # Plot observations 
+            plt.errorbar(x, obs_plot, yerr=obs_err_plot, fmt='bo', 
+                        label='Observations', alpha=0.8, markersize=6, linewidth=2)
+
+            plt.xlabel('Time', fontsize=14)
+            plt.ylabel(v, fontsize=14)
+            plt.title(f'Posterior predictive for {v} (Site: {s})', fontsize=16)
+            plt.legend(fontsize=12)
+            plt.grid(True, alpha=0.3)
+            plt.xticks(fontsize=12)
+            plt.yticks(fontsize=12)
+            plt.tight_layout()
+            plt.savefig(f'{outdir_pred}/Predictions_{v}_posterior.png', dpi=300, bbox_inches='tight')
             plt.close()
+
+            #Create a separate plot showing residuals 
+            if default_output_dict[v] is not None:
+                plt.figure(figsize=(12, 4))
+                
+                # Calculate residuals
+                obs_valid = obs_plot[~np.isnan(obs_plot)]
+                x_valid = x[~np.isnan(obs_plot)]
+                default_valid = default_output_dict[v][~np.isnan(obs_plot)]
+                median_valid = median[~np.isnan(obs_plot)]
+                
+                if len(obs_valid) > 0:
+                    default_residuals = default_valid - obs_valid
+                    mcmc_residuals = median_valid - obs_valid
+                    
+                    plt.subplot(1, 2, 1)
+                    plt.plot(x_valid, default_residuals, 'k-', linewidth=3, label='Default residuals')
+                    plt.plot(x_valid, mcmc_residuals, 'r-', linewidth=3, label='MCMC median residuals')
+                    plt.axhline(y=0, color='gray', linestyle='--', alpha=0.7, linewidth=2)
+                    plt.xlabel('Time', fontsize=12)
+                    plt.ylabel('Model - Obs', fontsize=12)
+                    plt.title(f'Residuals for {v}', fontsize=14)
+                    plt.legend(fontsize=11)
+                    plt.grid(True, alpha=0.3)
+                    plt.xticks(fontsize=11)
+                    plt.yticks(fontsize=11)
+                    
+                    plt.subplot(1, 2, 2)
+                    plt.hist(default_residuals, bins=20, alpha=0.7, label='Default', color='black', linewidth=2)
+                    plt.hist(mcmc_residuals, bins=20, alpha=0.7, label='MCMC median', color='red', linewidth=2)
+                    plt.xlabel('Model - Obs', fontsize=12)
+                    plt.ylabel('Frequency', fontsize=12)
+                    plt.title(f'Residual Distribution for {v}', fontsize=14)
+                    plt.legend(fontsize=11)
+                    plt.grid(True, alpha=0.3)
+                    plt.xticks(fontsize=11)
+                    plt.yticks(fontsize=11)
+                    
+                    plt.tight_layout()
+                    plt.savefig(f'{outdir_pred}/Residuals_{v}_comparison.png', dpi=300, bbox_inches='tight')
+                    plt.close()
+
+    # Write summary statistics to file
+    summary_file = MCMC_out + '/prediction_summary_stats.txt'
+    with open(summary_file, 'w') as f:
+        f.write("="*60 + "\n")
+        f.write("PREDICTION SUMMARY STATISTICS\n")
+        f.write("="*60 + "\n")
+        f.write(f"Analysis date: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+        f.write(f"Number of MCMC samples: {n_samples}\n")
+        f.write(f"Burn-in: {burnin} steps ({burnin/nsteps*100:.1f}%)\n")
+        if multisite:
+            f.write(f"Multi-site analysis with {len(sites)} sites: {sites}\n")
+        else:
+            f.write(f"Single-site analysis: {sites[0]}\n")
+        f.write("\n")
+        
+        # Track overall statistics
+        all_default_rmse = []
+        all_mcmc_rmse = []
+        all_improvements = []
+        
+        for s in sites:
+            f.write(f"\nSITE: {s}\n")
+            f.write("-" * 40 + "\n")
+            
+            site_default_rmse = []
+            site_mcmc_rmse = []
+            site_improvements = []
+            
+            for v in myvars:
+                f.write(f"\nVariable: {v}\n")
+                
+                # Get valid observations for this site/variable
+                obs_plot = np.array(obs[s][v].copy())
+                obs_plot[obs_plot < -9000] = np.nan
+                obs_valid = obs_plot[~np.isnan(obs_plot)]
+                
+                if len(obs_valid) > 0 and default_output_dict[v] is not None:
+                    # Get predictions for this site/variable
+                    lower = np.percentile(output_dict[v], 2.5, axis=0)
+                    upper = np.percentile(output_dict[v], 97.5, axis=0)
+                    median = np.percentile(output_dict[v], 50, axis=0)
+                    
+                    # Calculate metrics for default parameters
+                    default_pred = default_output_dict[v][~np.isnan(obs_plot)]
+                    default_rmse = np.sqrt(np.mean((default_pred - obs_valid)**2))
+                    default_mae = np.mean(np.abs(default_pred - obs_valid))
+                    default_r2 = np.corrcoef(default_pred, obs_valid)[0,1]**2 if len(obs_valid) > 1 else 0
+                    
+                    # Calculate metrics for MCMC median
+                    mcmc_pred = median[~np.isnan(obs_plot)]
+                    mcmc_rmse = np.sqrt(np.mean((mcmc_pred - obs_valid)**2))
+                    mcmc_mae = np.mean(np.abs(mcmc_pred - obs_valid))
+                    mcmc_r2 = np.corrcoef(mcmc_pred, obs_valid)[0,1]**2 if len(obs_valid) > 1 else 0
+                    
+                    # Calculate metrics for 95% CI coverage
+                    lower_valid = lower[~np.isnan(obs_plot)]
+                    upper_valid = upper[~np.isnan(obs_plot)]
+                    coverage = np.mean((obs_valid >= lower_valid) & (obs_valid <= upper_valid)) * 100
+                    
+                    # Calculate improvement
+                    improvement_rmse = (default_rmse - mcmc_rmse) / default_rmse * 100 if default_rmse > 0 else 0
+                    improvement_r2 = mcmc_r2 - default_r2
+                    
+                    # Write to file
+                    f.write(f"  Number of valid observations: {len(obs_valid)}\n")
+                    f.write(f"  \n")
+                    f.write(f"  Default parameters:\n")
+                    f.write(f"    RMSE: {default_rmse:.4f}\n")
+                    f.write(f"    MAE:  {default_mae:.4f}\n")
+                    f.write(f"    R²:   {default_r2:.4f}\n")
+                    f.write(f"  \n")
+                    f.write(f"  MCMC optimized:\n")
+                    f.write(f"    RMSE: {mcmc_rmse:.4f}\n")
+                    f.write(f"    MAE:  {mcmc_mae:.4f}\n")
+                    f.write(f"    R²:   {mcmc_r2:.4f}\n")
+                    f.write(f"    95% CI coverage: {coverage:.1f}%\n")
+                    f.write(f"  \n")
+                    f.write(f"  Improvements:\n")
+                    f.write(f"    RMSE improvement: {improvement_rmse:.1f}%\n")
+                    f.write(f"    R² improvement: {improvement_r2:+.4f}\n")
+                    
+                    # Store for overall statistics
+                    site_default_rmse.append(default_rmse)
+                    site_mcmc_rmse.append(mcmc_rmse)
+                    site_improvements.append(improvement_rmse)
+                    
+                    all_default_rmse.append(default_rmse)
+                    all_mcmc_rmse.append(mcmc_rmse)
+                    all_improvements.append(improvement_rmse)
+                    
+                else:
+                    f.write(f"  Cannot calculate statistics (no valid data or default predictions)\n")
+            
+            # Site summary
+            if site_default_rmse:
+                f.write(f"\nSITE {s} SUMMARY:\n")
+                f.write(f"  Average RMSE improvement: {np.mean(site_improvements):.1f}%\n")
+                f.write(f"  Variables improved: {sum(1 for imp in site_improvements if imp > 0)}/{len(site_improvements)}\n")
+        
+        # Overall summary across all sites and variables
+        if all_default_rmse:
+            f.write(f"\n" + "="*60 + "\n")
+            f.write("OVERALL SUMMARY (All Sites & Variables)\n")
+            f.write("="*60 + "\n")
+            f.write(f"Total variables analyzed: {len(all_default_rmse)}\n")
+            f.write(f"Average default RMSE: {np.mean(all_default_rmse):.4f}\n")
+            f.write(f"Average MCMC RMSE: {np.mean(all_mcmc_rmse):.4f}\n")
+            f.write(f"Average RMSE improvement: {np.mean(all_improvements):.1f}%\n")
+            f.write(f"Variables improved: {sum(1 for imp in all_improvements if imp > 0)}/{len(all_improvements)}\n")
+            f.write(f"Best improvement: {max(all_improvements):.1f}%\n")
+            f.write(f"Worst change: {min(all_improvements):.1f}%\n")
+            
+            # Parameter summary
+            f.write(f"\n" + "PARAMETER SUMMARY" + "\n")
+            f.write("-" * 40 + "\n")
+            f.write("Best-fit parameters:\n")
+            for i, (pname, pval) in enumerate(zip(labels_model, best_parms)):
+                parm_mean = np.mean(samples[:, i])
+                parm_std = np.std(samples[:, i])
+                f.write(f"  {pname:25s}: {pval:10.4f} (mean: {parm_mean:8.4f} ± {parm_std:6.4f})\n")
+            
+            if fit_error and nerr_parms > 0:
+                f.write(f"\nError parameters:\n")
+                for i, v in enumerate(myvars):
+                    err_idx = ensemble_parms.index('sigma_'+v) - n_model_parms
+                    err_mean = np.mean(samples[:, n_model_parms + i])
+                    err_std = np.std(samples[:, n_model_parms + i])
+                    f.write(f"  sigma_{v:20s}: {best_err_parms[err_idx]:10.4f} (mean: {err_mean:8.4f} ± {err_std:6.4f})\n")
+
+    # Also print a brief summary to console
+    print(f"\nSummary statistics written to: {summary_file}")
+    if all_default_rmse:
+        print(f"Overall RMSE improvement: {np.mean(all_improvements):.1f}%")
+        print(f"Variables improved: {sum(1 for imp in all_improvements if imp > 0)}/{len(all_improvements)}")
 
     #Create corner plot for model parameters only
     samples_model = samples[:, :n_model_parms]
@@ -248,15 +465,16 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
     plt.close(fig)
 
     # Write best parameters to ELM netCDF parameter file and text file
-    out_nc = self.UQ_output + '/MCMC_output/clm_params_best.nc'
+    out_nc = MCMC_out + '/clm_params_best.nc'
     write_best_params_to_clm(self, best_parms, labels_model, out_nc)
     # Also save best parameters in a simple text file
-    out_txt = self.UQ_output + '/MCMC_output/best_params.txt'
+    out_txt = MCMC_out + '/best_params.txt'
     with open(out_txt, 'w') as f:
         for i, pname in enumerate(labels_model):
             f.write(f"{pname} {best_parms[i]}\n")
     
 def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
+    #TODO:  allow updating FATES parameters
     # Path to template parameter file (first ensemble member)
     template_nc = os.path.join(self.rundir_UQ, 'g00001', 'clm_params_00001.nc')
     # Copy template to output location
@@ -281,3 +499,4 @@ def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
                 print(f"Warning: Parameter {pname} not found in NetCDF file.")
     print(f"Best-fit parameters written to {out_nc_path}")
 
+ 
