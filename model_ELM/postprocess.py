@@ -181,9 +181,13 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
             values_out = do_timeaverage(values, int(nperyear))
       nperyear_out = 1
     else:
-        #no averaging requested
-        values_out = values[:]
-        nperyear_out = nperyear
+        if (self.postproc_timeaverage > 1):
+            values_out = do_timeaverage(values, self.postproc_timeaverage)
+            nperyear_out = int(nperyear/self.postproc_timeaverage)
+        else:
+            #no averaging requested
+            values_out = values[:]
+            nperyear_out = nperyear
     var_out = var
     if ('_pft' in var):
         var_out = var_out+str(index)

@@ -29,6 +29,7 @@ def read_parm_list(self, parm_list=''):
     self.nparms_ensemble = len(self.ensemble_parms)
 
 def get_default_parms(self):
+    #To do:  Handle FATES parameters
     parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
     self.default_parms=[]
     for i, p in enumerate(self.ensemble_parms):

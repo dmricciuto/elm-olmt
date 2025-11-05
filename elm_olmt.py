@@ -258,6 +258,7 @@ def main():
         postproc_endyear = cfg['postprocessing'].get('endyear', def_postproc_endyear)
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
         postproc_pfts = cfg['postprocessing'].get('pfts', [0])
+        postproc_timeaverage = cfg['postprocessing'].get('timeaverage', 1)
 
    # Observations 
     has_obs = False
@@ -493,6 +494,7 @@ def main():
             cases[c].postproc_endyear = postproc_endyear
             cases[c].postproc_freq = postproc_freq
             cases[c].postproc_pfts = postproc_pfts
+            cases[c].postproc_timeaverage = postproc_timeaverage
             # Also get the observations if requested, use postproc
             if (has_obs and site != ''):
                 cases[c].obs = {}
@@ -503,7 +505,8 @@ def main():
                         cases[c].postproc_vars.append(v)
                     print('Getting observations for variable: '+v)
                     cases[c].get_fluxnet_obs(site=site,tstep=postproc_freq,ystart=obs_startyear, \
-                        yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months)
+                        yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months, \
+                        timeaverage = postproc_timeaverage)
         else:
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))

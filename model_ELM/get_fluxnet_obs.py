@@ -3,7 +3,7 @@ import os
 from netCDF4 import Dataset
 
 def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', \
-  myobsdir='', valid_months=None):
+  myobsdir='', valid_months=None, time_average=1):
   
   # Ensure valid_months is a list of integers
   if valid_months is None:
@@ -12,6 +12,11 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
   valid_months = [int(m) for m in valid_months if 1 <= int(m) <= 12]
   if not valid_months:
       raise ValueError("No valid months provided. Months must be integers between 1 and 12.")
+
+  # Validate time_average parameter
+  time_average = int(time_average)
+  if time_average < 1:
+      time_average = 1
 
   #myvars = ['TBOT','FSDS','WS','RAIN','VPD','NEE','GPP','ER','EFLX_LH_TOT','FSH']
   #myvars   = ['FPSN','FSH','EFLX_LH_TOT']
@@ -105,6 +110,7 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
             #Shift obs by 1 day (Model timestamp repsresents previous day)
             self.obs[vars_elm[vnum]] = np.roll(self.obs[vars_elm[vnum]], 1)
             self.obs_err[vars_elm[vnum]] = np.roll(self.obs_err[vars_elm[vnum]], 1)
+            
             #Mask days not in valid months
             ndays = len(self.obs[vars_elm[vnum]]) 
             nyears = ndays // 365
@@ -120,3 +126,51 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
               month_day_end   = month_day_start+ndaysm[min(m,11)]
             self.obs[vars_elm[vnum]][~mymask] = -9999
             self.obs_err[vars_elm[vnum]][~mymask] = -9999
+            
+            # ADD TIME AVERAGING FOR DAILY DATA
+            if time_average > 1:
+                print(f"Applying {time_average}-day averaging to daily observations")
+                # Get the original daily data
+                daily_obs = self.obs[vars_elm[vnum]].copy()
+                daily_obs_err = self.obs_err[vars_elm[vnum]].copy()
+                
+                # Calculate number of averaged periods
+                n_periods = len(daily_obs) // time_average
+                # Initialize averaged arrays
+                averaged_obs = np.full(n_periods, -9999.0)
+                averaged_obs_err = np.full(n_periods, -9999.0)
+                
+                for i in range(n_periods):
+                    start_idx = i * time_average
+                    end_idx = start_idx + time_average
+                    
+                    # Get the chunk of data
+                    obs_chunk = daily_obs[start_idx:end_idx]
+                    err_chunk = daily_obs_err[start_idx:end_idx]
+                    
+                    # Only average if we have valid data (not all -9999)
+                    valid_obs = obs_chunk[obs_chunk > -9999]
+                    valid_err = err_chunk[err_chunk > -9999]
+                    
+                    if len(valid_obs) > 0:
+                        # Calculate mean of valid observations
+                        averaged_obs[i] = np.mean(valid_obs)
+                        
+                        # For errors, use root-mean-square if we have multiple valid values
+                        if len(valid_err) > 0:
+                            if len(valid_err) == 1:
+                                averaged_obs_err[i] = valid_err[0]
+                            else:
+                                # RMS error for averaged data
+                                averaged_obs_err[i] = np.sqrt(np.mean(valid_err**2)) / np.sqrt(len(valid_err))
+                        else:
+                            averaged_obs_err[i] = -9999
+                    # If no valid data, leave as -9999 (already initialized)
+                
+                # Replace the daily data with averaged data
+                self.obs[vars_elm[vnum]] = averaged_obs
+                self.obs_err[vars_elm[vnum]] = averaged_obs_err
+                
+                print(f"Averaged from {len(daily_obs)} daily values to {len(averaged_obs)} {time_average}-day values")
+
+

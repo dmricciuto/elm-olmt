@@ -174,6 +174,7 @@ if (not options.UQ_only):
 if (mycase.postproc_vars != []):
     #Train surrogate models
     mycase.train_surrogate(mycase.postproc_vars)
+    mycase.plot_surrogate(mycase.postproc_vars)
 
     #run GSA
     mycase.GSA(mycase.postproc_vars)

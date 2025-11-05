@@ -24,37 +24,50 @@ def sample_from_prior(pmin, pmax, nsamples):
 
 
 def log_posterior(parms, sites, myvars, pmin, pmax, obs, obs_err, nparms_ensemble, nerr_parms, run_surrogate):
-    # Uniform priors
-    prior = 1.0
-    for j in range(nparms_ensemble):
-        if (parms[j] < pmin[j] or parms[j] > pmax[j]):
-            prior = 0.0
-    post = prior
-    if prior > 0.0:
-        parms_model = parms[0:(nparms_ensemble - nerr_parms)]
+    # Quick prior check first (fastest rejection)
+    if np.any(parms < pmin) or np.any(parms > pmax):
+        return -np.inf  # Use -inf instead of -9999999 (emcee standard)
+    
+    log_likelihood = 0.0
+    parms_model = parms[:(nparms_ensemble - nerr_parms)]
+    
+    try:
         for s in sites:
-            # Check if site exists in run_surrogate dictionary
             if s not in run_surrogate:
-                print(f"Warning: Site {s} not found in run_surrogate dictionary")
                 continue
+                
+            # Get model predictions for this site
             output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
-            for v in myvars:
+            
+            for i, v in enumerate(myvars):
                 myoutput = output[v].flatten()
-                myobs    = np.array(obs[s][v]).flatten()
-                myerr    = np.array(obs_err[s][v]).flatten()
-                # Mask out invalid observations
+                myobs = obs[s][v]
+                myerr = obs_err[s][v]
+                
+                # Vectorized masking
                 mask = (myobs > -9000) & (myerr > 0)
-                #mask = mask & (np.arange(len(myobs)) % 12 > 2) & (np.arange(len(myobs)) % 12 < 11)  # mask out winter months
-                if (nerr_parms > 0):
-                    myerr[mask] = parms[-len(myvars)+myvars.index(v)]
-                # Vectorized calculation
-                resid = myoutput[mask] - myobs[mask]
-                ri = (resid / myerr[mask]) ** 2
-                li = -0.5 * np.log(2.0 * np.pi) - np.log(myerr[mask]) - 0.5 * ri
-                post += np.sum(li)
-    else:
-        post = -9999999
-    return post
+                if not np.any(mask):
+                    continue
+                
+                # Apply mask once
+                obs_masked = myobs[mask]
+                output_masked = myoutput[mask]
+                err_masked = myerr[mask]
+                
+                # Update error if fitting error parameters
+                if nerr_parms > 0:
+                    err_masked = np.full_like(err_masked, parms[nparms_ensemble - nerr_parms + i])
+                
+                # Vectorized likelihood calculation
+                residuals = output_masked - obs_masked
+                log_likelihood += -0.5 * np.sum(
+                    np.log(2 * np.pi * err_masked**2) + (residuals / err_masked)**2
+                )
+                
+    except Exception as e:
+        return -np.inf
+    
+    return log_likelihood
 
 # More sophisticated burn-in detection
 def estimate_burnin(sampler, labels_model):
@@ -499,4 +512,3 @@ def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
                 print(f"Warning: Parameter {pname} not found in NetCDF file.")
     print(f"Best-fit parameters written to {out_nc_path}")
 
- 
