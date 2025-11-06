@@ -506,7 +506,7 @@ def main():
                     print('Getting observations for variable: '+v)
                     cases[c].get_fluxnet_obs(site=site,tstep=postproc_freq,ystart=obs_startyear, \
                         yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months, \
-                        timeaverage = postproc_timeaverage)
+                        time_average = postproc_timeaverage)
         else:
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))
