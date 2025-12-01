@@ -29,7 +29,7 @@ def load_config(config_file):
                 cfg[section][key] = value.lower() == 'true'
             elif not ',' in value:
                 # Handle single values
-                if value.isdigit():
+                if value.isdigit() or 'hist_nhtfrq' in key:
                     cfg[section][key] = int(value)
                 elif value.replace('.', '').replace('-', '').isdigit():
                     cfg[section][key] = float(value)
@@ -356,7 +356,7 @@ def main():
             compsets.append(compset_type+'1850'+compset_base.replace('CNP','CN'))  #ad_spinup
             suffix.append('ad_spinup')
             startyear.append(1)
-        nyears.append(nyears_ad)
+            nyears.append(nyears_ad)
         if (nyears_final > 0):
             compsets.append(compset_type+'1850'+compset_base)  #Final spinup
             suffix.append('')

@@ -71,37 +71,53 @@ def get_pointindices_bbox(self, lat_bounds, lon_bounds, lat_grid, lon_grid, mask
 def subset_netcdf(self, index, input_file, output_file, keep2d=False):
     # Load the input NetCDF file
     original_ds = xr.open_dataset(input_file, mode='r')
-    #subset_ds = xr.Dataset()
-    #print(index, input_file)
+
+    # Ensure index is always a list for consistent handling
+    if not isinstance(index, list):
+        index = [index]
+
+    # Check if index contains tuples (2D) or integers (1D)
+    is_2d_index = len(index) > 0 and isinstance(index[0], (tuple, list))
+
     # Select the variable and apply subsetting if specified
     for var_name, var_data in original_ds.data_vars.items():
         if ('lsmlat' in var_data.dims and 'lsmlon' in var_data.dims):
-            if keep2d:
+            if is_2d_index:
+              if keep2d:
                 lat_indices = [lat for lat, lon in index]
                 lon_indices = [lon for lat, lon in index]
-                var_subset = var_data.isel(lsmlat=slice(min(lat_indices), max(lat_indices)),
-                                           lsmlon=slice(min(lon_indices), max(lon_indices)))
+                var_subset = var_data.isel(lsmlat=slice(min(lat_indices), max(lat_indices)+1),
+                                           lsmlon=slice(min(lon_indices), max(lon_indices)+1))
+              else:
+                lat_indices = [lat for lat, lon in index]
+                lon_indices = [lon for lat, lon in index]
+                var_subset = var_data.isel(lsmlat=xr.DataArray(lat_indices, dims='gridcell'),
+                                           lsmlon=xr.DataArray(lon_indices, dims='gridcell'))
             else:
-                var_subset = var_data.isel(lsmlat=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
-                                           lsmlon=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
+                var_subset = var_data
         elif ('lat' in var_data.dims and 'lon' in var_data.dims):
-            if keep2d:
+            if is_2d_index:
+              if keep2d:
                 lat_indices = [lat for lat, lon in index]
                 lon_indices = [lon for lat, lon in index]
-                var_subset = var_data.isel(lat=slice(min(lat_indices), max(lat_indices)),
-                                           lon=slice(min(lon_indices), max(lon_indices)))
+                var_subset = var_data.isel(lat=slice(min(lat_indices), max(lat_indices)+1),
+                                           lon=slice(min(lon_indices), max(lon_indices)+1))
+              else:
+                lat_indices = [lat for lat, lon in index]
+                lon_indices = [lon for lat, lon in index]
+                var_subset = var_data.isel(lat=xr.DataArray(lat_indices, dims='gridcell'),
+                                           lon=xr.DataArray(lon_indices, dims='gridcell'))
             else:
-                var_subset = var_data.isel(lat=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
-                                           lon=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
+                var_subset = var_data
         elif ('ni' in var_data.dims and 'nj' in var_data.dims):
-            #Domain file
-            if keep2d:
+              #Domain file
+              if keep2d:
                 # Use original 2D indexing
                 lat_indices = [lat for lat, lon in index]
                 lon_indices = [lon for lat, lon in index]
-                var_subset = var_data.isel(nj=slice(min(lat_indices), max(lat_indices)),
-                                           ni=slice(min(lon_indices), max(lon_indices)))
-            else:
+                var_subset = var_data.isel(nj=slice(min(lat_indices), max(lat_indices)+1),
+                                           ni=slice(min(lon_indices), max(lon_indices)+1))
+              else:
                 # Flatten to 1D
                 var_subset = var_data.isel(nj=xr.DataArray([lat for lat, lon in index], dims='gridcell'),
                                            ni=xr.DataArray([lon for lat, lon in index], dims='gridcell'))
@@ -110,7 +126,8 @@ def subset_netcdf(self, index, input_file, output_file, keep2d=False):
                 var_subset = var_subset.transpose('nj', ...)
         elif ('gridcell' in var_data.dims):
             #Source dataset is 1D, simply extract
-            var_subset = var_data.isel({gridcell: index})
+            #var_subset = var_data.isel({gridcell: index})
+            var_subset = var_data.isel(gridcell=index)
         else:
             var_subset = var_data
         var_subset.to_netcdf(output_file,mode='a' if var_name != list(original_ds.data_vars)[0] else 'w')

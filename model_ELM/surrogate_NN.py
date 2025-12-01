@@ -82,13 +82,13 @@ def train_surrogate(self, myvars):
         
         print(f"Using {len(valid_indices)} valid samples out of {self.samples.shape[1]}")
         # Decide whether to use SVD or per-timestep approach
-        if nqoi > 500:
-            print(f"  {nqoi} timesteps > 500, using SVD approach")
+        if nqoi > 50:
+            print(f"  {nqoi} timesteps > 50, using SVD approach")
             self.use_svd[vname] = True
             # SVD will optimize process count internally
             self.train_svd_surrogate(vname, y, p, n_processes)
         else:
-            print(f"  {nqoi} timesteps <= 500, using per-timestep approach")
+            print(f"  {nqoi} timesteps <= 50, using per-timestep approach")
             self.use_svd[vname] = False
             # Optimize for per-timestep too
             n_processes_timestep = min(n_processes, nqoi)
