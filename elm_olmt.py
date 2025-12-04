@@ -217,13 +217,13 @@ def main():
     # Load case options and treatment options from config file
     case_options = {}
     treatment_options = {}
-    
+   
     if 'case_options' in cfg:
         case_options = cfg['case_options'].copy()
         #print('Case options:')
         #for key, value in case_options.items():
         #    print(f"  {key}: {value}")  
-   
+    
     if 'parameters' in cfg:
         all_parameters = cfg['parameters'].copy()
         # Split parameters into ELM and FATES based on prefix
@@ -511,6 +511,15 @@ def main():
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))
 
+        # Determine if we want a dynamic PFT file
+        if ('case_options' in cfg):
+            if ('pftdynfile' in cfg['case_options']):
+                if cfg['case_options']['pftdynfile'] == '':
+                    cases[c].nopftdyn = True
+            elif ('flanduse_timeseries' in cfg['case_options']):
+                if cfg['case_options']['flanduse_timeseries'] == '':
+                    cases[c].nopftdyn = True
+        
         # Set up the case (surface, domain and pftdata)
         print('Setting up case for site: '+site)
         cases[c].setup_case()
@@ -530,7 +539,8 @@ def main():
         if ('20TR' in compsets[c] and not use_fates):
             # Get the dynamic PFT data
             cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
-            cases[c].setup_domain_surfdata(makepftdyn=True)
+            if (not cases[c].nopftdyn):
+                cases[c].setup_domain_surfdata(makepftdyn=True)
 
         # Build the case
         print('Building case')

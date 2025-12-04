@@ -487,6 +487,8 @@ class ELMcase():
         surffile = self.case_options['fsurdat']
     if ('pftdynfile' in self.case_options.keys()):
         pftdynfile = self.case_options['pftdynfile']
+        if  pftdynfile == '':
+            self.nopftdyn = True
     elif ('flanduse_timeseries' in self.case_options.keys()):
         pftdynfile = self.case_options['flanduse_timeseries']
         if pftdynfile == '':
@@ -716,7 +718,7 @@ class ELMcase():
     self.customize_namelist(variable='fsurdat',value="'"+surffile+"'")
     if ('20TR' in self.casename):
       if (self.nopftdyn):
-          self.customize_namelist(variable='flanduse_timeseries',value='')
+          self.customize_namelist(variable='flanduse_timeseries',value="''")
       else:
           self.customize_namelist(variable='flanduse_timeseries',value="'"+pftdynfile+"'")
       self.customize_namelist(variable='check_finidat_fsurdat_consistency',value='.false.')
