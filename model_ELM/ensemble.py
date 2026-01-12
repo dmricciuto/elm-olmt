@@ -29,11 +29,19 @@ def read_parm_list(self, parm_list=''):
     self.nparms_ensemble = len(self.ensemble_parms)
 
 def get_default_parms(self):
-    #To do:  Handle FATES parameters
     parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
+    fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
+    CNP_parm_file = Dataset(self.OLMTdir+'/temp/CNP_parameters.nc','r')
     self.default_parms=[]
+    CNP_parms = ['ks_sorption', 'r_desorp', 'r_weather', 'r_adsorp', 'k_s1_biochem', 'smax', 'k_s3_biochem', \
+        'r_occlude', 'k_s4_biochem', 'k_s2_biochem']       
     for i, p in enumerate(self.ensemble_parms):
-        param_var = parm_file[p]
+        if 'fates' in p:
+            param_var = fates_parm_file[p]
+        elif p in CNP_parms:
+            param_var = CNP_parm_file[p]
+        else:   
+            param_var = parm_file[p]
         # Check the dimensions of the parameter
         if len(param_var.dimensions) == 0:
             # Scalar parameter - no PFT indexing needed
@@ -163,7 +171,8 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
         # Check if it's a site run (single point simulation)
         is_site_run = hasattr(self, 'site') and self.site != '' and self.site is not None
         if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename \
-            and not 'ad_spinup' in self.casename and is_site_run):
+            and not 'ad_spinup' in self.casename and not 'FATES' in self.compset and \
+            not 'ED' in self.compset and is_site_run):
             #Assume this is a final spinup case, do spinup diagnostic plots
             myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
         elif self.postproc_vars:

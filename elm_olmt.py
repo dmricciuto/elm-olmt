@@ -47,7 +47,11 @@ def load_config(config_file):
                 # Try to convert to numeric types
                 try:
                     # Try int first
-                    cfg[section][key] = [int(x) for x in items]
+                    if key in ['hist_nhtfrq', 'hist_mfilt']:
+                        # Store as comma-separated string for Fortran namelist
+                        cfg[section][key] = ', '.join(str(int(x)) for x in items)
+                    else:
+                        cfg[section][key] = [int(x) for x in items]
                 except ValueError:
                     try:
                         # Try float
