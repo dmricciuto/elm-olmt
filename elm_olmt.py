@@ -155,6 +155,7 @@ def main():
     mettype = cfg['simulation']['mettype']
     metdir = cfg['simulation'].get('metdir', '')
     case_suffix = cfg['simulation'].get('case_suffix', '')
+    case_prefix = cfg['simulation'].get('case_prefix', '')
 
     # Site configuration
     if runtype == 'site':
@@ -417,7 +418,7 @@ def main():
       for c in range(0,ncases):
         mysuffix = '_'.join(filter(None,[suffix[c],case_suffix]))
 
-        cases[c] = model_ELM.ELMcase(caseid='',compset=compsets[c], site=site, \
+        cases[c] = model_ELM.ELMcase(caseid=str(case_prefix),compset=compsets[c], site=site, \
             caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
             machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, project=project,  \
             res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
@@ -512,7 +513,10 @@ def main():
         print('Postproc_vars: '+str(cases[c].postproc_vars))
 
         # Determine if we want a dynamic PFT file
-        if ('case_options' in cfg):
+        if (use_fates):
+            cases[c].nopftdyn = True
+        else:
+          if ('case_options' in cfg):
             if ('pftdynfile' in cfg['case_options']):
                 if cfg['case_options']['pftdynfile'] == '':
                     cases[c].nopftdyn = True
