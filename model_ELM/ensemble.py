@@ -5,6 +5,8 @@ import numpy as np
 import datetime
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
+import xarray as xr
+import json
 
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
@@ -30,10 +32,23 @@ def read_parm_list(self, parm_list=''):
 
 def get_default_parms(self):
     #To do:  Handle FATES parameters
+    
     parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
+    parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
+    data_dict = parm_ds.to_dict()
+
+    print('LOADED DATASET IN XARRAY')
+    exit(0)
+    
     self.default_parms=[]
     for i, p in enumerate(self.ensemble_parms):
+        print(i,p)
+        #if ('fates_' in p):
+        #    
+        #else:
+            
         param_var = parm_file[p]
+        
         # Check the dimensions of the parameter
         if len(param_var.dimensions) == 0:
             # Scalar parameter - no PFT indexing needed

@@ -255,7 +255,7 @@ class ELMcase():
         if not(key in data['parameters']):
             print(f"Attempting to modify a parameter that is not in the input file")
             print(f"Requested parameter name: {key}")
-            print(f"File-path: {param_file_path)")
+            print(f"File-path: {param_file_path}")
         else:
 
             # Check dimensions of the variable
@@ -464,10 +464,12 @@ class ELMcase():
       #Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
     print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to the temp directory 
+    #Copy the parameter file to the temp directory
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
+        print("is adding")
+        exit(0)
         param_path = self.OLMTdir + '/temp/clm_params.nc'
         self.modify_ncinput_file(param_path, self.add_parameter, "parameter")
 
@@ -482,17 +484,20 @@ class ELMcase():
     if (self.fates_paramfile == ''):
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     print('FATES parameter file : '+self.fates_paramfile)
-    os.system('cp '+self.fates_paramfile+' '+self.OLMTdir+'/temp/fates_paramfile.json')
-    if (self.fates_pft >= 0):
+    fbase = self.OLMTdir+'/temp/fates_paramfile.json'
+    os.system('cp '+self.fates_paramfile+' '+fbase)
+    if (self.fates_pft > 0):
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
             fname_list=[]
             print('Duplicating '+str(self.pft_duplicates)+' times.')
             for pf in range(0,self.pft_duplicates):
-                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
-                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
-                        +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
+                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.json'
+                swapper_path = self.modelroot+'/src/external_models/fates/tools/pft_index_swapper.py'
+                swapcmd=swapper_path+' --pft-indices='+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname
+                os.system(swapcmd)
                 fname_list.append(fname)
+                
             # Open and concatenate along the 'fates_pft' dimension
             datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
             # Find variables that have 'fates_pft' as a dimension
