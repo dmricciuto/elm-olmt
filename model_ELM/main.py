@@ -489,37 +489,19 @@ class ELMcase():
     if (self.fates_pft > 0):
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
-            fname_list=[]
             print('Duplicating '+str(self.pft_duplicates)+' times.')
             for pf in range(0,self.pft_duplicates):
                 fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.json'
                 swapper_path = self.modelroot+'/src/external_models/fates/tools/pft_index_swapper.py'
                 swapcmd=swapper_path+' --pft-indices='+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname
                 os.system(swapcmd)
-                fname_list.append(fname)
-                
-            # Open and concatenate along the 'fates_pft' dimension
-            datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
-            # Find variables that have 'fates_pft' as a dimension
-            vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
-            # Subset only those vars
-            datasets_trimmed = [ds[vars_with_fpft] for ds in datasets]
-            ds_concat = xr.concat(datasets_trimmed, dim='fates_pft')
-            # Add back the rest of the variables (those without 'fates_pft')
-            vars_wo_fpft = [var for var in datasets[0].data_vars if 'fates_pft' not in datasets[0][var].dims]
-            for var in vars_wo_fpft:
-                ds_concat[var] = datasets[0][var]  # Use first file's value
-            ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
-            # Close datasets to free memory
-            for ds in datasets:
-                ds.close()
-            ds_concat.close()
-            # Clean up temporary files
-            for fname in fname_list:
-                os.remove(fname)
+
         else:
-            os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
-                self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')
+            fname = self.OLMTdir+'/temp/fates_paramfile.json'
+            swapper_path = self.modelroot+'/src/external_models/fates/tools/pft_index_swapper.py'
+            swapcmd=swapper_path+' --pft-indices='+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname
+            os.system(swapcmd)
+
 
     # Apply FATES parameter modifications
     if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
@@ -869,7 +851,7 @@ class ELMcase():
                   self.nutrient_comp.lower()+' -soil_decomp '+self.soil_decomp.lower()+'"'
           bldnml = bldnml.replace('cnt','century')
           self.xmlchange('ELM_BLDNML_OPTS',append=bldnml)
-        self.customize_namelist(variable='fates_paramfile',value="'"+self.rundir+"/fates_paramfile.nc'")
+        self.customize_namelist(variable='fates_paramfile',value="'"+self.rundir+"/fates_paramfile.json'")
         #if (self.fates_logging):
         #    self.customize_namelist(variable='use_fates_logging',value='.true.')
     self.customize_namelist(variable='nyears_ad_carbon_only',value='25')
@@ -904,8 +886,10 @@ class ELMcase():
 
     #set domain file information
     if (domainfile == ''):
-      self.xmlchange('ATM_DOMAIN_PATH',value='"\${RUNDIR}"')
-      self.xmlchange('LND_DOMAIN_PATH',value='"\${RUNDIR}"')
+      #self.xmlchange('ATM_DOMAIN_PATH',value='"\${RUNDIR}"')
+      #self.xmlchange('LND_DOMAIN_PATH',value='"\${RUNDIR}"')
+      self.xmlchange('ATM_DOMAIN_PATH',value='"${RUNDIR}"')
+      self.xmlchange('LND_DOMAIN_PATH',value='"${RUNDIR}"')
       self.xmlchange('ATM_DOMAIN_FILE',value='domain.nc')
       self.xmlchange('LND_DOMAIN_FILE',value='domain.nc')
     else:
@@ -995,7 +979,7 @@ class ELMcase():
       if (not 'fsoilordercon' in self.case_options.keys()):
         os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
       if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
-        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.nc '+self.rundir)
+        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.json '+self.rundir)
       if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)
       if (not 'surffile' in self.case_options.keys() and not 'fsurdat' in self.case_options.keys()):
