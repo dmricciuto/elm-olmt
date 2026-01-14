@@ -7,6 +7,7 @@ import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 import xarray as xr
 import json
+import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
@@ -88,9 +89,12 @@ def create_ensemble_script(self, walltime=24):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
+        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
-        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        if(self.queue.strip()==''):
+            myfile.write('#SBATCH --qos=regular\n')
+        else:
+            myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
@@ -133,9 +137,12 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
+        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
-        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        if(self.queue.strip()==''):
+            myfile.write('#SBATCH --qos=regular\n')
+        else:
+            myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')

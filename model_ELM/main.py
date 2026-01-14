@@ -12,6 +12,7 @@ from .MCMC import *
 from .netcdf4_functions import *
 from datetime import datetime
 import xarray as xr
+import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 def smart_loadtxt(filename):
     # Try comma first, then whitespace
@@ -143,8 +144,12 @@ class ELMcase():
     self.noslurm=False
     if ('linux' in self.machine or 'ubuntu' in self.machine or 'docker' in self.machine):
         self.noslurm=True
-    if self.queue == '':
-        self.queue='batch'
+    if(self.machine == 'pm-cpu'):
+        if self.queue == '':
+            self.queue='regular'
+    else:
+        if self.queue == '':
+            self.queue='batch'
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -1160,6 +1165,7 @@ class ELMcase():
                 stdout=log_file)
             jobnum=0
     else:
+        #code.interact(local=dict(globals(), **locals())) 
         result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                 stdout=subprocess.PIPE, text=True)
         output = result.stdout.strip()

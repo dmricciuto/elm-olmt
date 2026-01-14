@@ -21,7 +21,8 @@ modelroot = os.environ['HOME']+'/E3SM'
 exeroot = ''
 
 project = 'm2420'
-queue   = 'shared'
+account = 'm2420'
+queue   = 'shared'   # Defaults to 'regular'  on perlmutter
 walltime = 12  
 
 #----------------------Required inputs---------------------------------------------
@@ -45,7 +46,7 @@ lat_bounds = [-90,90]
 lon_bounds = [-180,180]
 res = 'hcru_hcru'          #Resolution of global files to extract from
 
-use_cpl_bypass = True      #Coupler bypass for meteorology
+use_cpl_bypass = False   #True      #Coupler bypass for meteorology
 nutrients      = 'CNP'     #none or SP (SP mode), C (carbon only), CN (carbon/nitrogen), or CNP (carbon/nitrogen/phosphorus)
 nutrient_comp  = 'RD'      #Relative demand (RD) or equilibirium chemistry approximiation (ECA)
 soil_decomp    = 'CTC'     #Convergent trophic cascade (CTC) or Century (CNT) model
@@ -248,7 +249,7 @@ for site in sites:
 
     cases[c] = model_ELM.ELMcase(caseid='',compset=compsets[c], site=site, \
         caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
-        machine=machine, exeroot=exeroot, suffix=mysuffix,  \
+        machine=machine, exeroot=exeroot, suffix=mysuffix, project=project,  \
         res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
         lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list)
 
