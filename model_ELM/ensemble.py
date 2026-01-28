@@ -40,8 +40,10 @@ def get_default_parms(self):
     parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
     data_dict = parm_ds.to_dict()
     
-    #To do:  Handle FATES json parameters
-    fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
+    if (self.fates_param_type == 'json'):
+        fates_parm_file = json.load(open(self.OLMTdir+'/temp/fates_paramfile.json','r'))
+    else:
+        fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
     
     CNP_parm_file = Dataset(self.OLMTdir+'/temp/CNP_parameters.nc','r')
     self.default_parms=[]
@@ -49,14 +51,21 @@ def get_default_parms(self):
         'r_occlude', 'k_s4_biochem', 'k_s2_biochem']       
     for i, p in enumerate(self.ensemble_parms):        
         if 'fates' in p:
-            #To do: Handle FATES json parameters
-            param_var = fates_parm_file[p]
+            if (self.fates_param_type == 'json'):
+                param_var = np.array(fates_parm_file['parameters'][p]['data'])
+                # Check dimensions of the variable
+                ndim = len(param_var.shape)
+            else:
+                param_var = fates_parm_file[p]
+                ndim = len(param_var.dimensions)
         elif p in CNP_parms:
             param_var = CNP_parm_file[p]
+            ndim = len(param_var.dimensions)
         else:   
             param_var = parm_file[p]
+            ndim = len(param_var.dimensions)    
         # Check the dimensions of the parameter
-        if len(param_var.dimensions) == 0:
+        if ndim == 0:
             # Scalar parameter - no PFT indexing needed
             self.default_parms.append(param_var[:])  # Read scalar value
         else:
