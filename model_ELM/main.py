@@ -1,6 +1,7 @@
 import socket, os, sys, csv, time, math, numpy
 import glob, re, subprocess
 import pickle
+import json
 from .makepointdata import makepointdata
 from .set_histvars import *
 from .ensemble import *
@@ -11,6 +12,7 @@ from .MCMC import *
 from .netcdf4_functions import *
 from datetime import datetime
 import xarray as xr
+import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 def smart_loadtxt(filename):
     # Try comma first, then whitespace
@@ -142,8 +144,12 @@ class ELMcase():
     self.noslurm=False
     if ('linux' in self.machine or 'ubuntu' in self.machine or 'docker' in self.machine):
         self.noslurm=True
-    if self.queue == '':
-        self.queue='batch'
+    if(self.machine == 'pm-cpu'):
+        if self.queue == '':
+            self.queue='regular'
+    else:
+        if self.queue == '':
+            self.queue='batch'
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -226,6 +232,131 @@ class ELMcase():
             value = line.split('=')[1]
     return value[:-1]   #avoid new line character
 
+
+  def modify_jsoninput_file(self, param_file_path, parameters, file_description="parameter"):
+
+    try:
+        # Use .strip() and os.path.expanduser to handle whitespace and '~' shortcuts
+        clean_path = param_file_path.strip()
+    
+        with open(clean_path, 'r') as file:
+            data = json.load(file)
+        
+    except FileNotFoundError:
+        print(f"Error: The file at {clean_path} was not found.")
+        data = {} # Set to empty dict to prevent further crashes
+        
+    except json.JSONDecodeError as e:
+        print(f"Error: Failed to parse JSON. Check for syntax errors: {e}")
+        print(f"File path: {clean_path}")
+        data = {}
+        
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        print(f"while attempting to open the the json parameter file: {clean_path}")
+        data = {}
+        
+    for key, value in parameters.items():
+        if not(key in data['parameters']):
+            print(f"Attempting to modify a parameter that is not in the input file")
+            print(f"Requested parameter name: {key}")
+            print(f"File-path: {param_file_path}")
+        else:
+
+            # Check dimensions of the variable
+            var = data['parameters'][key]
+            var_data = np.array(var['data'])
+            var_shape = var_data.shape
+
+            
+            if (not isinstance(value, list)):
+                # If this is a scalar input value, simple rules apply
+                data['parameters'][key]['data'] = value
+
+            else:
+                # If the input value is a list, its a little more complicated
+
+                # Check if first index is -1 (set all indices)
+                if len(value) >= 2 and int(value[0]) == -1:
+                    if len(value) > 2:
+                        print(f"Error: {key} has index -1 but more than 2 values in list. Use [-1, value] only.")
+                        continue
+                    # Set all indices to the same value
+                    all_value = value[1]
+                    print(f"  Setting all indices = {all_value}")
+                    data['parameters'][key]['data'] = value
+                    
+                else:
+                    # Check if variable is 2D
+                    if len(var_shape) == 2:
+                        # 2D parameter: expect pairs of [index1, index2, value]
+                        if len(value) % 3 != 0:
+                            print(f"Error: {key} is 2D but values not in groups of 3 [index1, index2, value]")
+                            continue
+                        
+                        for i in range(0, len(value), 3):
+                            if i + 2 >= len(value):
+                                break
+                            idx1 = int(value[i])
+                            idx2 = int(value[i+1]) 
+                            param_value = value[i+2]
+                            if idx1 < 0 or idx2 < 0:
+                                print(f"Error: {key} has negative indices [{idx1}, {idx2}]. Use -1 only to set all.")
+                                continue
+                            if idx1 >= var_shape[0] or idx2 >= var_shape[1]:
+                                print(f"Error: {key} indices [{idx1}, {idx2}] exceed dimensions {var_shape}")
+                                continue
+                            print(f"  Setting [{idx1}, {idx2}] = {param_value}")
+                            data['parameters'][key]['data'][idx1][idx2] = param_value
+                            
+                    elif len(var_shape) == 1 or file_description == "surface data":
+                        # 1D parameter: expect pairs of [index, value]
+                        for i in range(0, len(value)-1, 2):
+                            idx = int(value[i])
+                            param_value = value[i+1]
+                            if idx < 0:
+                                print(f"Error: {key} has negative index {idx}. Use -1 only to set all.")
+                                continue
+                            if idx >= var_shape[0]:
+                                print(f"Error: {key} index {idx} exceeds dimension {var_shape[0]}")
+                                continue
+                            data['parameters'][key]['data'][idx] = param_value
+                            print(f"  Setting index {idx} = {param_value}")
+                    else:
+                        print(f"Error: {key} has {len(var_shape)}D shape - only 1D and 2D parameters supported")
+                        continue
+                    
+    # Add metadata about original filename and modifications
+    timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        
+    # Update global attributes
+    # Everything below here assumes that you are going to actually make modification
+    # and not just query things. First step then is to modify the changelog of
+    # the file
+    # ------------------------------------------------------------------------------
+
+    change_log = f'modified by OLMT on: {timestamp}. Parameters changed: '+ ', '.join(parameters.keys())
+    
+    data['attributes']['history']
+    old_hist = data['attributes']['history']
+    new_hist = old_hist+'  '+change_log+'.'
+    data['attributes']['history'] = new_hist
+
+    try:
+        with open(clean_path, 'w') as outfile:
+            json.dump(data, outfile, indent=2)
+        
+    except FileNotFoundError:
+        print(f"Error: The file at {clean_path} was not found for writing.")
+        data = {} # Set to empty dict to prevent further crashes
+        
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+        print(f"while attempting to open the the json parameter file: {clean_path}")
+        data = {}
+
+        
+
   def modify_ncinput_file(self, param_file_path, parameters, file_description="parameter"):
     """
     Modify parameters in a NetCDF parameter file.
@@ -240,7 +371,6 @@ class ELMcase():
                 
                 # Check dimensions of the variable
                 var = nc.variables[key]
-                var_dims = var.dimensions  
                 var_shape = var.shape
 
                 if isinstance(value, list):
@@ -339,10 +469,12 @@ class ELMcase():
       #Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
     print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to the temp directory 
+    #Copy the parameter file to the temp directory
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
+        print("is adding")
+        exit(0)
         param_path = self.OLMTdir + '/temp/clm_params.nc'
         self.modify_ncinput_file(param_path, self.add_parameter, "parameter")
 
@@ -357,44 +489,29 @@ class ELMcase():
     if (self.fates_paramfile == ''):
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     print('FATES parameter file : '+self.fates_paramfile)
-    os.system('cp '+self.fates_paramfile+' '+self.OLMTdir+'/temp/fates_paramfile.nc')
-    if (self.fates_pft >= 0):
+    fbase = self.OLMTdir+'/temp/fates_paramfile.json'
+    os.system('cp '+self.fates_paramfile+' '+fbase)
+    if (self.fates_pft > 0):
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
-            fname_list=[]
             print('Duplicating '+str(self.pft_duplicates)+' times.')
             for pf in range(0,self.pft_duplicates):
-                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
-                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
-                        +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
-                fname_list.append(fname)
-            # Open and concatenate along the 'fates_pft' dimension
-            datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
-            # Find variables that have 'fates_pft' as a dimension
-            vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
-            # Subset only those vars
-            datasets_trimmed = [ds[vars_with_fpft] for ds in datasets]
-            ds_concat = xr.concat(datasets_trimmed, dim='fates_pft')
-            # Add back the rest of the variables (those without 'fates_pft')
-            vars_wo_fpft = [var for var in datasets[0].data_vars if 'fates_pft' not in datasets[0][var].dims]
-            for var in vars_wo_fpft:
-                ds_concat[var] = datasets[0][var]  # Use first file's value
-            ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
-            # Close datasets to free memory
-            for ds in datasets:
-                ds.close()
-            ds_concat.close()
-            # Clean up temporary files
-            for fname in fname_list:
-                os.remove(fname)
+                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.json'
+                swapper_path = self.modelroot+'/src/external_models/fates/tools/pft_index_swapper.py'
+                swapcmd=swapper_path+' --pft-indices='+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname
+                os.system(swapcmd)
+
         else:
-            os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' '+ \
-                self.OLMTdir+'/temp/fates_paramfile.nc -o '+self.OLMTdir+'/temp/fates_paramfile.nc')
+            fname = self.OLMTdir+'/temp/fates_paramfile.json'
+            swapper_path = self.modelroot+'/src/external_models/fates/tools/pft_index_swapper.py'
+            swapcmd=swapper_path+' --pft-indices='+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname
+            os.system(swapcmd)
+
 
     # Apply FATES parameter modifications
     if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
-        fates_param_path = self.OLMTdir + '/temp/fates_paramfile.nc'
-        self.modify_ncinput_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
+        fates_param_path = self.OLMTdir + '/temp/fates_paramfile.json'
+        self.modify_jsoninput_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
 
   def set_finidat_file(self, finidat_case='', finidat_year=0, finidat=''):
       if (finidat_case != ''):
@@ -739,7 +856,7 @@ class ELMcase():
                   self.nutrient_comp.lower()+' -soil_decomp '+self.soil_decomp.lower()+'"'
           bldnml = bldnml.replace('cnt','century')
           self.xmlchange('ELM_BLDNML_OPTS',append=bldnml)
-        self.customize_namelist(variable='fates_paramfile',value="'"+self.rundir+"/fates_paramfile.nc'")
+        self.customize_namelist(variable='fates_paramfile',value="'"+self.rundir+"/fates_paramfile.json'")
         #if (self.fates_logging):
         #    self.customize_namelist(variable='use_fates_logging',value='.true.')
     self.customize_namelist(variable='nyears_ad_carbon_only',value='25')
@@ -774,8 +891,10 @@ class ELMcase():
 
     #set domain file information
     if (domainfile == ''):
-      self.xmlchange('ATM_DOMAIN_PATH',value='"\${RUNDIR}"')
-      self.xmlchange('LND_DOMAIN_PATH',value='"\${RUNDIR}"')
+      #self.xmlchange('ATM_DOMAIN_PATH',value='"\${RUNDIR}"')
+      #self.xmlchange('LND_DOMAIN_PATH',value='"\${RUNDIR}"')
+      self.xmlchange('ATM_DOMAIN_PATH',value='"${RUNDIR}"')
+      self.xmlchange('LND_DOMAIN_PATH',value='"${RUNDIR}"')
       self.xmlchange('ATM_DOMAIN_FILE',value='domain.nc')
       self.xmlchange('LND_DOMAIN_FILE',value='domain.nc')
     else:
@@ -865,7 +984,7 @@ class ELMcase():
       if (not 'fsoilordercon' in self.case_options.keys()):
         os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
       if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
-        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.nc '+self.rundir)
+        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.json '+self.rundir)
       if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)
       if (not 'surffile' in self.case_options.keys() and not 'fsurdat' in self.case_options.keys()):
@@ -1046,6 +1165,7 @@ class ELMcase():
                 stdout=log_file)
             jobnum=0
     else:
+        #code.interact(local=dict(globals(), **locals())) 
         result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                 stdout=subprocess.PIPE, text=True)
         output = result.stdout.strip()

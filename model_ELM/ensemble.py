@@ -5,6 +5,9 @@ import numpy as np
 import datetime
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
+import xarray as xr
+import json
+import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
@@ -30,13 +33,23 @@ def read_parm_list(self, parm_list=''):
 
 def get_default_parms(self):
     parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
+    parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
+    data_dict = parm_ds.to_dict()
+    
+    parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
+    parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
+    data_dict = parm_ds.to_dict()
+    
+    #To do:  Handle FATES json parameters
     fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
+    
     CNP_parm_file = Dataset(self.OLMTdir+'/temp/CNP_parameters.nc','r')
     self.default_parms=[]
     CNP_parms = ['ks_sorption', 'r_desorp', 'r_weather', 'r_adsorp', 'k_s1_biochem', 'smax', 'k_s3_biochem', \
         'r_occlude', 'k_s4_biochem', 'k_s2_biochem']       
-    for i, p in enumerate(self.ensemble_parms):
+    for i, p in enumerate(self.ensemble_parms):        
         if 'fates' in p:
+            #To do: Handle FATES json parameters
             param_var = fates_parm_file[p]
         elif p in CNP_parms:
             param_var = CNP_parm_file[p]
@@ -81,9 +94,12 @@ def create_ensemble_script(self, walltime=24):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
+        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
-        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        if(self.queue.strip()==''):
+            myfile.write('#SBATCH --qos=regular\n')
+        else:
+            myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
@@ -126,9 +142,12 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
     if (self.queue == 'debug'):
         walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+'00:00\n')
+        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
-        myfile.write('#SBATCH --qos='+self.queue+'\n')
+        if(self.queue.strip()==''):
+            myfile.write('#SBATCH --qos=regular\n')
+        else:
+            myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
         myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')

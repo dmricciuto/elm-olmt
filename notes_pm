@@ -1,0 +1,6 @@
+Follow Dans instructions on the elm-olmt wiki, including:
+anaconda setup, and choosing the environment
+
+module load conda/Miniforge3-24.7.1-0
+conda activate OLMT_pm
+
