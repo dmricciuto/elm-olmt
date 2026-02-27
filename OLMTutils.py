@@ -156,6 +156,7 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
                     trans_year = s.split(',')[0]
                     siteinfo[sitename]['transitions'][trans_year] = {}
                     siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'] = np.zeros([npfts], float)
+                    siteinfo[sitename]['transitions'][trans_year]['PCT_CFT'] = np.zeros([36],float)
                     for p in range(0, 5):
                         pindex = int(s[:-1].split(',')[p * 2 + 2])
                         ppct = float(s[:-1].split(',')[p * 2 + 1])

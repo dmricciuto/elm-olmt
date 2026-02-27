@@ -7,7 +7,7 @@ import numpy as np
 
 
 #Get default directories, automatically detect machine if machine_name=''
-machine, rootdir, inputdata, queue, project = get_machine_info(machine_name='')
+machine, rootdir, inputdata, queue, project, hostname = get_machine_info(machine_name='')
 
 #set rootdir and inputdata below if you want to override defaults
 caseroot= rootdir+'/e3sm_cases'

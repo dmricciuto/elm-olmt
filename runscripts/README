@@ -1,0 +1,52 @@
+For running elm-olmt with crops make the following modifications:
+
+------------------------------------------------------------------
+git diff components/elm/bld/namelist_files/namelist_defaults.xml
+diff --git a/components/elm/bld/namelist_files/namelist_defaults.xml b/components/elm/bld/namelist_files/namelist_defaults.xml
+index aebc38a9c9..d9f6dbf633 100644
+--- a/components/elm/bld/namelist_files/namelist_defaults.xml
++++ b/components/elm/bld/namelist_files/namelist_defaults.xml
+@@ -419,6 +419,8 @@ lnd/clm2/surfdata_map/surfdata_1x1_urbanc_alpha_simyr2000_c130927.nc</fsurdat>
+ <!-- for pre-industrial simulations - year 1850 -->
+ <fsurdat hgrid="360x720cru"   sim_year="1850" use_crop=".false."                           >
+ lnd/clm2/surfdata_map/surfdata_360x720cru_simyr1850_c180216.nc</fsurdat>
++<fsurdat hgrid="360x720cru"   sim_year="1850" use_crop=".true."                           >
++lnd/clm2/surfdata_map/surfdata_360x720cru_50pfts_simyr1850_c240120.nc</fsurdat>
+ <fsurdat hgrid="48x96"        sim_year="1850" use_crop=".false." >
+ lnd/clm2/surfdata_map/surfdata_48x96_simyr1850_c130927.nc</fsurdat>
+ 
+@@ -515,6 +517,8 @@ lnd/clm2/surfdata_map/surfdata_conusx4v1_simyr2000_c160503.nc</fsurdat>
+ 
+ <flanduse_timeseries hgrid="360x720cru"    sim_year_range="1850-2015"
+  use_crop=".false." >lnd/clm2/surfdata_map/landuse.timeseries_360x720cru_hist_simyr1850-2015_c180220.nc</flanduse_timeseries>
++<flanduse_timeseries hgrid="360x720cru"    sim_year_range="1850-2015"
++ use_crop=".true." >lnd/clm2/surfdata_map/landuse.timeseries_360x720cru_hist_50pfts_simyr1850-2015_c240202.nc</flanduse_timeseries>
+ <flanduse_timeseries hgrid="0.9x1.25"      
+  use_crop=".false." >lnd/clm2/surfdata_map/landuse.timeseries_0.9x1.25_hist_simyr1850-2015_c180306.nc</flanduse_timeseries>
+ <flanduse_timeseries hgrid="1.9x2.5"
+
+
+------------------------------------------------------------------
+git diff components/elm/cime_config/config_compsets.xml
+diff --git a/components/elm/cime_config/config_compsets.xml b/components/elm/cime_config/config_compsets.xml
+index d6ae2ec97d..8ab416f1c0 100644
+--- a/components/elm/cime_config/config_compsets.xml
++++ b/components/elm/cime_config/config_compsets.xml
+@@ -114,6 +114,16 @@
+     <lname>1850_SATM_ELM%CN-CROP_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+   </compset>
+ 
++  <compset>
++    <alias>ICB1850ELMCNCROP</alias>
++    <lname>1850_SATM_ELM%CN-CROP_SICE_SOCN_MOSART_SGLC_SWAV</lname>
++  </compset>
++
++   <compset>
++     <alias>ICB20TRELMCNCROP</alias>
++     <lname>20TR_SATM_ELM%CN-CROP_SICE_SOCN_MOSART_SGLC_SWAV</lname>
++   </compset>
++
+   <compset>
+     <alias>IRCP45ELMBGC</alias>
+     <lname>RCP4_DATM%QIA_ELM%BGC_SICE_SOCN_MOSART_SGLC_SWAV</lname>
+------------------------------------------------------------------
