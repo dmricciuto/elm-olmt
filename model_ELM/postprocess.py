@@ -117,7 +117,7 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
     if (hist_nhtfrq == 0):
       nperyear=12
     else:
-      nperyear = abs(8760/hist_nhtfrq)
+      nperyear = max(abs(8760/hist_nhtfrq), 1)
     file_list_all = np.sort(glob.glob(self.casename+'.elm.h'+str(hnum)+'.*.nc'))
     file_list = []
     #Filter the requested years

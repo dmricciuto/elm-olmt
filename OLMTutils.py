@@ -7,6 +7,7 @@ def get_machine_info(machine_name=''):
     queue = ''
     project = ''
     hostname = ''
+    apptainer_bind = ''
     if (machine_name == ''):
         if ('HOSTNAME' in os.environ):
             machine_name=os.environ['HOSTNAME']
@@ -20,6 +21,14 @@ def get_machine_info(machine_name=''):
         hostname = 'baseline.ccs.ornl.gov'
         queue = 'batch'
         project = 'CLI185'
+        apptainer_bind = '/gpfs/wolf2'
+    elif ('cades' in machine_name):
+        rootdir = '/lustre/or-scratch/cades-ccsi/'+os.environ['USER']
+        inputdata = '/lustre/or-scratch/cades-ccsi/proj-shared/project_acme/e3sm_inputdata/'
+        machine = 'cades'
+        hostname = 'or-login.ornl.gov'
+        queue = 'batch'
+        apptainer_bind = '/lustre/or-scratch'
     elif  ('chrlogin' in machine_name or 'chrysalis' in machine_name):
         rootdir = '/lcrc/group/e3sm/'+os.environ['USER']+'/scratch'
         inputdata = '/lcrc/group/e3sm/ccsm-data/inputdata'
@@ -44,7 +53,7 @@ def get_machine_info(machine_name=''):
         rootdir = '/output'
         inputdata = '/inputdata'
         machine = 'docker'
-    return machine, rootdir, inputdata, queue, project, hostname
+    return machine, rootdir, inputdata, queue, project, hostname, apptainer_bind
 
 #Function to get the available site groups
 def get_sitegroups(inputdata, sftp=None):

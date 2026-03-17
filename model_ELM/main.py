@@ -28,7 +28,8 @@ class ELMcase():
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', project = '',\
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
-            point_list=[], namelist_options=[],casename='',mpilib='', olmtdir=''):
+            point_list=[], namelist_options=[],casename='',mpilib='', olmtdir='', walltime=24, 
+            apptainer='', apptainer_bind = '/'):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -76,6 +77,9 @@ class ELMcase():
         self.queue=queue
         self.project=project
         self.get_machine(machine=machine)
+        # Apptainer container image (optional)
+        self.apptainer = apptainer
+        self.apptainer_bind = apptainer_bind
         self.compiler=''
         self.pio_version=2
         self.compset=compset
@@ -115,9 +119,10 @@ class ELMcase():
         self.postproc_endyear=9999
         self.namelist_options=namelist_options
         self.mpilib=''
+        self.walltime=walltime
 
   def setup_ensemble(self, sampletype='monte_carlo',parm_list='', ensemble_file='', \
-          np_ensemble=64, nsamples=100, obs={}, obs_err={}):
+          np_ensemble=64, nsamples=100, obs={}, obs_err={}, finidat_root=''):
     read_parm_list(self, parm_list=parm_list)
     if (ensemble_file == ''):
       create_samples(self, sampletype=sampletype, parm_list=parm_list,nsamples=nsamples)
@@ -125,6 +130,9 @@ class ELMcase():
       self.ensemble_file = ensemble_file
       self.samples = np.transpose(smart_loadtxt(ensemble_file))
       self.nsamples = np.shape(self.samples)[1]
+    self.finidat_root = finidat_root
+    if (finidat_root != ''):
+      self.has_finidat = True
     self.np_ensemble=np_ensemble
     create_ensemble_script(self)
     self.get_default_parms()
@@ -587,12 +595,17 @@ class ELMcase():
         os.system('rm -rf '+self.casedir)    
     print("CASE directory is: "+self.casedir)
     #create the case
-    walltime=24
-    timestr=str(int(float(walltime)))+':'+str(int((float(walltime)- \
-                                     int(float(walltime)))*60))+':00'
+    timestr=str(int(float(self.walltime)))+':'+str(int((float(self.walltime)- \
+                                     int(float(self.walltime)))*60))+':00'
     #IF the resolution is user defined (site), we will first create a case with 
     #original resolution to get them correct domain, surface and land use files.
-    cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
+    if (self.apptainer != ''):
+      cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.modelroot+'/cime/scripts '+ \
+              self.apptainer+' ./create_newcase --case '+self.casedir+ \
+           ' --mach docker --compset '+self.compset+' --res '+self.res+' --walltime '+timestr+ \
+           ' --handle-preexisting-dirs u' 
+    else:
+      cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
            self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u' 
     if (self.project != ''):
       cmd = cmd+' --project '+self.project
@@ -773,6 +786,7 @@ class ELMcase():
     if (not self.is_bypass() and not 'default' in self.forcing):
       if (not 'site' in self.forcing):
         self.datm_mode = 'CLMGSWP3v1'   #CLMCRUNCEP
+        self.datm_mode = 'uELM_TES'
         self.xmlchange('DATM_MODE',value=self.datm_mode)
       else:
         self.xmlchange('DATM_MODE',value='CLM1PT') 
@@ -781,6 +795,7 @@ class ELMcase():
         self.xmlchange('DATM_CLMNCEP_YR_END',value=str(self.met_endyear))
       else:
         self.xmlchange('DATM_CLMNCEP_YR_END',value=str(self.met_endyear_spinup))
+      self.xmlchange('DATM_CLMNCEP_YR_ALIGN',value=str(self.met_alignyear))
     #Change simulation timestep
     if (float(self.tstep) != 0.5):
       self.xmlchange('ATM_NCPL',value=str(int(24/float(self.tstep))))
@@ -817,8 +832,13 @@ class ELMcase():
     if (self.has_finidat):
         self.customize_namelist(variable='finidat',value="'"+self.finidat+"'")
     #Setup the new case
-    result = subprocess.run(['./case.setup'], stdout=subprocess.PIPE, \
-            stderr=subprocess.PIPE, text=True)
+    if (self.apptainer != ''):
+        cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer + \
+                    ' ./case.setup'
+    else:
+        cmd = './case.setup'
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, \
+            shell=True)
     if (result.returncode > 0):
         print('Error: runcase.py failed to setup case')
         print(result.stderr)
@@ -996,15 +1016,25 @@ class ELMcase():
         self.xmlchange('LND_NY',value='1')
         self.xmlchange('ATM_NX',value='1')
         self.xmlchange('ATM_NY',value='1')
-        result = subprocess.run(['./case.setup'], stdout=subprocess.PIPE, \
-            stderr=subprocess.PIPE, text=True)
+        if (self.apptainer != ''):
+            cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer+ \
+                    ' ./case.setup'
+        else:
+            cmd = './case.setup'
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, \
+                shell=True)
 
       if (self.dobuild):
+        if (self.apptainer != ''):
+            cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer + \
+                    ' ./case.build'
+        else:
+            cmd = './case.build'
         if (clean):
-          result = subprocess.run(['./case.build','--clean-all'], \
-                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-        result = subprocess.run(['./case.build'], \
-                stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+          result = subprocess.run(cmd+' --clean-all', stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
+                  text=True, shell=True)
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
+                  text=True, shell=True)
         if (result.returncode > 0):
           print('Error:  Failed to build case.  Aborting')
           print(result.stderr)
@@ -1157,9 +1187,15 @@ class ELMcase():
 
       # run preview_namelists to copy user_datm.streams.... to CaseDocs
       if os.path.exists(os.path.abspath(self.modelroot)+'/cime/scripts/Tools/preview_namelists'):
-        cmd=os.path.abspath(self.modelroot)+'/cime/scripts/Tools/preview_namelists'
+        cmdpath=os.path.abspath(self.modelroot)+'/cime/scripts/Tools'
       else:
-        cmd=os.path.abspath(self.modelroot)+'/cime/CIME/Tools/preview_namelists'
+        cmdpath=os.path.abspath(self.modelroot)+'/cime/CIME/Tools'
+      if (self.apptainer != ''):
+          cmd = 'apptainer exec --bind '+self.apptainer_bind+' '+ \
+                ' --pwd '+self.casedir+' '+self.apptainer+' '+cmdpath+'/preview_namelists'
+      else:
+        cmd = cmdpath+'/preview_namelists'
+
       result = subprocess.run(cmd, stdout=subprocess.PIPE, \
             stderr=subprocess.PIPE, text=True, shell=True)
       if (result.returncode > 0):

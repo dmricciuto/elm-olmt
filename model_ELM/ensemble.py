@@ -9,6 +9,49 @@ import xarray as xr
 import json
 import code  # For development: code.interact(local=dict(globals(), **locals()))
 
+
+def find_latest_restart(finidat_path):
+    """
+    Search `finidat_path` for files matching `*elm.r.*` and
+    return the most recent valid restart file's absolute path.
+
+    A valid restart file here is one that:
+      - is a regular file
+      - has non-zero size
+      - can be opened by netCDF4.Dataset
+
+    Returns `None` if no valid restart file is found.
+    """
+    import glob
+
+    if not finidat_path:
+        return None
+    pattern = os.path.join(os.path.abspath(finidat_path), '**', '*elm.r.*')
+    candidates = glob.glob(pattern, recursive=True)
+    if not candidates:
+        return None
+
+    # Filter to regular, non-empty files and verify netCDF readability
+    valid = []
+    for f in candidates:
+        try:
+            if not os.path.isfile(f):
+                continue
+            if os.path.getsize(f) == 0:
+                continue
+            # try opening with netCDF4 to ensure it's a readable restart file
+            ds = Dataset(f, 'r')
+            ds.close()
+            valid.append(f)
+        except Exception:
+            continue
+
+    if not valid:
+        return None
+
+    latest = max(valid, key=lambda x: os.path.getmtime(x))
+    return os.path.abspath(latest)
+
 #Read the parameter list file
 def read_parm_list(self, parm_list=''):
     os.chdir(self.OLMTdir)
@@ -40,15 +83,18 @@ def get_default_parms(self):
     parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
     data_dict = parm_ds.to_dict()
     
-    if (self.fates_param_type == 'json'):
+    if ('FATES' in self.compset or 'ED' in self.compset):
+      if (self.fates_param_type == 'json'):
         fates_parm_file = json.load(open(self.OLMTdir+'/temp/fates_paramfile.json','r'))
-    else:
+      else:
         fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
     
     CNP_parm_file = Dataset(self.OLMTdir+'/temp/CNP_parameters.nc','r')
     self.default_parms=[]
     CNP_parms = ['ks_sorption', 'r_desorp', 'r_weather', 'r_adsorp', 'k_s1_biochem', 'smax', 'k_s3_biochem', \
-        'r_occlude', 'k_s4_biochem', 'k_s2_biochem']       
+        'r_occlude', 'k_s4_biochem', 'k_s2_biochem']      
+    surfparms = ['MONTHLY_LAI', 'ORGANIC', 'PCT_SAND', 'PCT_CLAY', 'SECONDARY_P', 'APATITE_P', \
+            'LABILE_P', 'OCCLUDED_P']
     for i, p in enumerate(self.ensemble_parms):        
         if 'fates' in p:
             if (self.fates_param_type == 'json'):
@@ -60,6 +106,10 @@ def get_default_parms(self):
                 ndim = len(param_var.dimensions)
         elif p in CNP_parms:
             param_var = CNP_parm_file[p]
+            ndim = len(param_var.dimensions)
+        elif p in surfparms:
+            surffile = Dataset(self.OLMTdir+'/temp/surfdata.nc','r')
+            param_var = surffile[p]
             ndim = len(param_var.dimensions)
         else:   
             param_var = parm_file[p]
@@ -87,7 +137,7 @@ def create_samples(self,sampletype='monte_carlo',nsamples=100,parm_list=''):
     os.system('mkdir -p parm_samples')
     np.savetxt(self.ensemble_file,np.transpose(self.samples))
 
-def create_ensemble_script(self, walltime=24):
+def create_ensemble_script(self):
     #Create the PBS script we will submit to run the ensemble
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
@@ -101,9 +151,10 @@ def create_ensemble_script(self, walltime=24):
     myfile = open('case.submit_ensemble','w')
     myfile.write('#!/bin/bash -e\n\n')
     if (self.queue == 'debug'):
-        walltime=2
+        print('Debug queue selected, setting walltime to 2 hours')
+        self.walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH --time='+str(self.walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
         if(self.queue.strip()==''):
             myfile.write('#SBATCH --qos=regular\n')
@@ -111,7 +162,7 @@ def create_ensemble_script(self, walltime=24):
             myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
-        myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH -t '+str(self.walltime)+':00:00\n')
         myfile.write('#SBATCH -p '+self.queue+'\n')
         if (self.project != ''):
             myfile.write('#SBATCH -A '+self.project+'\n')
@@ -120,7 +171,12 @@ def create_ensemble_script(self, walltime=24):
 
     myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
-    myfile.write('./preview_namelists\n\n')
+    if (self.apptainer != ''):
+      myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
+                ' --pwd '+self.caseroot+'/'+self.casename+ ' '+ \
+                self.apptainer+' ./preview_namelists\n')
+    else:     
+      myfile.write('./preview_namelists\n')
     myfile.write('ulimit -n '+str(self.nsamples+1024)+'\n')
     myfile.write('cd '+self.OLMTdir+'\n')
     myfile.write('./manage_ensemble.py --case '+self.casename+'\n')
@@ -131,7 +187,7 @@ def create_ensemble_script(self, walltime=24):
     self.UQ_output = self.runroot+'/UQ/analysis/'+self.casename
     os.system('mkdir -p '+self.UQ_output)
 
-def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
+def create_multisite_script(self,sites,scriptdir,cases_compare=""):
     #Create the PBS script we will submit to run multiple sites
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
@@ -149,9 +205,10 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
     myfile = open(fname,'w')
     myfile.write('#!/bin/bash -e\n\n')
     if (self.queue == 'debug'):
-        walltime=2
+        print('Debug queue selected, setting walltime to 2 hours')
+        self.walltime=2
     if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH --time='+str(self.walltime)+':00:00\n')
         myfile.write('#SBATCH --constraint=cpu\n')
         if(self.queue.strip()==''):
             myfile.write('#SBATCH --qos=regular\n')
@@ -159,7 +216,7 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
             myfile.write('#SBATCH --qos='+self.queue+'\n')
         myfile.write('#SBATCH --account='+self.project+'\n')
     else:
-        myfile.write('#SBATCH -t '+str(walltime)+':00:00\n')
+        myfile.write('#SBATCH -t '+str(self.walltime)+':00:00\n')
         myfile.write('#SBATCH -p '+self.queue+'\n')
         if (self.project != ''):
             myfile.write('#SBATCH -A '+self.project+'\n')
@@ -170,7 +227,12 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
     for s in sites:
       myfile.write('cd '+self.caseroot+'/'+self.casename.replace(sites[0],s)+'\n')
-      myfile.write('./preview_namelists\n')
+      if (self.apptainer != ''):
+        myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
+                ' --pwd '+self.caseroot+'/'+self.casename.replace(sites[0],s)+ ' '+ \
+                self.apptainer+' ./preview_namelists\n')
+      else:
+        myfile.write('./preview_namelists\n')
       myfile.write('cd '+self.runroot+'/'+self.casename.replace(sites[0],s)+'/run\n')
       myfile.write('mkdir -p timing/checkpoints\n')
       #restart file options
@@ -191,7 +253,13 @@ def create_multisite_script(self,sites,scriptdir,cases_compare="",walltime=24):
         myfile.write('mpiexec -n '+str(self.np)+' '+self.exeroot+'/e3sm.exe > '+ \
            self.rundir+'/e3sm_log.txt &\n\n')
       else:
-        myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
+        if (self.apptainer != ''):
+            myfile.write('srun -n '+str(self.np)+' -c 1 apptainer exec '+ \
+                ' --bind '+self.apptainer_bind+' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
+                +self.apptainer+' '+self.exeroot+'/e3sm.exe > '+ \
+                self.rundir+'/e3sm_log.txt &\n\n')
+        else:
+            myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
                 self.rundir+'/e3sm_log.txt &\n\n')
     myfile.write('wait\n')
     myfile.write('cd '+self.OLMTdir+'\n')
@@ -283,10 +351,18 @@ def ensemble_copy(self, ens_num):
                 myoutput.write(" fsurdat = '"+surffile_new+"'\n")
                 surffile = ens_dir+'/surfdata_'+gst[1:]+'.nc'
             elif ('finidat = ' in s and self.has_finidat):
-                finidat_file_path = os.path.abspath(self.rundir_UQ)+'/../'+self.dependcase+'/g'+gst[1:]
-                finidat_file_name = self.finidat.split('/')[-1]
+                if (self.finidat_root != ''):
+                   finidat_file_path = self.finidat_root+'/g'+gst[1:]
+                   finidat_file_name = find_latest_restart(finidat_file_path).split('/')[-1]
+                   if finidat_file_name is None:
+                          print('No valid restart file found in '+finidat_file_path+'. Exiting.')
+                          sys.exit(1)
+                else:
+                    finidat_file_path = os.path.abspath(self.rundir_UQ)+'/../'+self.dependcase+'/g'+gst[1:]
+                    finidat_file_name = self.finidat.split('/')[-1]
                 #finidat_file_orig = self.finidat
                 finidat_file_new  = finidat_file_path+'/'+finidat_file_name 
+                print(finidat_file_new)
                 #if ('ad_spinup' in self.dependcase): 
                 #        os.system('python adjust_restart.py --rundir '+finidat_file_path+' --casename '+ \
                 #            self.dependcase)
@@ -334,7 +410,8 @@ def ensemble_copy(self, ens_num):
          myvar = self.getncvar(finidat_file_new, v)
          myvar = parm_values[pnum] * myvar
          ierr = self.putncvar(finidat_file_new, v, myvar)
-    elif (p == 'MONTHLY_LAI' or p == 'ORGANIC' or p == 'PCT_SAND' or p == 'PCT_CLAY'):
+    elif (p == 'MONTHLY_LAI' or p == 'ORGANIC' or p == 'PCT_SAND' or p == 'PCT_CLAY' \
+            or 'SECOND_P' in p or 'APATITE_P' in p or 'LABILE_P' in p or 'OCCLUDED_P' in p):
       myfile = surffile
       param = self.getncvar(myfile, p)
       param[:] = parm_values[pnum]

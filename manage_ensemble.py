@@ -105,10 +105,12 @@ def postprocess_ensemble(n):
   #Postprocess
   if (mycase.postproc_vars != []):
       for v in mycase.postproc_vars:
-        hnum=1
+        hnum=1  #default is h1 file (usually daily output with gridcell average)
+        if (mycase.postproc_freq == 'annual'):
+          hnum=0  #annual output is usually in h0 file (e.g. in spinup)
         mypfts=[0]
         if ('_pft' in v):
-            #PFT level outputs requested
+            #PFT level outputs requested, usually in h2
             hnum=2
             mypfts=mycase.postproc_pfts
         for p in mypfts:
@@ -149,10 +151,16 @@ if (not options.UQ_only):
       with open(log_file_path, "w") as log_file:
         if (mycase.noslurm == False):
           node_submit=get_node_submit(pactive,process_nodes,mynodes)
-          command = ['srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+' '+mycase.exeroot+'/e3sm.exe']
+          if (mycase.apptainer != ''):
+            command = 'srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+ \
+              ' apptainer exec --bind '+mycase.apptainer_bind+' --pwd '+rundir+\
+              ' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
+              +mycase.apptainer+' '+mycase.exeroot+'/e3sm.exe'
+          else:
+            command = 'srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+' '+mycase.exeroot+'/e3sm.exe'
           process_nodes.append(node_submit)
         else:
-          command = [mycase.exeroot+'/e3sm.exe']
+          command = mycase.exeroot+'/e3sm.exe'
         if (options.postproc_only):
             command='ls'
         process = subprocess.Popen(command, shell=True, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
@@ -193,12 +201,14 @@ if (mycase.postproc_vars != []):
         #Run MCMC for the observation variables
         obs_mcmc = [v for v in mycase.postproc_vars if v in mycase.obs.keys()]
         # Always run single-site MCMC first
-        mycase.MCMC(obs_mcmc, nwalkers=24, nsteps=10000, multisite=False)
+        mycase.nobs_vars = 3
+        nwalkers = max(24, (mycase.nparms_ensemble+mycase.nobs_vars)*2)
+        mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=10000, multisite=False)
         
         # Check if multisite MCMC should be run
         if hasattr(mycase, 'all_sites') and mycase.all_sites is not None and len(mycase.all_sites) > 1:
             print(f"Running multisite MCMC for {len(mycase.all_sites)} sites: {mycase.all_sites}")
-            mycase.MCMC(obs_mcmc, nwalkers=24, nsteps=10000, multisite=True)
+            mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=10000, multisite=True)
             
         #Save postprocessed output
         mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')

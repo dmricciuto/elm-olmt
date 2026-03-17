@@ -137,7 +137,7 @@ def main():
     
     # Get machine info
     machine_name = cfg['machine'].get('machine_name', '')
-    machine, rootdir, inputdata, queue, project, hostname = \
+    machine, rootdir, inputdata, queue, project, hostname, apptainer_bind = \
         get_machine_info(machine_name=machine_name)
     print('Machine: '+machine+'\n')
     
@@ -149,6 +149,8 @@ def main():
     runroot = cfg['machine'].get('runroot', rootdir + '/e3sm_run')
     modelroot = cfg['machine'].get('modelroot', '')
     exeroot = cfg['machine'].get('exeroot', '')
+    walltime = cfg['machine'].get('walltime', 24)
+    apptainer = cfg['machine'].get('apptainer', '')
     print('Run root directory:  '+runroot)
     print('Case root directory: '+caseroot)
     print('Input data directory: '+inputdata)
@@ -216,6 +218,7 @@ def main():
             nsamples = cfg['ensemble']['nsamples']
             np_ensemble = cfg['ensemble'].get('np_ensemble',nsamples)
             ensemble_file = cfg['ensemble'].get('ensemble_file','')
+            finidat_root = cfg['ensemble'].get('finidat_root', '')
     else:
         parm_list = ''
 
@@ -427,7 +430,7 @@ def main():
             machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, project=project,  \
             res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
-            olmtdir=scriptdir)
+            olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind)
         #Save the other site names in first site's cases (for use in multi-site calibration)
         if site == sites[-1]:
             cases[c].all_sites = [s for s in sites]
@@ -504,6 +507,7 @@ def main():
             if (has_obs and site != ''):
                 cases[c].obs = {}
                 cases[c].obs_err = {}
+                cases[c].nobs_vars = len(obs_vars)
                 for v in obs_vars:
                     if not v in postproc_vars:
                         print('Adding observation variable to postprocessing: '+v)
@@ -538,12 +542,17 @@ def main():
             if (site == sites[0] and c == 0):
                 # Get the ensemble file from the first site and case
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
-                    ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err)
+                    ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err, \
+                        finidat_root=finidat_root)
                 ensemble_file = cases[c].ensemble_file
             else:
+                thisfinidat_root = ''
+                if (c == 0):
+                    thisfinidat_root = finidat_root.replace(sites[0], site)
                 # Use the ensemble file for subsequent cases and sites
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
-                    ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err)
+                    ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err, \
+                        finidat_root=thisfinidat_root)
         if ('20TR' in compsets[c] and not use_fates):
             # Get the dynamic PFT data
             cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
