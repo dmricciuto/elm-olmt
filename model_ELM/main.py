@@ -117,6 +117,10 @@ class ELMcase():
         self.postproc_vars=[]
         self.postproc_startyear=-1
         self.postproc_endyear=9999
+        self.postproc_pfts=[0]
+        self.postproc_cols=[0]
+        self.postproc_freq='monthly'
+        self.postproc_timeaverage=1
         self.namelist_options=namelist_options
         self.mpilib=''
         self.walltime=walltime
@@ -1279,5 +1283,4 @@ _add_methods_from_module(get_fluxnet_obs)
 _add_methods_from_module(surrogate_NN)
 _add_methods_from_module(run_GSA)
 _add_methods_from_module(MCMC)
-
 

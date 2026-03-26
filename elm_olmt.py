@@ -266,6 +266,7 @@ def main():
         postproc_endyear = cfg['postprocessing'].get('endyear', def_postproc_endyear)
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
         postproc_pfts = cfg['postprocessing'].get('pfts', [0])
+        postproc_cols = cfg['postprocessing'].get('cols', [0])
         postproc_timeaverage = cfg['postprocessing'].get('timeaverage', 1)
 
    # Observations 
@@ -502,6 +503,7 @@ def main():
             cases[c].postproc_endyear = postproc_endyear
             cases[c].postproc_freq = postproc_freq
             cases[c].postproc_pfts = postproc_pfts
+            cases[c].postproc_cols = postproc_cols
             cases[c].postproc_timeaverage = postproc_timeaverage
             # Also get the observations if requested, use postproc
             if (has_obs and site != ''):

@@ -113,6 +113,10 @@ def postprocess_ensemble(n):
             #PFT level outputs requested, usually in h2
             hnum=2
             mypfts=mycase.postproc_pfts
+        elif ('_col' in v):
+            # Column level outputs requested, usually in h2
+            hnum=2
+            mypfts=mycase.postproc_cols
         for p in mypfts:
           if (mycase.postproc_freq == 'daily' or mycase.postproc_freq == 'hourly'):  #default
             mycase.postprocess(v, ens_num=n,startyear=mycase.postproc_startyear, \
@@ -212,7 +216,6 @@ if (mycase.postproc_vars != []):
             
         #Save postprocessed output
         mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
-
 
 
 

@@ -45,6 +45,9 @@ else:
         if ('_pft' in v):
             hnum = 2 #Assume pft-level output is in h2 file
             myindex = list(reference_case.postproc_pfts)
+        elif ('_col' in v):
+            hnum = 2 #Assume column-level output is in h2 file
+            myindex = list(reference_case.postproc_cols)
         else:
             hnum = 1
             myindex = [0]
@@ -60,6 +63,7 @@ else:
         
         # Process each index (e.g., different PFTs)
         for i in myindex:
+            print(v,myindex)
             # Create a single plot for all cases
             plt.figure(figsize=(12, 6))
             
@@ -80,7 +84,7 @@ else:
                 if len(cases) > 1:
                     # Get the processed data
                     var_out = v
-                    if ('_pft' in v):
+                    if ('_pft' in v or '_col' in v):
                         var_out = var_out + str(i)
                     
                     # Plot this case's data on the combined plot
@@ -108,4 +112,3 @@ else:
             else:
                 # Close the figure we created but didn't use for single case
                 plt.close()
-

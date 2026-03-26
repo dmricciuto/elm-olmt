@@ -4,6 +4,15 @@ import re,os,glob
 import numpy as np
 import matplotlib.pyplot as plt
 
+def get_postproc_basevar(var):
+    return var.split('_pft')[0].split('_col')[0]
+
+def is_pft_var(var):
+    return '_pft' in var
+
+def is_col_var(var):
+    return '_col' in var
+
 def do_dailytomonthly(values):
     dayspermonth=[31,28,31,30,31,30,31,31,30,31,30,31]
     npoints = len(values)
@@ -137,9 +146,10 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         if (nperyear != 12):
           #If not monthly files, ignore the last file (it only represents a single timestep)
           file_list = file_list[:-1]
-    os.system('ncrcat -O -v '+var.split('_pft')[0]+' '+' '.join(file_list)+' '+var+'.nc')
+    basevar = get_postproc_basevar(var)
+    os.system('ncrcat -O -v '+basevar+' '+' '.join(file_list)+' '+var+'.nc')
     myoutput = Dataset(var+'.nc','r')
-    units = myoutput[var.split('_pft')[0]].units
+    units = myoutput[basevar].units
     #change flux units
     factor = 1.0
     if (units == 'gC/m^2/s' or units == 'gN/m^2/s' or units == 'gP/m^2/s'):
@@ -158,17 +168,17 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
             units = 'mm/day'
             factor = 24*3600
 
-    if (myoutput[var.split('_pft')[0]][:].ndim == 4):
+    if (myoutput[basevar][:].ndim == 4):
       #2D output with vertical structure
-      values = myoutput[var.split('_pft')[0]][:,index,yindex,xindex]*factor
-    elif (myoutput[var.split('_pft')[0]][:].ndim == 3):
+      values = myoutput[basevar][:,index,yindex,xindex]*factor
+    elif (myoutput[basevar][:].ndim == 3):
       #2D output or 1D output with vertical structure (currently assumes 1D)
-      values = myoutput[var.split('_pft')[0]][:,index,gindex]*factor
+      values = myoutput[basevar][:,index,gindex]*factor
     else:
       #1D output (unstructured grid)
-      values = myoutput[var.split('_pft')[0]][:,gindex]*factor
-      if ('_pft' in var):  #PFT-level output
-          values = myoutput[var.split('_pft')[0]][:,index]*factor
+      values = myoutput[basevar][:,gindex]*factor
+      if (is_pft_var(var) or is_col_var(var)):  # PFT- or column-level output
+          values = myoutput[basevar][:,index]*factor
 
     if (dailytomonthly and hist_nhtfrq == -24):
       values_out = do_dailytomonthly(values)
@@ -189,7 +199,7 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
             values_out = values[:]
             nperyear_out = nperyear
     var_out = var
-    if ('_pft' in var):
+    if (is_pft_var(var) or is_col_var(var)):
         var_out = var_out+str(index)
     if (ens_num > 0 and not var_out in self.output):
         self.output[var_out] = np.zeros([len(values_out),self.nsamples],float)

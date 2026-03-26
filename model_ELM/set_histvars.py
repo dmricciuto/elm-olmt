@@ -2,6 +2,12 @@
 import re, os, sys, csv, time, math
 import numpy
 
+def get_postproc_basevar(var):
+    return var.split('_pft')[0].split('_col')[0]
+
+def is_indexed_postproc_var(var):
+    return ('_pft' in var or '_col' in var)
+
 def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
    if (spinup>0):
       var_list_spinup = ['PPOOL', 'EFLX_LH_TOT', 'RETRANSN', 'PCO2', 'PBOT', 'TBOT','FSDS','NDEP_TO_SMINN', 'OCDEP', \
@@ -45,9 +51,9 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
           vst_pp=''
           vst_pp_pft=''
           for v in self.postproc_vars:
-              if ('_pft' in v):
-                  #PFT specific outputs (put in h2 file)
-                  vst_pp_pft=vst_pp_pft+"'"+v.split('_pft')[0]+"',"
+              if (is_indexed_postproc_var(v)):
+                  # PFT- or column-specific outputs (put in h2 file)
+                  vst_pp_pft=vst_pp_pft+"'"+get_postproc_basevar(v)+"',"
               else:
                   vst_pp=vst_pp+"'"+v+"',"
           #Write daily for requested postprocessed variables
@@ -82,9 +88,9 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
         vst_pp=''
         vst_pp_pft=''
         for v in self.postproc_vars:
-            if ('_pft' in v):
-                #PFT specific outputs (put in h2 file)
-                vst_pp_pft=vst_pp_pft+"'"+v.split('_pft')[0]+"',"
+            if (is_indexed_postproc_var(v)):
+                # PFT- or column-specific outputs (put in h2 file)
+                vst_pp_pft=vst_pp_pft+"'"+get_postproc_basevar(v)+"',"
             else:
                 vst_pp=vst_pp+"'"+v+"',"
         if (vst_pp_pft != ''):

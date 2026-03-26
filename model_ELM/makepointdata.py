@@ -133,7 +133,7 @@ def subset_netcdf(self, index, input_file, output_file, keep2d=False):
         var_subset.to_netcdf(output_file,mode='a' if var_name != list(original_ds.data_vars)[0] else 'w')
     original_ds.close()
 
-def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None):
+def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_bareground=False):
     #Set the PFTs as desired, zero out other landunits
     #If year is specified, set PCT_NAT_PFT for that year and all years after
     # Make a copy to avoid view assignment issues
@@ -171,7 +171,23 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None):
         for v in nonveg:
             if v in ds.variables:
                 ds[v] = ds[v] * 0 + 0.0  # Use assignment instead of in-place
-    
+
+    # If requested, make the first topounit bareground: zero all natpft fractions and set natpft 0 to 100
+    if first_bareground:
+        if 'PCT_NAT_PFT' in ds:
+            arr = ds['PCT_NAT_PFT']
+            dims = list(arr.dims)
+            nd = arr.ndim
+            if 'topounit' in dims and 'natpft' in dims:
+                top_i = dims.index('topounit')
+                nat_i = dims.index('natpft')
+                idx_zero = [slice(None)] * nd
+                idx_zero[top_i] = 0
+                arr.values[tuple(idx_zero)] = 0.0
+                idx_nat0 = [slice(None)] * nd
+                idx_nat0[top_i] = 0
+                idx_nat0[nat_i] = 0
+                arr.values[tuple(idx_nat0)] = 100.0
     return ds
 
             
@@ -219,9 +235,10 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         if (self.humhol and not isdomain):
             if ('SPR' in self.site):
                 #SPRUCE fractional hum-hol areas and elevations
-                fracarea = [0.66,0.34]
-                elevations = [466.15,465.0]
-                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=2, fracarea=fracarea, elevations=elevations)
+                fracarea = [0.5,0.17,0.33]
+                elevations = [464.6,465.0,465.15]   #lagg, hollow, hummock
+                distances = [0, 3, 1]  # Example distances for the two topounits (in meters)
+                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, fracarea=fracarea, elevations=elevations, distances=distances)
             else:
                 #Default fractional areas and elevations
                 ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=2)
@@ -230,7 +247,11 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
             #Set site PFT and soil texture
             if (sum(self.siteinfo['PCT_NAT_PFT']) > 0):
                 pct_nat_pft = xr.DataArray(self.siteinfo['PCT_NAT_PFT'], dims=['natpft'])
-                ds = self.setpfts(ds, pct_nat_pft);
+                if 'SPR' in self.site:
+                    #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
+                    ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)  
+                else:
+                    ds = self.setpfts(ds, pct_nat_pft)
             if (pft >=0):
                 npfts = ds['PCT_NAT_PFT'].sizes['natpft']
                 #Overrite site info
@@ -269,7 +290,11 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 for year in self.siteinfo['transitions'].keys():
                     #Set PFTS for this year and all subsequent years
                     pct_nat_pft = xr.DataArray(self.siteinfo['transitions'][year]['PCT_NAT_PFT'], dims=['natpft'])
-                    ds = self.setpfts(ds, pct_nat_pft, year=int(year))
+                    if ('SPR' in self.site):
+                        #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
+                        ds = self.setpfts(ds, pct_nat_pft, first_bareground=True, year=int(year))
+                    else:
+                        ds = self.setpfts(ds, pct_nat_pft, year=int(year))
                     #Set harvest for this year
                     year_indices = np.where(years == int(year))[0]
                     ds['HARVEST_VH1'].values[year_indices] = self.siteinfo['transitions'][year]['HARVEST']
@@ -341,7 +366,8 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
             os.system('cp '+infile+' '+outfile)
 
 
-def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=None, elevations=None):
+def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=None, \
+        elevations=None, distances=None):
     """
     Add topounit dimension and related variables for topographic simulations
     
@@ -388,6 +414,15 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
         elevations = np.array(elevations)
         if len(elevations) != num_topounits:
             raise ValueError(f"elevations length ({len(elevations)}) must equal num_topounits ({num_topounits})")
+
+    # Validate and set default lateral distances
+    if distances is None:
+        # Default lateral distances (meters): zeros
+        distances = np.zeros(num_topounits)
+    else:
+        distances = np.array(distances)
+        if len(distances) != num_topounits:
+            raise ValueError(f"distances length ({len(distances)}) must equal num_topounits ({num_topounits})")
     
     # Load the dataset into memory first
     ds = ds.load()
@@ -527,6 +562,20 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
             '_FillValue': -999.0,
             'descriptions': 'Average elevation of subgrid',
             'units': 'meters asl'
+        }
+    )
+    
+    # TopounitLateralDist: Lateral distance for each topounit (meters)
+    dist_shape = elv_shape
+    dist_dims = elv_dims
+    dist_data = np.broadcast_to(distances.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitLateralDist'] = xr.DataArray(
+        dist_data,
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'descriptions': 'Lateral distance for each topounit within gridcell',
+            'units': 'meters'
         }
     )
     
