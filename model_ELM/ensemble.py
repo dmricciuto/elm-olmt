@@ -10,6 +10,162 @@ import json
 import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 
+def parse_sbatch(case_run_path):
+    """Parse SBATCH directives from a .case.run file and return a dict.
+
+    Returns keys (ints or strings or None):
+      nodes, ntasks, ntasks_per_node, cpus_per_task,
+      partition, job_name, exclusive (bool), output, error,
+      account, time, qos, mem_per_cpu, gres
+    """
+    parsed = {
+        'nodes': None,
+        'ntasks': None,
+        'ntasks_per_node': None,
+        'cpus_per_task': None,
+        'partition': None,
+        'job_name': None,
+        'exclusive': None,
+        'output': None,
+        'error': None,
+        'account': None,
+        'time': None,
+        'qos': None,
+        'mem_per_cpu': None,
+        'gres': None,
+    }
+    if not os.path.exists(case_run_path):
+        return parsed
+    try:
+        import re
+        with open(case_run_path, 'r') as cr:
+            for line in cr:
+                l = line.strip()
+                if not l.startswith('#SBATCH'):
+                    continue
+                line_content = l.lstrip('#').strip()
+                m = re.search(r'--nodes[=\s]+(\d+)', line_content)
+                if m:
+                    parsed['nodes'] = int(m.group(1))
+                m = re.search(r'-N\s+(\d+)', line_content)
+                if m:
+                    parsed['nodes'] = int(m.group(1))
+                m = re.search(r'--ntasks[=\s]+(\d+)', line_content)
+                if m:
+                    parsed['ntasks'] = int(m.group(1))
+                m = re.search(r'-n\s+(\d+)', line_content)
+                if m:
+                    parsed['ntasks'] = int(m.group(1))
+                m = re.search(r'--ntasks-per-node[=\s]+(\d+)', line_content)
+                if m:
+                    parsed['ntasks_per_node'] = int(m.group(1))
+                m = re.search(r'--partition[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['partition'] = m.group(1)
+                m = re.search(r'-p\s+(\S+)', line_content)
+                if m:
+                    parsed['partition'] = m.group(1)
+                m = re.search(r'--job-name[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['job_name'] = m.group(1)
+                m = re.search(r'-J\s+(\S+)', line_content)
+                if m:
+                    parsed['job_name'] = m.group(1)
+                if '--exclusive' in line_content:
+                    parsed['exclusive'] = True
+                m = re.search(r'--output[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['output'] = m.group(1)
+                m = re.search(r'-o\s+(\S+)', line_content)
+                if m:
+                    parsed['output'] = m.group(1)
+                m = re.search(r'--error[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['error'] = m.group(1)
+                m = re.search(r'-e\s+(\S+)', line_content)
+                if m:
+                    parsed['error'] = m.group(1)
+                m = re.search(r'--account[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['account'] = m.group(1)
+                m = re.search(r'-A\s+(\S+)', line_content)
+                if m:
+                    parsed['account'] = m.group(1)
+                m = re.search(r'--time[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['time'] = m.group(1)
+                m = re.search(r'-t\s+(\S+)', line_content)
+                if m:
+                    parsed['time'] = m.group(1)
+                m = re.search(r'--qos[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['qos'] = m.group(1)
+                m = re.search(r'--mem-per-cpu[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['mem_per_cpu'] = m.group(1)
+                m = re.search(r'--gres[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['gres'] = m.group(1)
+                m = re.search(r'--cpus-per-task[=\s]+(\d+)', line_content)
+                if m:
+                    parsed['cpus_per_task'] = int(m.group(1))
+                m = re.search(r'-c\s+(\d+)', line_content)
+                if m:
+                    parsed['cpus_per_task'] = int(m.group(1))
+    except Exception:
+        pass
+    return parsed
+
+
+def write_sbatch(parsed, myfile):
+    """Write SBATCH directives to `myfile` from `parsed` dict.
+    Note: callers may override `nodes` or `job_name` after parsing. This
+    function will write `nodes` if present in `parsed` unless the caller
+    intends to manage those values itself.
+    """
+    ps = parsed or {}
+    # write nodes and job name if provided
+    if ps.get('nodes') is not None:
+        myfile.write('#SBATCH -N '+str(ps.get('nodes'))+'\n')
+    if ps.get('job_name'):
+        myfile.write('#SBATCH -J '+str(ps.get('job_name'))+'\n')
+    if ps.get('partition'):
+        myfile.write('#SBATCH -p '+str(ps.get('partition'))+'\n')
+    if ps.get('account'):
+        myfile.write('#SBATCH -A '+str(ps.get('account'))+'\n')
+    if ps.get('qos'):
+        myfile.write('#SBATCH --qos='+str(ps.get('qos'))+'\n')
+    if ps.get('time'):
+        myfile.write('#SBATCH --time='+str(ps.get('time'))+'\n')
+    # tasks and cpu options
+    # Ensure --ntasks-per-node is always emitted when possible (preferred).
+    derived_ntasks_per_node = None
+    if ps.get('ntasks_per_node') is not None:
+        derived_ntasks_per_node = int(ps.get('ntasks_per_node'))
+    elif ps.get('ntasks') is not None and ps.get('nodes') is not None:
+        # derive ceil(ntasks / nodes)
+        try:
+            derived_ntasks_per_node = int(math.ceil(float(ps.get('ntasks'))/float(ps.get('nodes'))))
+        except Exception:
+            derived_ntasks_per_node = None
+    if derived_ntasks_per_node is not None:
+        myfile.write('#SBATCH --ntasks-per-node='+str(derived_ntasks_per_node)+'\n')
+    # Intentionally do NOT emit a global `-n` directive; prefer only
+    # `--ntasks-per-node` so downstream tools derive total tasks explicitly.
+    if ps.get('cpus_per_task') is not None:
+        myfile.write('#SBATCH -c '+str(ps.get('cpus_per_task'))+'\n')
+    if ps.get('exclusive'):
+        myfile.write('#SBATCH --exclusive\n')
+    if ps.get('output'):
+        myfile.write('#SBATCH --output='+str(ps.get('output'))+'\n')
+    if ps.get('error'):
+        myfile.write('#SBATCH --error='+str(ps.get('error'))+'\n')
+    if ps.get('mem_per_cpu'):
+        myfile.write('#SBATCH --mem-per-cpu='+str(ps.get('mem_per_cpu'))+'\n')
+    if ps.get('gres'):
+        myfile.write('#SBATCH --gres='+str(ps.get('gres'))+'\n')
+
+
 def find_latest_restart(finidat_path):
     """
     Search `finidat_path` for files matching `*elm.r.*` and
@@ -150,24 +306,20 @@ def create_ensemble_script(self):
     nnodes = int(np.ceil((self.np_ensemble*self.np)/self.npernode))
     myfile = open('case.submit_ensemble','w')
     myfile.write('#!/bin/bash -e\n\n')
+    case_run = os.path.join(self.casedir, '.case.run')
+    parsed_sbatch = parse_sbatch(case_run)
     if (self.queue == 'debug'):
         print('Debug queue selected, setting walltime to 2 hours')
         self.walltime=2
-    if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(self.walltime)+':00:00\n')
-        myfile.write('#SBATCH --constraint=cpu\n')
-        if(self.queue.strip()==''):
-            myfile.write('#SBATCH --qos=regular\n')
-        else:
-            myfile.write('#SBATCH --qos='+self.queue+'\n')
-        myfile.write('#SBATCH --account='+self.project+'\n')
-    else:
-        myfile.write('#SBATCH -t '+str(self.walltime)+':00:00\n')
-        myfile.write('#SBATCH -p '+self.queue+'\n')
-        if (self.project != ''):
-            myfile.write('#SBATCH -A '+self.project+'\n')
-    myfile.write('#SBATCH -J '+self.casename+'\n')
-    myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')  
+    total_tasks = int(self.np_ensemble) * int(self.np)
+    parsed_sbatch['qos'] = self.queue
+    parsed_sbatch['time'] = str(self.walltime)+':00:00'
+    parsed_sbatch['nodes'] = int(nnodes)
+    parsed_sbatch['ntasks'] = int(total_tasks)
+    parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(parsed_sbatch['ntasks'])/float(parsed_sbatch['nodes'])))
+    parsed_sbatch['exclusive'] = False
+    # Write SBATCH directives using helper
+    write_sbatch(parsed_sbatch, myfile)
 
     myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
@@ -197,43 +349,41 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
             ldpath = s.split('=')[1].strip()
     softenv.close()
     self.npernode=int(self.xmlquery('MAX_TASKS_PER_NODE'))
-    if sites[0] != '':
-        nnodes = int(np.ceil(len(sites)/self.npernode))
-    else:
-        nnodes = int(np.ceil(self.np/self.npernode))
+    nruns = len(sites) if len(sites) > 0 else 1
+    total_tasks = int(self.np) * int(nruns)
+    nnodes = max(1, int(np.ceil(float(total_tasks) / float(self.npernode))))
     fname = self.casename.replace('_'+self.site,'')+'.sh'
     myfile = open(fname,'w')
     myfile.write('#!/bin/bash -e\n\n')
+    case_run = os.path.join(self.casedir, '.case.run')
+    parsed_sbatch = parse_sbatch(case_run)
     if (self.queue == 'debug'):
         print('Debug queue selected, setting walltime to 2 hours')
         self.walltime=2
-    if ('pm-cpu' in self.machine):
-        myfile.write('#SBATCH --time='+str(self.walltime)+':00:00\n')
-        myfile.write('#SBATCH --constraint=cpu\n')
-        if(self.queue.strip()==''):
-            myfile.write('#SBATCH --qos=regular\n')
-        else:
-            myfile.write('#SBATCH --qos='+self.queue+'\n')
-        myfile.write('#SBATCH --account='+self.project+'\n')
-    else:
-        myfile.write('#SBATCH -t '+str(self.walltime)+':00:00\n')
-        myfile.write('#SBATCH -p '+self.queue+'\n')
-        if (self.project != ''):
-            myfile.write('#SBATCH -A '+self.project+'\n')
+    parsed_sbatch['qos'] = self.queue
+    parsed_sbatch['time'] = str(self.walltime)+':00:00'
+    parsed_sbatch['nodes'] = int(nnodes)
+    parsed_sbatch['ntasks'] = int(total_tasks)
+    parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(total_tasks)/float(nnodes)))
+    # Ensure we do not emit --exclusive for multisite submission either.
+    parsed_sbatch['exclusive'] = False
+    # Write SBATCH directives using helper 
+    write_sbatch(parsed_sbatch, myfile)
 
-    myfile.write('#SBATCH -J '+self.casename.replace('_'+self.site,'')+'\n')
-    myfile.write('#SBATCH --nodes='+str(nnodes)+'\n')
     myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
     myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
     for s in sites:
-      myfile.write('cd '+self.caseroot+'/'+self.casename.replace(sites[0],s)+'\n')
+      site_casename = self.casename.replace(sites[0],s)
+      site_casedir = self.caseroot+'/'+site_casename
+      site_rundir = self.runroot+'/'+site_casename+'/run'
+      myfile.write('cd '+site_casedir+'\n')
       if (self.apptainer != ''):
         myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
-                ' --pwd '+self.caseroot+'/'+self.casename.replace(sites[0],s)+ ' '+ \
+                ' --pwd '+site_casedir+ ' '+ \
                 self.apptainer+' ./preview_namelists\n')
       else:
         myfile.write('./preview_namelists\n')
-      myfile.write('cd '+self.runroot+'/'+self.casename.replace(sites[0],s)+'/run\n')
+      myfile.write('cd '+site_rundir+'\n')
       myfile.write('mkdir -p timing/checkpoints\n')
       #restart file options
       for key in self.case_options.keys():
@@ -251,16 +401,21 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
                     self.finidat+' --var '+var+' --val '+value+'\n')
       if (self.noslurm):
         myfile.write('mpiexec -n '+str(self.np)+' '+self.exeroot+'/e3sm.exe > '+ \
-           self.rundir+'/e3sm_log.txt &\n\n')
+                     site_rundir+'/e3sm_log.txt &\n\n')
       else:
-        if (self.apptainer != ''):
-            myfile.write('srun -n '+str(self.np)+' -c 1 apptainer exec '+ \
-                ' --bind '+self.apptainer_bind+' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
-                +self.apptainer+' '+self.exeroot+'/e3sm.exe > '+ \
-                self.rundir+'/e3sm_log.txt &\n\n')
-        else:
-            myfile.write('srun -n '+str(self.np)+' -c 1 '+self.exeroot+'/e3sm.exe > '+ \
-                self.rundir+'/e3sm_log.txt &\n\n')
+          # compute nodes required for this site run and align srun options
+          nodes_per_run = max(1, int(np.ceil(float(self.np) / float(self.npernode))))
+          ntasks_run = int(self.np)
+          tasks_per_node_run = max(1, int(math.ceil(float(ntasks_run) / float(nodes_per_run))))
+          cpus_per_task = parsed_sbatch['cpus_per_task'] if parsed_sbatch.get('cpus_per_task') is not None else 1
+          if (self.apptainer != ''):
+                myfile.write('srun --nodes='+str(nodes_per_run)+' --ntasks='+str(ntasks_run)+' --ntasks-per-node='+str(tasks_per_node_run)+' --cpu-bind=none -c '+str(cpus_per_task)+' apptainer exec '+ \
+                    ' --bind '+self.apptainer_bind+' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
+                    +self.apptainer+' '+self.exeroot+'/e3sm.exe > '+ \
+                    site_rundir+'/e3sm_log.txt &\n\n')
+          else:
+                myfile.write('srun --nodes='+str(nodes_per_run)+' --ntasks='+str(ntasks_run)+' --ntasks-per-node='+str(tasks_per_node_run)+' --cpu-bind=none -c '+str(cpus_per_task)+' '+self.exeroot+'/e3sm.exe > '+ \
+                    site_rundir+'/e3sm_log.txt &\n\n')
     myfile.write('wait\n')
     myfile.write('cd '+self.OLMTdir+'\n')
     for s in sites:

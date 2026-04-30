@@ -29,6 +29,13 @@ def get_machine_info(machine_name=''):
         hostname = 'or-login.ornl.gov'
         queue = 'batch'
         apptainer_bind = '/lustre/or-scratch'
+    if ('pflogin' in machine_name or 'pathfinder' in machine_name):
+        rootdir = '/projects/hpcl-cli185/users/'+os.environ['USER']
+        inputdata = '/projects/hpcl-cli185/world-shared/e3sm/inputdata/'
+        machine = 'pathfinder'
+        hostname = 'pflogin.ornl.gov'
+        queue = 'normal'
+        apptainer_bind = '/projects/hpcl-cli185'
     elif  ('chrlogin' in machine_name or 'chrysalis' in machine_name):
         rootdir = '/lcrc/group/e3sm/'+os.environ['USER']+'/scratch'
         inputdata = '/lcrc/group/e3sm/ccsm-data/inputdata'

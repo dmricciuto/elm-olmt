@@ -17,9 +17,11 @@ def load_config(config_file):
     cfg = {}
     for section in config.sections():
         cfg[section] = {}
-        for key, value in config.items(section, raw=False):
+        for key, value in config.items(section, raw=True):
             # Strip quotes from the value first
             value = value.strip().strip('\'"')
+            # Expand environment variables (e.g. $USER, ${USER}) before configparser interpolation
+            value = os.path.expandvars(value)
             # Skip conversion for specific keys
             if key == 'startdate_add_co2':
                 cfg[section][key] = str(value)

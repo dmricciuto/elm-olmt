@@ -1,7 +1,8 @@
 #!/usr/bin/env python
-import sys,os, time
+import sys,os, time, math
 import numpy as np
 import subprocess
+import random
 import pickle
 import model_ELM
 from optparse import OptionParser
@@ -23,47 +24,44 @@ parser.add_option("--UQ_only", dest="UQ_only", default=False, \
 #Load case object
 myfile=open('pklfiles/'+options.case+'.pkl','rb')
 mycase=pickle.load(myfile)
+# default placement: enable pack_single_tasks only for single-task cases unless overridden
+if not hasattr(mycase, 'pack_single_tasks'):
+  mycase.pack_single_tasks = (getattr(mycase, 'np', 1) == 1)
+if not hasattr(mycase, 'rotate_nodes'):
+  mycase.rotate_nodes = True
 
 #get the node file and parse
 def get_nodelist():
+  # Prefer Slurm's canonical hostnames to avoid -w mismatches
+  try:
+    out = subprocess.check_output(['scontrol', 'show', 'hostnames', os.environ.get('SLURM_JOB_NODELIST', '')])
+    hosts = [h.strip() for h in out.decode().splitlines() if h.strip()]
+    if hosts:
+      return hosts
+  except Exception:
+    pass
+  # Fallback: try simple parsing of SLURM_JOB_NODELIST
   mynodes=[]
-  nodelist=os.environ['SLURM_JOB_NODELIST'].split('xxx')
-  print(nodelist)
-  for n in nodelist:
-    if ('[' in n):
-        node_prefix=n.split('[')[0]
-        nodelist2=n.split('[')[1].split(',')
-        for n2 in nodelist2:
-          if ('-' in n2):
-            firstnode=n2.split('-')[0]
-            lastnode=n2.split('-')[1].strip(']')
-            for nn in range(int(firstnode),int(lastnode)+1):
-              if ('baseline' in mycase.machine):
-                nstr = str(nn)
-              else:
-                nstr = str(10000+nn)[1:]
-              mynodes.append(node_prefix+nstr)
-          else:
-              if ('baseline' in mycase.machine):
-                nstr=str(n2).strip(']')
-              else:
-                nstr=str(10000+n2)[1:].strip(']')
-              mynodes.append(node_prefix+nstr)
-    else:
-        mynodes.append(n)
+  nodelist = os.environ.get('SLURM_JOB_NODELIST','')
+  if not nodelist:
+    return mynodes
+  # handle formats like node[01-04,07]
+  if '[' in nodelist:
+    prefix = nodelist.split('[')[0]
+    inside = nodelist.split('[')[1].rstrip(']')
+    parts = inside.split(',')
+    for p in parts:
+      if '-' in p:
+        a,b = p.split('-')
+        for i in range(int(a), int(b)+1):
+          mynodes.append(prefix + str(i))
+      else:
+        mynodes.append(prefix + p)
+  else:
+    mynodes = nodelist.split(',')
   return mynodes
 
-def get_node_submit(pactive,process_nodes,mynodes):
-    node_submit=0
-    for n in range(0,len(mynodes)):
-         ctn=0    #Counter for active processes on each node
-         for p in range(0,len(processes)):
-                if pactive[p] == 1 and process_nodes[p] == n:
-                    ctn=ctn+1
-         if (ctn < mycase.npernode/mycase.np):
-             #If this node is not full, submit
-             node_submit=n
-    return(node_submit)
+
 
 def check_run_success(n):
     success=False
@@ -138,9 +136,21 @@ if (not options.UQ_only):
   process_hang=[]    #Keep track of how long process has been hanging
   mycase.postprocessed=np.zeros([mycase.nsamples],int)
   n_job = 1
+  rotate_index = 0
+  nodes_list = []
   if (mycase.noslurm == False):
-    process_nodes = []
-    mynodes = get_nodelist()
+    allocated_nodes = None
+    if 'SLURM_JOB_NUM_NODES' in os.environ:
+        try:
+            allocated_nodes = int(os.environ['SLURM_JOB_NUM_NODES'])
+        except Exception:
+            allocated_nodes = None
+    # prepare node rotation list if requested
+    if getattr(mycase, 'rotate_nodes', False):
+      try:
+        nodes_list = get_nodelist()
+      except Exception:
+        nodes_list = []
 
   #Run the simulations 
   while (n_job <= mycase.nsamples):
@@ -149,24 +159,68 @@ if (not options.UQ_only):
       jobst = str(100000+n_job)
       rundir = mycase.rundir_UQ + '/g'+jobst[1:]+'/'
       log_file_path = f"{rundir}e3sm_log.txt"
-      #Copy relevant files
       if not options.postproc_only:
+        time.sleep(0.2)
         mycase.ensemble_copy(n_job)
       with open(log_file_path, "w") as log_file:
         if (mycase.noslurm == False):
-          node_submit=get_node_submit(pactive,process_nodes,mynodes)
-          if (mycase.apptainer != ''):
-            command = 'srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+ \
-              ' apptainer exec --bind '+mycase.apptainer_bind+' --pwd '+rundir+\
-              ' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
-              +mycase.apptainer+' '+mycase.exeroot+'/e3sm.exe'
+          # compute per-member node/task layout
+          nodes_per_run = max(1, int(math.ceil(float(mycase.np) / float(mycase.npernode))))
+          tpnode = min(int(mycase.npernode), int(mycase.np))
+          cpus_per_task = getattr(mycase, 'thread_count', 1) or 1
+          # current number running
+          current_running = sum(pactive)
+          # If packing single-task steps, skip the required_nodes check and
+          # allow Slurm to place steps on allocated nodes. Otherwise, ensure
+          # there are enough allocated nodes before requesting per-run nodes.
+          if not getattr(mycase, 'pack_single_tasks', False):
+              required_nodes = nodes_per_run * (current_running + 1)
+              if allocated_nodes is not None and required_nodes > allocated_nodes:
+                  # not enough nodes available now; wait and retry
+                  time.sleep(1)
+                  continue
+
+          # build srun. Two modes:
+          # - pack_single_tasks: emit `srun -n 1 -c X` for each member and
+          #   optionally add `-w <node>` when rotate_nodes is enabled. 
+          # - default: request nodes/ntasks-per-node and use distribution to
+          #   spread runs across nodes.
+          if getattr(mycase, 'pack_single_tasks', False):
+            # optional rotate_nodes: pick a node from the allocation
+            node_arg = ''
+            if getattr(mycase, 'rotate_nodes', False) and len(nodes_list) > 0:
+              try:
+                node = nodes_list[rotate_index % len(nodes_list)]
+                rotate_index = rotate_index + 1
+                node_arg = ' -w '+node
+              except Exception:
+                node_arg = ''
+            if (mycase.apptainer != ''):
+              command = 'srun -n 1 -c '+str(cpus_per_task)+ node_arg + \
+                ' apptainer exec --bind '+mycase.apptainer_bind+' --pwd '+rundir+ \
+                ' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' +mycase.apptainer+' '+mycase.exeroot+'/e3sm.exe'
+            else:
+              command = 'srun -n 1 -c '+str(cpus_per_task)+ node_arg + ' '+mycase.exeroot+'/e3sm.exe'
           else:
-            command = 'srun -n '+str(mycase.np)+' -c 1 -w '+mynodes[node_submit]+' '+mycase.exeroot+'/e3sm.exe'
-          process_nodes.append(node_submit)
+            # build srun using nodes/ntasks-per-node and distribution to avoid packing
+            if (mycase.apptainer != ''):
+              command = 'srun --nodes='+str(nodes_per_run)+ ' --ntasks='+str(mycase.np)+ ' --ntasks-per-node='+str(tpnode)+ \
+                ' -c '+str(cpus_per_task)+ \
+                ' apptainer exec --bind '+mycase.apptainer_bind+' --pwd '+rundir+ \
+                ' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' +mycase.apptainer+' '+mycase.exeroot+'/e3sm.exe'
+            else:
+              command = 'srun --nodes='+str(nodes_per_run)+ ' --ntasks='+str(mycase.np)+ ' --ntasks-per-node='+str(tpnode)+ \
+                ' -c '+str(cpus_per_task)+ ' '+mycase.exeroot+'/e3sm.exe'
         else:
           command = mycase.exeroot+'/e3sm.exe'
         if (options.postproc_only):
             command='ls'
+        # record the exact launch command for debugging in the member log
+        try:
+          log_file.write('LAUNCH_CMD: '+command+'\n')
+          log_file.flush()
+        except Exception:
+          pass
         process = subprocess.Popen(command, shell=True, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
         processes.append(process)
         process_jobnum.append(n_job)
