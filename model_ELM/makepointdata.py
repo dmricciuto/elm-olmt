@@ -240,9 +240,11 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 distances = [0, 3, 1]  # Example distances for the two topounits (in meters)
                 ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, fracarea=fracarea, elevations=elevations, distances=distances)
             else:
+                fracarea = [0.5,0.5]
+                elevations = [self.siteinfo['elev'], self.siteinfo['elev']+0.15]
+                distances = [0, 1]
                 #Default fractional areas and elevations
-                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=2)
-
+                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=2, fracarea=fracarea, elevations=elevations, distances=distances)
         if (not isdomain):
             #Set site PFT and soil texture
             if (sum(self.siteinfo['PCT_NAT_PFT']) > 0):
@@ -269,10 +271,10 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                     ds['PCT_CLAY'].values[:] = self.siteinfo['PCT_CLAY']
                     print('Setting $CLAY to ',self.siteinfo['PCT_CLAY'])
                 #SPRUCE-specific properties
-                if ('SPR' in self.site):
+                if (self.humhol): #'SPR' in self.site):
                   print('Setting SPRUCE organic, soil order and P variables')
-                  ds['ORGANIC'].values[0:8,:] = 130.
-                  ds['ORGANIC'].values[8,:] = 65.
+                  ds['ORGANIC'].values[0:9,:] = 130.
+                  ds['ORGANIC'].values[9,:] = 65.
                   ds['SOIL_ORDER'].values[:] = 3
                   ds['LABILE_P'].values[:] = 1.0
                   ds['APATITE_P'].values[:] = 0.1

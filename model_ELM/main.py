@@ -76,6 +76,7 @@ class ELMcase():
           self.caseid = caseid
         self.queue=queue
         self.project=project
+        self.interactive_build=False
         self.get_machine(machine=machine)
         # Apptainer container image (optional)
         self.apptainer = apptainer
@@ -154,11 +155,17 @@ class ELMcase():
     else:
       self.machine=machine
     self.noslurm=False
+    self.interactive_build=False
     if ('linux' in self.machine or 'ubuntu' in self.machine or 'docker' in self.machine):
         self.noslurm=True
     if(self.machine == 'pm-cpu'):
         if self.queue == '':
             self.queue='regular'
+    elif(self.machine == 'pathfinder'):
+        if self.queue == '':
+            self.queue='normal'
+        # Build on compute node to avoid OOM on login node
+        self.interactive_build=True
     else:
         if self.queue == '':
             self.queue='batch'
@@ -1034,6 +1041,13 @@ class ELMcase():
                     ' ./case.build'
         else:
             cmd = './case.build'
+        if (self.interactive_build):
+            # Wrap build command with srun to run on a compute node (avoids OOM on login node)
+            project_opt = ' --account='+self.project if self.project != '' else ''
+            srun_prefix = 'srun --nodes=1 --ntasks=1 --mem=32gb --time=1:00:00'+ \
+                    ' -q normal -c 1 --partition=serial '
+            cmd = srun_prefix+cmd
+            print('Building on compute node: '+cmd)
         if (clean):
           result = subprocess.run(cmd+' --clean-all', stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
                   text=True, shell=True)
