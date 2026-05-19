@@ -1041,22 +1041,39 @@ class ELMcase():
                     ' ./case.build'
         else:
             cmd = './case.build'
+        build_timeout = None
         if (self.interactive_build):
             # Wrap build command with srun to run on a compute node (avoids OOM on login node)
             project_opt = ' --account='+self.project if self.project != '' else ''
+            resource_wait_minutes = 60
+            build_timeout = resource_wait_minutes * 60
             srun_prefix = 'srun --nodes=1 --ntasks=1 --mem=32gb --time=1:00:00'+ \
-                    ' -q normal -c 1 --partition=serial '
+                    ' -q normal -c 1 --partition=serial --kill-on-bad-exit=1' + project_opt + ' '
             cmd = srun_prefix+cmd
             print('Building on compute node: '+cmd)
+            sinfo = subprocess.run('sinfo -h -p serial -t idle -o "%D"', stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE, text=True, shell=True)
+            idle_nodes = sinfo.stdout.strip()
+            if not idle_nodes or int(idle_nodes) == 0:
+                print('Warning: no idle nodes in serial partition; waiting for one to become available ' + \
+                        '(will time out after '+str(resource_wait_minutes)+' minutes).')
         if (clean):
           result = subprocess.run(cmd+' --clean-all', stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
-                  text=True, shell=True)
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
-                  text=True, shell=True)
+                  text=True, shell=True, timeout=build_timeout)
+        try:
+          result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, \
+                  text=True, shell=True, timeout=build_timeout)
+        except subprocess.TimeoutExpired:
+          print('Error:  No compute node became available after '+str(resource_wait_minutes)+ \
+                  ' minutes.  Aborting.')
+          sys.exit(1)
         if (result.returncode > 0):
           print('Error:  Failed to build case.  Aborting')
-          print(result.stderr)
-          #sys.exit(1)
+          if result.stdout:
+              print(result.stdout)
+          if result.stderr:
+              print(result.stderr)
+          sys.exit(1)
       else:
         self.xmlchange('BUILD_COMPLETE',value='TRUE')
       #If using DATM, customize the stream files
