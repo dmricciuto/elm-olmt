@@ -166,6 +166,69 @@ def write_sbatch(parsed, myfile):
         myfile.write('#SBATCH --gres='+str(ps.get('gres'))+'\n')
 
 
+def get_resubmit_segments(self, resubmit_years):
+    """Return segment metadata for logical-case resubmission."""
+    total_years = int(self.run_n)
+    try:
+        resubmit_years = int(resubmit_years or 0)
+    except Exception:
+        resubmit_years = 0
+
+    if total_years <= 0 or resubmit_years <= 0 or resubmit_years >= total_years:
+        return [{
+            'index': 1,
+            'count': 1,
+            'start_offset': 0,
+            'end_offset': total_years,
+            'run_n': total_years,
+            'continue_run': False,
+            'final': True,
+        }]
+
+    segments = []
+    start_offset = 0
+    index = 1
+    while start_offset < total_years:
+        run_n = min(resubmit_years, total_years - start_offset)
+        end_offset = start_offset + run_n
+        segments.append({
+            'index': index,
+            'count': 0,
+            'start_offset': start_offset,
+            'end_offset': end_offset,
+            'run_n': run_n,
+            'continue_run': index > 1,
+            'final': end_offset >= total_years,
+        })
+        start_offset = end_offset
+        index = index + 1
+
+    for segment in segments:
+        segment['count'] = len(segments)
+    return segments
+
+
+def get_ensemble_segments(self):
+    """Return segment metadata for ensemble resubmission."""
+    return get_resubmit_segments(self, getattr(self, 'ensemble_resubmit_years', 0))
+
+
+def get_multisite_segments(self):
+    """Return segment metadata for multi-site resubmission."""
+    return get_resubmit_segments(self, getattr(self, 'resubmit_years', 0))
+
+
+def write_case_xmlchange(myfile, self, variable, value, casedir=None):
+    if casedir is None:
+        casedir = self.casedir
+    cmd = './xmlchange '+variable+'='+str(value)
+    if (self.apptainer != ''):
+        myfile.write('apptainer exec --bind '+self.apptainer_bind+' --pwd '+casedir+' '+ \
+            self.apptainer+' '+cmd+'\n')
+    else:
+        myfile.write(cmd+'\n')
+
+
 def find_latest_restart(finidat_path):
     """
     Search `finidat_path` for files matching `*elm.r.*` and
@@ -297,15 +360,15 @@ def create_ensemble_script(self):
     #Create the PBS script we will submit to run the ensemble
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
-    softenv = open('software_environment.txt','r')
-    for s in softenv:
-        if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
-            ldpath = s.split('=')[1].strip()
-    softenv.close()
+    ldpath = ''
+    if os.path.exists('software_environment.txt'):
+        softenv = open('software_environment.txt','r')
+        for s in softenv:
+            if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
+                ldpath = s.split('=')[1].strip()
+        softenv.close()
     self.npernode=int(self.xmlquery('MAX_TASKS_PER_NODE'))
-    nnodes = int(np.ceil((self.np_ensemble*self.np)/self.npernode))
-    myfile = open('case.submit_ensemble','w')
-    myfile.write('#!/bin/bash -e\n\n')
+    nnodes = max(1, int(np.ceil((self.np_ensemble*self.np)/self.npernode)))
     case_run = os.path.join(self.casedir, '.case.run')
     parsed_sbatch = parse_sbatch(case_run)
     if (self.queue == 'debug'):
@@ -313,140 +376,215 @@ def create_ensemble_script(self):
         self.walltime=2
     total_tasks = int(self.np_ensemble) * int(self.np)
     parsed_sbatch['qos'] = self.queue
+    if getattr(self, 'partition', '') != '':
+        parsed_sbatch['partition'] = self.partition
     parsed_sbatch['time'] = str(self.walltime)+':00:00'
     parsed_sbatch['nodes'] = int(nnodes)
     parsed_sbatch['ntasks'] = int(total_tasks)
     parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(parsed_sbatch['ntasks'])/float(parsed_sbatch['nodes'])))
     parsed_sbatch['exclusive'] = False
-    # Write SBATCH directives using helper
-    write_sbatch(parsed_sbatch, myfile)
 
-    myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
-    myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
-    if (self.apptainer != ''):
-      myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
-                ' --pwd '+self.caseroot+'/'+self.casename+ ' '+ \
-                self.apptainer+' ./preview_namelists\n')
-    else:     
-      myfile.write('./preview_namelists\n')
-    myfile.write('ulimit -n '+str(self.nsamples+1024)+'\n')
-    myfile.write('cd '+self.OLMTdir+'\n')
-    myfile.write('./manage_ensemble.py --case '+self.casename+'\n')
-    myfile.close()  
-    os.system('chmod u+x case.submit_ensemble')
+    segments = get_ensemble_segments(self)
+    scriptfiles = []
+    for segment in segments:
+        if len(segments) == 1:
+            scriptname = 'case.submit_ensemble'
+        else:
+            scriptname = 'case.submit_ensemble.seg'+str(1000+segment['index'])[1:]
+        myfile = open(scriptname,'w')
+        myfile.write('#!/bin/bash -e\n\n')
+        # Write SBATCH directives using helper
+        write_sbatch(parsed_sbatch.copy(), myfile)
+
+        myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
+        if len(segments) > 1:
+            write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears')
+            write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'])
+            write_case_xmlchange(myfile, self, 'REST_N', segment['run_n'])
+            write_case_xmlchange(myfile, self, 'CONTINUE_RUN', 'TRUE' if segment['continue_run'] else 'FALSE')
+        if ldpath != '':
+            myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
+        if (self.apptainer != ''):
+          myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
+                    ' --pwd '+self.caseroot+'/'+self.casename+ ' '+ \
+                    self.apptainer+' ./preview_namelists\n')
+        else:
+          myfile.write('./preview_namelists\n')
+        myfile.write('ulimit -n '+str(self.nsamples+1024)+'\n')
+        myfile.write('cd '+self.OLMTdir+'\n')
+        manage_cmd = './manage_ensemble.py --case '+self.casename
+        if len(segments) > 1:
+            segment_end_year = int(self.startyear) + int(segment['end_offset'])
+            manage_cmd += ' --segment '+str(segment['index'])
+            manage_cmd += ' --segment_years '+str(segment['run_n'])
+            manage_cmd += ' --segment_end_year '+str(segment_end_year)
+            if segment['continue_run']:
+                manage_cmd += ' --continue_segment'
+            if not segment['final']:
+                manage_cmd += ' --no_final_segment'
+        myfile.write(manage_cmd+'\n')
+        myfile.close()
+        os.system('chmod u+x '+scriptname)
+        scriptfiles.append('./'+scriptname)
+
     self.rundir_UQ = self.runroot+'/UQ/ensembles/'+self.casename
     os.system('mkdir -p '+self.rundir_UQ)
     self.UQ_output = self.runroot+'/UQ/analysis/'+self.casename
     os.system('mkdir -p '+self.UQ_output)
+    return scriptfiles
 
 def create_multisite_script(self,sites,scriptdir,cases_compare=""):
     #Create the PBS script we will submit to run multiple sites
     os.chdir(self.casedir)
     #Get the LD_LIBRARY_PATH from software environment
-    softenv = open('software_environment.txt','r')
-    for s in softenv:
-        if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
-            ldpath = s.split('=')[1].strip()
-    softenv.close()
+    ldpath = ''
+    if os.path.exists('software_environment.txt'):
+        softenv = open('software_environment.txt','r')
+        for s in softenv:
+            if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
+                ldpath = s.split('=')[1].strip()
+        softenv.close()
     self.npernode=int(self.xmlquery('MAX_TASKS_PER_NODE'))
     nruns = len(sites) if len(sites) > 0 else 1
     total_tasks = int(self.np) * int(nruns)
     nnodes = max(1, int(np.ceil(float(total_tasks) / float(self.npernode))))
-    fname = self.casename.replace('_'+self.site,'')+'.sh'
-    myfile = open(fname,'w')
-    myfile.write('#!/bin/bash -e\n\n')
     case_run = os.path.join(self.casedir, '.case.run')
     parsed_sbatch = parse_sbatch(case_run)
     if (self.queue == 'debug'):
         print('Debug queue selected, setting walltime to 2 hours')
         self.walltime=2
     parsed_sbatch['qos'] = self.queue
+    if getattr(self, 'partition', '') != '':
+        parsed_sbatch['partition'] = self.partition
     parsed_sbatch['time'] = str(self.walltime)+':00:00'
     parsed_sbatch['nodes'] = int(nnodes)
     parsed_sbatch['ntasks'] = int(total_tasks)
     parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(total_tasks)/float(nnodes)))
     # Ensure we do not emit --exclusive for multisite submission either.
     parsed_sbatch['exclusive'] = False
-    # Write SBATCH directives using helper 
-    write_sbatch(parsed_sbatch, myfile)
 
-    myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
-    myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
-    for s in sites:
-      site_casename = self.casename.replace(sites[0],s)
-      site_casedir = self.caseroot+'/'+site_casename
-      site_rundir = self.runroot+'/'+site_casename+'/run'
-      myfile.write('cd '+site_casedir+'\n')
-      if (self.apptainer != ''):
-        myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
-                ' --pwd '+site_casedir+ ' '+ \
-                self.apptainer+' ./preview_namelists\n')
+    segments = get_multisite_segments(self)
+    base_fname = self.casename.replace('_'+self.site,'')+'.sh'
+    scriptfiles = []
+    for segment in segments:
+      if len(segments) == 1:
+        fname = base_fname
       else:
-        myfile.write('./preview_namelists\n')
-      myfile.write('cd '+site_rundir+'\n')
-      myfile.write('mkdir -p timing/checkpoints\n')
-      #restart file options
-      for key in self.case_options.keys():
-        if ('restart_' in key):
-            var   = key[8:]
-            value = str(self.case_options[key])
-            if ('*' in value or '+' in value):
-                operator=value[0]
-                value=value[1:]
-                myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
-                    self.finidat+' --var '+var+' --val '+value+ \
-                    ' --operator "'+operator+'"\n')
-            else:
-                myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
-                    self.finidat+' --var '+var+' --val '+value+'\n')
-      if (self.noslurm):
-        myfile.write('mpiexec -n '+str(self.np)+' '+self.exeroot+'/e3sm.exe > '+ \
-                     site_rundir+'/e3sm_log.txt &\n\n')
-      else:
-          # compute nodes required for this site run and align srun options
-          nodes_per_run = max(1, int(np.ceil(float(self.np) / float(self.npernode))))
-          ntasks_run = int(self.np)
-          tasks_per_node_run = max(1, int(math.ceil(float(ntasks_run) / float(nodes_per_run))))
-          cpus_per_task = parsed_sbatch['cpus_per_task'] if parsed_sbatch.get('cpus_per_task') is not None else 1
-          if (self.apptainer != ''):
+        fname = base_fname[:-3]+'.seg'+str(1000+segment['index'])[1:]+'.sh'
+      myfile = open(fname,'w')
+      myfile.write('#!/bin/bash -e\n\n')
+      # Write SBATCH directives using helper
+      write_sbatch(parsed_sbatch.copy(), myfile)
+
+      myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
+      if (self.apptainer != '' and ldpath != ''):
+          myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
+      for s in sites:
+        site_casename = self.casename.replace(sites[0],s)
+        site_casedir = self.caseroot+'/'+site_casename
+        site_rundir = self.runroot+'/'+site_casename+'/run'
+        myfile.write('cd '+site_casedir+'\n')
+        if len(segments) > 1:
+          write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears', casedir=site_casedir)
+          write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'], casedir=site_casedir)
+          write_case_xmlchange(myfile, self, 'REST_N', segment['run_n'], casedir=site_casedir)
+          write_case_xmlchange(myfile, self, 'CONTINUE_RUN', 'TRUE' if segment['continue_run'] else 'FALSE', casedir=site_casedir)
+        if (self.apptainer != ''):
+          myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
+                  ' --pwd '+site_casedir+ ' '+ \
+                  self.apptainer+' ./preview_namelists\n')
+        elif len(segments) > 1:
+          myfile.write('./preview_namelists\n')
+        myfile.write('cd '+site_rundir+'\n')
+        myfile.write('mkdir -p timing/checkpoints\n')
+
+        #restart file options only apply to the initial segment
+        if not segment['continue_run']:
+          for key in self.case_options.keys():
+            if ('restart_' in key):
+                var   = key[8:]
+                value = str(self.case_options[key])
+                if ('*' in value or '+' in value):
+                    operator=value[0]
+                    value=value[1:]
+                    myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
+                        self.finidat+' --var '+var+' --val '+value+ \
+                        ' --operator "'+operator+'"\n')
+                else:
+                    myfile.write('python '+self.OLMTdir+'/modify_netcdf.py --filename '+ \
+                        self.finidat+' --var '+var+' --val '+value+'\n')
+        exe_name = 'elm_offline_driver' if getattr(self, 'offline_driver', False) else 'e3sm.exe'
+        exe_path = self.exeroot+'/'+exe_name
+        log_path = site_rundir+'/e3sm_log.txt'
+        if len(segments) > 1:
+          log_path = site_rundir+'/e3sm_log.seg'+str(1000+segment['index'])[1:]+'.txt'
+        if (self.noslurm):
+          myfile.write('mpiexec -n '+str(self.np)+' '+exe_path+' > '+ \
+                       log_path+' &\n\n')
+        else:
+            if (self.apptainer != ''):
+                # Preserve explicit container execution path for multi-site runs.
+                nodes_per_run = max(1, int(np.ceil(float(self.np) / float(self.npernode))))
+                ntasks_run = int(self.np)
+                tasks_per_node_run = max(1, int(math.ceil(float(ntasks_run) / float(nodes_per_run))))
+                cpus_per_task = parsed_sbatch['cpus_per_task'] if parsed_sbatch.get('cpus_per_task') is not None else 1
                 myfile.write('srun --nodes='+str(nodes_per_run)+' --ntasks='+str(ntasks_run)+' --ntasks-per-node='+str(tasks_per_node_run)+' --cpu-bind=none -c '+str(cpus_per_task)+' apptainer exec '+ \
                     ' --bind '+self.apptainer_bind+' --env OMPI_MCA_pml=ob1 --env OMPI_MCA_btl=self,vader,tcp  ' \
-                    +self.apptainer+' '+self.exeroot+'/e3sm.exe > '+ \
-                    site_rundir+'/e3sm_log.txt &\n\n')
-          else:
-                myfile.write('srun --nodes='+str(nodes_per_run)+' --ntasks='+str(ntasks_run)+' --ntasks-per-node='+str(tasks_per_node_run)+' --cpu-bind=none -c '+str(cpus_per_task)+' '+self.exeroot+'/e3sm.exe > '+ \
-                    site_rundir+'/e3sm_log.txt &\n\n')
-    myfile.write('wait\n')
-    myfile.write('cd '+self.OLMTdir+'\n')
-    for s in sites:
-        # Check if it's a site run (single point simulation)
-        is_site_run = hasattr(self, 'site') and self.site != '' and self.site is not None
-        if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename \
-            and not 'ad_spinup' in self.casename and not 'FATES' in self.compset and \
-            not 'ED' in self.compset and is_site_run):
-            #Assume this is a final spinup case, do spinup diagnostic plots
-            myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
-        elif self.postproc_vars:
-            #Do requested postprocessing and plotting
-            postproc_cmd = 'python manage_postproc.py --case '+self.casename.replace(sites[0],s)
-            myfile.write(postproc_cmd + '\n')
-            if cases_compare and cases_compare.strip() and s == sites[-1]:
-                postproc_cmd += ' --cases_compare "' + cases_compare + '"'
+                    +self.apptainer+' '+exe_path+' > '+ \
+                    log_path+' &\n\n')
+            else:
+                direct_cmd = site_casedir+'/.case.run > '+log_path+' 2>&1'
+                sbatch_cmd = 'sbatch --wait'
+                if parsed_sbatch.get('time'):
+                    sbatch_cmd += ' --time='+str(parsed_sbatch.get('time'))
+                if parsed_sbatch.get('partition'):
+                    sbatch_cmd += ' -p '+str(parsed_sbatch.get('partition'))
+                if parsed_sbatch.get('qos'):
+                    sbatch_cmd += ' --qos='+str(parsed_sbatch.get('qos'))
+                if parsed_sbatch.get('account'):
+                    sbatch_cmd += ' -A '+str(parsed_sbatch.get('account'))
+                sbatch_cmd += ' --output='+log_path
+                sbatch_cmd += ' --error='+log_path
+                sbatch_cmd += ' '+site_casedir+'/.case.run'
+                myfile.write('if [ -n "${SLURM_JOB_ID:-}" ]; then\n')
+                myfile.write('  '+direct_cmd+' &\n')
+                myfile.write('else\n')
+                myfile.write('  '+sbatch_cmd+' &\n')
+                myfile.write('fi\n\n')
+      myfile.write('wait\n')
+      if segment['final']:
+        myfile.write('cd '+self.OLMTdir+'\n')
+        for s in sites:
+            # Check if it's a site run (single point simulation)
+            is_site_run = hasattr(self, 'site') and self.site != '' and self.site is not None
+            if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename \
+                and not 'ad_spinup' in self.casename and not 'FATES' in self.compset and \
+                not 'ED' in self.compset and is_site_run):
+                #Assume this is a final spinup case, do spinup diagnostic plots
+                myfile.write('python manage_postproc.py --case '+self.casename.replace(sites[0],s)+' --plot_spinup\n')
+            elif self.postproc_vars:
+                #Do requested postprocessing and plotting
+                postproc_cmd = 'python manage_postproc.py --case '+self.casename.replace(sites[0],s)
                 myfile.write(postproc_cmd + '\n')
-    myfile.close()
-    os.system('chmod u+x '+fname)
-    return os.path.abspath('./'+fname)
+                if cases_compare and cases_compare.strip() and s == sites[-1]:
+                    postproc_cmd += ' --cases_compare "' + cases_compare + '"'
+                    myfile.write(postproc_cmd + '\n')
+      myfile.close()
+      os.system('chmod u+x '+fname)
+      scriptfiles.append(os.path.abspath('./'+fname))
+    return scriptfiles
 
-def ensemble_copy(self, ens_num):
+def ensemble_copy(self, ens_num, clean=True):
 
   gst=str(100000+int(ens_num))
 
   # create ensemble directory from original case 
   orig_dir = str(os.path.abspath(self.runroot)+'/'+self.casename+'/run')
   ens_dir  = str(os.path.abspath(self.rundir_UQ)+'/g'+gst[1:])
-		
+
   os.system('mkdir -p '+ens_dir+'/timing/checkpoints')
-  os.system('rm -f '+ens_dir+'/*.log.* '+ens_dir+'/*.nc '+ens_dir+'/rpointer*')
+  if clean:
+    os.system('rm -f '+ens_dir+'/*.log.* '+ens_dir+'/*.nc '+ens_dir+'/rpointer*')
   os.system('cp  '+orig_dir+'/*_in* '+ens_dir)
   os.system('cp  '+orig_dir+'/*nml '+ens_dir)
   if (not ('CB' in self.casename)):
@@ -469,8 +607,8 @@ def ensemble_copy(self, ens_num):
                   paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/fates_params_'+gst[1:]+'.nc'
                 os.system('cp '+paramfile_orig+' '+paramfile_new)
-                os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
-                os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
+                #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
+                #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" fates_paramfile = '"+paramfile_new+"'\n")
                 fates_paramfile = ens_dir+'/fates_params_'+gst[1:]+'.nc'
             elif ('paramfile' in s):
@@ -479,8 +617,8 @@ def ensemble_copy(self, ens_num):
                    paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/clm_params_'+gst[1:]+'.nc'
                 os.system('cp '+paramfile_orig+' '+paramfile_new)
-                os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
-                os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
+                #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
+                #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" paramfile = '"+paramfile_new+"'\n")
                 pftfile = ens_dir+'/clm_params_'+gst[1:]+'.nc'
             elif ('ppmv' in s and 'co2' in self.ensemble_parms):
@@ -491,8 +629,8 @@ def ensemble_copy(self, ens_num):
                    CNPfile_orig  = orig_dir+'/'+CNPfile_orig[2:]
                 CNPfile_new  = ens_dir+'/CNP_parameters_'+gst[1:]+'.nc'
                 os.system('cp '+CNPfile_orig+' '+CNPfile_new)
-                os.system('nccopy -3 '+CNPfile_new+' '+CNPfile_new+'_tmp')
-                os.system('mv '+CNPfile_new+'_tmp '+CNPfile_new)
+                #os.system('nccopy -3 '+CNPfile_new+' '+CNPfile_new+'_tmp')
+                #os.system('mv '+CNPfile_new+'_tmp '+CNPfile_new)
                 myoutput.write(" fsoilordercon = '"+CNPfile_new+"'\n")
                 CNPfile = ens_dir+'/CNP_parameters_'+gst[1:]+'.nc'
             elif ('fsurdat =' in s):
@@ -501,8 +639,8 @@ def ensemble_copy(self, ens_num):
                   surffile_orig = orig_dir+'/'+surffile_orig[2:]
                 surffile_new = ens_dir+'/surfdata_'+gst[1:]+'.nc'
                 os.system('cp '+surffile_orig+' '+surffile_new)
-                os.system('nccopy -3 '+surffile_new+' '+surffile_new+'_tmp')
-                os.system('mv '+surffile_new+'_tmp '+surffile_new)
+                #os.system('nccopy -3 '+surffile_new+' '+surffile_new+'_tmp')
+                #os.system('mv '+surffile_new+'_tmp '+surffile_new)
                 myoutput.write(" fsurdat = '"+surffile_new+"'\n")
                 surffile = ens_dir+'/surfdata_'+gst[1:]+'.nc'
             elif ('finidat = ' in s and self.has_finidat):
@@ -523,17 +661,18 @@ def ensemble_copy(self, ens_num):
                 #            self.dependcase)
                 #os.system('cp '+finidat_file_orig+' '+finidat_file_new)
                 myoutput.write(" finidat = '"+finidat_file_new+"'\n")
-                #Make any requested restart modifications
-                for key in self.case_options.keys():
-                    if ('restart_' in key):
-                        var   = key[8:]
-                        value = self.case_options[key]
-                        ncval = self.getncvar(finidat_file_new, var)
-                        if ('*' in value):
-                            value = value*ncval
-                        if ('+' in value):
-                            value = value+ncval
-                        self.putncvar(finidat_file_new, var, value)
+                #Make any requested restart modifications on the initial segment only.
+                if clean:
+                    for key in self.case_options.keys():
+                        if ('restart_' in key):
+                            var   = key[8:]
+                            value = self.case_options[key]
+                            ncval = self.getncvar(finidat_file_new, var)
+                            if ('*' in value):
+                                value = value*ncval
+                            if ('+' in value):
+                                value = value+ncval
+                            self.putncvar(finidat_file_new, var, value)
             elif ('logfile =' in s):
                 #Get the current date and time
                 now = datetime.datetime.now()
@@ -556,6 +695,9 @@ def ensemble_copy(self, ens_num):
   parm_indices = self.ensemble_pfts
   for p in self.ensemble_parms:
     if ('INI' in p):
+      if not clean:
+         pnum = pnum+1
+         continue
       if ('BGC' in self.casename):
          scalevars = ['soil3c_vr','soil3n_vr','soil3p_vr']
       else:
@@ -646,6 +788,17 @@ def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1)
     # Percentiles to calculate
     data=self.output[myvar].transpose()
 
+    # Mask failed members (sentinel -9999) before computing percentiles
+    data = data.astype(float).copy()
+    data[data <= -9999] = np.nan
+    # Drop columns (members) that are entirely NaN
+    valid_mask = ~np.all(np.isnan(data), axis=1)
+    data = data[valid_mask, :]
+    n_valid = int(valid_mask.sum())
+    n_total = valid_mask.shape[0]
+    if n_valid < n_total:
+        print(f'plot_ensemble {myvar}: using {n_valid} of {n_total} members (excluding failed)')
+
     # Calculate percentiles along the ensemble axis
     percentile_values = np.nanpercentile(data, percentiles, axis=0)
 
@@ -693,6 +846,32 @@ def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1)
     plt.tight_layout()
     plt.savefig(UQ_output+f'/{myvar}_percentiles.png', bbox_inches='tight')
     plt.close()
+
+    # --- Density-shaded version (no legend) ---
+    # Build a lookup from percentile value -> index in percentile_values
+    pct_idx = {p: i for i, p in enumerate(percentiles)}
+    # Nested shading bands from outermost to innermost
+    bands = []
+    if 1  in pct_idx and 99 in pct_idx: bands.append((1,  99,  0.15))
+    if 5  in pct_idx and 95 in pct_idx: bands.append((5,  95,  0.20))
+    if 25 in pct_idx and 75 in pct_idx: bands.append((25, 75,  0.30))
+
+    fig, ax = plt.subplots(figsize=(10, 6))
+    for lo, hi, alpha in bands:
+        ax.fill_between(x_axis,
+                        percentile_values[pct_idx[lo], :],
+                        percentile_values[pct_idx[hi], :],
+                        color='steelblue', alpha=alpha)
+    if 50 in pct_idx:
+        ax.plot(x_axis, percentile_values[pct_idx[50], :],
+                color='navy', linewidth=2)
+    ax.set_xlabel(x_label)
+    ax.set_ylabel(y_label)
+    ax.set_title(f'Ensemble Spread: {myvar}')
+    ax.grid(True)
+    fig.tight_layout()
+    fig.savefig(UQ_output+f'/{myvar}_percentiles_shaded.png', bbox_inches='tight')
+    plt.close(fig)
 
 
 ### END ###

@@ -25,11 +25,11 @@ def smart_loadtxt(filename):
 
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
-            res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', project = '',\
+            res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', partition='', project = '',\
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
             point_list=[], namelist_options=[],casename='',mpilib='', olmtdir='', walltime=24, 
-            apptainer='', apptainer_bind = '/'):
+            apptainer='', apptainer_bind = '/', offline_driver=False, resubmit_years=0):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -75,6 +75,7 @@ class ELMcase():
         else:
           self.caseid = caseid
         self.queue=queue
+        self.partition=partition
         self.project=project
         self.interactive_build=False
         self.get_machine(machine=machine)
@@ -122,12 +123,21 @@ class ELMcase():
         self.postproc_cols=[0]
         self.postproc_freq='monthly'
         self.postproc_timeaverage=1
+        self.sens_plot_ntimesteps=None  # None means plot all timesteps
         self.namelist_options=namelist_options
         self.mpilib=''
         self.walltime=walltime
+        try:
+          self.resubmit_years=int(resubmit_years)
+        except Exception:
+          self.resubmit_years=0
+        self.ensemble_resubmit_years=0
+        # Build offline driver (elm_offline_driver) alongside e3sm.exe
+        self.offline_driver = offline_driver
 
   def setup_ensemble(self, sampletype='monte_carlo',parm_list='', ensemble_file='', \
-          np_ensemble=64, nsamples=100, obs={}, obs_err={}, finidat_root=''):
+          np_ensemble=64, nsamples=100, obs={}, obs_err={}, finidat_root='', \
+          resubmit_years=0):
     read_parm_list(self, parm_list=parm_list)
     if (ensemble_file == ''):
       create_samples(self, sampletype=sampletype, parm_list=parm_list,nsamples=nsamples)
@@ -139,6 +149,10 @@ class ELMcase():
     if (finidat_root != ''):
       self.has_finidat = True
     self.np_ensemble=np_ensemble
+    try:
+      self.ensemble_resubmit_years = int(resubmit_years)
+    except Exception:
+      self.ensemble_resubmit_years = 0
     create_ensemble_script(self)
     self.get_default_parms()
     #Variables for surrogate model
@@ -823,6 +837,10 @@ class ELMcase():
       self.xmlchange('NTASKS_'+c,value=str(self.np))
       self.xmlchange('NTHRDS_'+c,value='1')
 
+    # Pathfinder queue-specific override: match requested hardware capacity.
+    if (self.machine == 'pathfinder' and self.queue == 'hpcl-cli185'):
+      self.xmlchange('MAX_TASKS_PER_NODE', value='128')
+
     self.xmlchange('STOP_OPTION',value='nyears')
     self.xmlchange('STOP_N',value=str(self.run_n))
     self.xmlchange('REST_N',value=str(self.run_n))
@@ -1028,18 +1046,32 @@ class ELMcase():
         self.xmlchange('ATM_NX',value='1')
         self.xmlchange('ATM_NY',value='1')
         if (self.apptainer != ''):
+          if self.offline_driver:
             cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer+ \
-                    ' ./case.setup'
+                ' bash -lc "export CMAKE_ARGS=\"-DBUILD_ELM_OFFLINE_DRIVER=ON\" && ./case.setup"'
+          else:
+            cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer+ \
+                ' ./case.setup'
         else:
+          if self.offline_driver:
+            cmd = 'export CMAKE_ARGS="-DBUILD_ELM_OFFLINE_DRIVER=ON" && ./case.setup'
+          else:
             cmd = './case.setup'
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, \
-                shell=True)
+            shell=True)
 
       if (self.dobuild):
         if (self.apptainer != ''):
+          if self.offline_driver:
             cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer + \
-                    ' ./case.build'
+                ' bash -lc "export CMAKE_ARGS=\"-DBUILD_ELM_OFFLINE_DRIVER=ON\" && ./case.build"'
+          else:
+            cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer + \
+                ' ./case.build'
         else:
+          if self.offline_driver:
+            cmd = 'export CMAKE_ARGS="-DBUILD_ELM_OFFLINE_DRIVER=ON" && ./case.build'
+          else:
             cmd = './case.build'
         build_timeout = None
         if (self.interactive_build):
@@ -1249,36 +1281,44 @@ class ELMcase():
     #Return the job id
     if (ensemble):
         #Create the PBS script
-        create_ensemble_script(self)
-        scriptfile = './case.submit_ensemble'
+        scriptfile = create_ensemble_script(self)
     elif (multisite_script != ''):
         scriptfile = multisite_script
     else:
         scriptfile = './case.submit'
     os.chdir(self.casedir)
-    if (depend > 0 and not self.noslurm):
-      if (ensemble or multisite_script != ''):
-          cmd = [mysubmit,'--dependency=afterok:'+str(depend),scriptfile]
-      else:
-          cmd = [scriptfile,'--prereq',str(depend)]
+    if not isinstance(scriptfile, list):
+      scriptfiles = [scriptfile]
     else:
-      if ((ensemble or multisite_script != '') and not self.noslurm):
-          cmd = [mysubmit,scriptfile]
+      scriptfiles = scriptfile
+
+    jobnum=0
+    jobnum_depend=depend
+    for script in scriptfiles:
+      if (jobnum_depend > 0 and not self.noslurm):
+        if (ensemble or multisite_script != ''):
+            cmd = [mysubmit,'--dependency=afterok:'+str(jobnum_depend),script]
+        else:
+            cmd = [script,'--prereq',str(jobnum_depend)]
       else:
-          cmd = [scriptfile]
-    if (self.noslurm):
-        log_file_path='./case_submit.log'
-        with open(log_file_path, "w") as log_file:
-            result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
-                stdout=log_file)
-            jobnum=0
-    else:
-        #code.interact(local=dict(globals(), **locals())) 
-        result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
-                stdout=subprocess.PIPE, text=True)
-        output = result.stdout.strip()
-        jobnum = int(output.split()[-1])
-        print('\nSubmitted '+str(jobnum))
+        if ((ensemble or multisite_script != '') and not self.noslurm):
+            cmd = [mysubmit,script]
+        else:
+            cmd = [script]
+      if (self.noslurm):
+          log_file_path='./case_submit.log'
+          with open(log_file_path, "a") as log_file:
+              result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
+                  stdout=log_file)
+              jobnum=0
+      else:
+          #code.interact(local=dict(globals(), **locals()))
+          result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
+                  stdout=subprocess.PIPE, text=True)
+          output = result.stdout.strip()
+          jobnum = int(output.split()[-1])
+          print('\nSubmitted '+str(jobnum)+' from '+script)
+          jobnum_depend=jobnum
     os.chdir(self.OLMTdir)
     return jobnum
 
@@ -1314,4 +1354,3 @@ _add_methods_from_module(get_fluxnet_obs)
 _add_methods_from_module(surrogate_NN)
 _add_methods_from_module(run_GSA)
 _add_methods_from_module(MCMC)
-

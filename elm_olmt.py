@@ -145,6 +145,7 @@ def main():
     
     # Override machine defaults with config values if provided
     queue = cfg['machine'].get('queue', queue)
+    partition = cfg['machine'].get('partition', '')
     project = cfg['machine'].get('project', project)
     inputdata = cfg['machine'].get('inputdata', inputdata)
     caseroot = cfg['machine'].get('caseroot', rootdir + '/e3sm_cases')
@@ -184,6 +185,8 @@ def main():
         lon_bounds = cfg['simulation']['lon_bounds']
     use_cpl_bypass = cfg['simulation'].get('use_cpl_bypass',True)
     res = cfg['simulation']['res']
+    # Option to build the offline driver alongside the regular executable
+    offline_driver = cfg['simulation'].get('offline_driver', False)
     
     # Biogeochemistry options
     nutrients = cfg['biogeochemistry']['nutrients']
@@ -212,8 +215,10 @@ def main():
     run_startyear = cfg['run_lengths'].get('trans_startyear', 1850)
     if (nutrients == 'none'):
         run_startyear = cfg['run_lengths'].get('startyear', run_startyear)
+    resubmit_years = cfg['run_lengths'].get('resubmit_years', 0)
 
     # Ensemble options
+    ensemble_resubmit_years = resubmit_years
     if ('ensemble' in cfg):
         parm_list = cfg['ensemble'].get('parm_list', '')
         if (parm_list != ''):
@@ -221,8 +226,10 @@ def main():
             np_ensemble = cfg['ensemble'].get('np_ensemble',nsamples)
             ensemble_file = cfg['ensemble'].get('ensemble_file','')
             finidat_root = cfg['ensemble'].get('finidat_root', '')
+            ensemble_resubmit_years = cfg['ensemble'].get('resubmit_years', resubmit_years)
     else:
         parm_list = ''
+        ensemble_resubmit_years = resubmit_years
 
     # Load case options and treatment options from config file
     case_options = {}
@@ -270,6 +277,7 @@ def main():
         postproc_pfts = cfg['postprocessing'].get('pfts', [0])
         postproc_cols = cfg['postprocessing'].get('cols', [0])
         postproc_timeaverage = cfg['postprocessing'].get('timeaverage', 1)
+        sens_plot_ntimesteps = cfg['postprocessing'].get('sens_plot_ntimesteps', None)
 
    # Observations 
     has_obs = False
@@ -416,6 +424,10 @@ def main():
     if (ensemble):
         print('Ensemble size:  '+str(nsamples))
         print('Parameter list: '+parm_list+'\n')
+        if (ensemble_resubmit_years):
+            print('Ensemble resubmit interval: '+str(ensemble_resubmit_years)+' years\n')
+    elif len(sites) > 1 and resubmit_years:
+        print('Multi-site resubmit interval: '+str(resubmit_years)+' years\n')
 
     nsites = len(sites)
     jobnum = np.zeros(len(compsets),int)  #list of submitted job ids
@@ -430,10 +442,11 @@ def main():
 
         cases[c] = model_ELM.ELMcase(caseid=str(case_prefix),compset=compsets[c], site=site, \
             caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
-            machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, project=project,  \
+            machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, partition=partition, project=project,  \
             res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
-            olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind)
+            olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind, \
+            offline_driver=offline_driver, resubmit_years=resubmit_years)
         #Save the other site names in first site's cases (for use in multi-site calibration)
         if site == sites[-1]:
             cases[c].all_sites = [s for s in sites]
@@ -507,6 +520,7 @@ def main():
             cases[c].postproc_pfts = postproc_pfts
             cases[c].postproc_cols = postproc_cols
             cases[c].postproc_timeaverage = postproc_timeaverage
+            cases[c].sens_plot_ntimesteps = sens_plot_ntimesteps
             # Also get the observations if requested, use postproc
             if (has_obs and site != ''):
                 cases[c].obs = {}
@@ -547,7 +561,7 @@ def main():
                 # Get the ensemble file from the first site and case
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
                     ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err, \
-                        finidat_root=finidat_root)
+                        finidat_root=finidat_root, resubmit_years=ensemble_resubmit_years)
                 ensemble_file = cases[c].ensemble_file
             else:
                 thisfinidat_root = ''
@@ -556,7 +570,7 @@ def main():
                 # Use the ensemble file for subsequent cases and sites
                 cases[c].setup_ensemble(parm_list=parm_list,np_ensemble=np_ensemble,nsamples=nsamples, \
                     ensemble_file = ensemble_file, obs=cases[c].obs, obs_err=cases[c].obs_err, \
-                        finidat_root=thisfinidat_root)
+                        finidat_root=thisfinidat_root, resubmit_years=ensemble_resubmit_years)
         if ('20TR' in compsets[c] and not use_fates):
             # Get the dynamic PFT data
             cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
@@ -602,9 +616,10 @@ def main():
                         site_cases.append(other_casename)
                     if site_cases:
                         cases_compare = ','.join(site_cases)
-                
-                # Always use the multi-site script even for one site
-                multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir, cases_compare=cases_compare)
+                if len(sites) > 1:
+                    multisite_scripts[c] = cases[c].create_multisite_script(sites, scriptdir, cases_compare=cases_compare)
+                else:
+                    multisite_scripts[c] = ''
             if (site == sites[nsites-1]):
                 jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
                     ensemble=ensemble,multisite_script=multisite_scripts[c])
