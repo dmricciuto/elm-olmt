@@ -146,6 +146,8 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         if (nperyear != 12):
           #If not monthly files, ignore the last file (it only represents a single timestep)
           file_list = file_list[:-1]
+    if len(file_list) == 0:
+        raise FileNotFoundError('No output files found for variable '+var+' in '+rundir)
     basevar = get_postproc_basevar(var)
     os.system('ncrcat -O -v '+basevar+' '+' '.join(file_list)+' '+var+'.nc')
     myoutput = Dataset(var+'.nc','r')

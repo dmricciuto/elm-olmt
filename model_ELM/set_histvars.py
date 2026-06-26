@@ -8,6 +8,71 @@ def get_postproc_basevar(var):
 def is_indexed_postproc_var(var):
     return ('_pft' in var or '_col' in var)
 
+def append_unique(values, additions):
+    for item in additions:
+        if item not in values:
+            values.append(item)
+
+def get_surface_file(self):
+    if (hasattr(self, 'case_options')):
+        if ('surffile' in self.case_options and self.case_options['surffile'] != ''):
+            return self.case_options['surffile']
+        if ('fsurdat' in self.case_options and self.case_options['fsurdat'] != ''):
+            return self.case_options['fsurdat']
+    try:
+        fsurdat = self.get_namelist_variable('fsurdat')
+        return fsurdat.strip().strip('\'"')
+    except Exception:
+        pass
+    if (hasattr(self, 'rundir') and self.rundir != ''):
+        return os.path.join(self.rundir, 'surfdata.nc')
+    return ''
+
+def is_multitopounit_surface_file(self):
+    surface_file = get_surface_file(self)
+    if (surface_file == '' or not os.path.exists(surface_file)):
+        return False
+    try:
+        from netCDF4 import Dataset
+        with Dataset(surface_file, 'r') as nc:
+            if ('topounit' in nc.dimensions and len(nc.dimensions['topounit']) > 1):
+                return True
+            if ('topoPerGrid' in nc.variables):
+                return numpy.nanmax(nc.variables['topoPerGrid'][:]) > 1
+    except Exception as err:
+        print('Warning: could not inspect surface file for topounits: '+surface_file)
+        print(err)
+    return False
+
+def option_enabled(self, *names):
+    if (not hasattr(self, 'case_options')):
+        return False
+    for name in names:
+        if (name in self.case_options):
+            value = self.case_options[name]
+            if (isinstance(value, bool)):
+                return value
+            if (str(value).strip().lower() in ['.true.', 'true', 't', '1']):
+                return True
+    return False
+
+def get_multitopounit_spinup_vars(indexed=False, include_routing=False, include_humhol=False):
+    base_vars = ['ZWT', 'ZWT_PERCH', 'WA', 'FSAT', 'H2OSFC', 'QDRAI', 'QDRAI_PERCH',
+                 'QDRAI_XS', 'QOVER', 'QH2OSFC', 'QRUNOFF', 'QRUNOFF_NODYNLNDUSE']
+    if (include_routing):
+        base_vars.extend(['QFROM_UPHILL', 'QTO_DOWNHILL'])
+    if (include_humhol):
+        base_vars.extend(['QFLX_SURF_INPUT', 'QFLX_LAT_AQU'])
+    if (indexed):
+        grid_only_vars = ['QRUNOFF']
+        indexed_vars = []
+        for var in base_vars:
+            indexed_vars.append(var)
+            if (var not in grid_only_vars):
+                indexed_vars.append(var+'_col')
+        return indexed_vars
+    return base_vars
+
 def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
    if (spinup>0):
       var_list_spinup = ['PPOOL', 'EFLX_LH_TOT', 'RETRANSN', 'PCO2', 'PBOT', 'TBOT','FSDS','NDEP_TO_SMINN', 'OCDEP', \
@@ -19,6 +84,16 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
       if ('ICBELMBC' in self.compset):
         var_list_spinup = ['FPSN','TLAI','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','RH2M','TSA','FSDS','FLDS','PBOT', \
                          'WIND','BTRAN','DAYL','T10','QBOT','TBOT']
+
+      has_postproc_vars = bool(self.postproc_vars)
+      if (is_multitopounit_surface_file(self)):
+        use_humhol_routing = option_enabled(self, 'use_humhol', 'humhol')
+        use_topounit_routing = use_humhol_routing or option_enabled(self, 'use_IM2_hillslope_hydrology')
+        append_unique(var_list_spinup, get_multitopounit_spinup_vars( \
+          include_routing=use_topounit_routing, include_humhol=use_humhol_routing))
+        if (has_postproc_vars or 'ELMBC' in self.compset):
+          append_unique(self.postproc_vars, get_multitopounit_spinup_vars(indexed=True, \
+            include_routing=use_topounit_routing, include_humhol=use_humhol_routing))
 
 
      #if (self.C14):

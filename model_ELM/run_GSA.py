@@ -43,12 +43,15 @@ def plot_GSA(self, myvars):
     UQ_output = self.UQ_output + '/GSA'
     os.makedirs(UQ_output, exist_ok=True)  # Ensures the directory exists
     
+    ntimesteps = getattr(self, 'sens_plot_ntimesteps', None)
     for v in myvars:
         if v != 'taxis':
             # Create the figure and axis
             fig, ax = plt.subplots(figsize=(10, 6))  # Larger figure for better visualization
-            
+
             nvar = self.sens_main[v].shape[1]
+            if ntimesteps is not None:
+                nvar = min(nvar, int(ntimesteps))
             x_pos = np.arange(nvar)
             
             # Define distinct colors and patterns
@@ -64,13 +67,13 @@ def plot_GSA(self, myvars):
                 hatch = hatches[p % len(hatches)]
                 bar = ax.bar(
                     x_pos, 
-                    self.sens_main[v][p, :], 
+                    self.sens_main[v][p, :nvar],
                     bottom=bottom, 
                     color=color, 
                     hatch=hatch, 
                     edgecolor='black'
                 )
-                bottom += self.sens_main[v][p, :]
+                bottom += self.sens_main[v][p, :nvar]
                 
                 # Create a legend entry
                 patches.append(mpatches.Patch(facecolor=color, hatch=hatch, edgecolor='black', label=self.ensemble_parms[p] + str(self.ensemble_pfts[p])))
@@ -105,13 +108,13 @@ def plot_GSA(self, myvars):
                 hatch = hatches[p % len(hatches)]
                 bar = ax.bar(
                     x_pos,
-                    self.sens_tot[v][p, :],
+                    self.sens_tot[v][p, :nvar],
                     bottom=bottom,
                     color=color,
                     hatch=hatch,
                     edgecolor='black'
                 )
-                bottom += self.sens_tot[v][p, :]
+                bottom += self.sens_tot[v][p, :nvar]
 
                 # Create a legend entry
                 patches.append(mpatches.Patch(facecolor=color, hatch=hatch, edgecolor='black', label=self.ensemble_parms[p] + str(self.ensemble_pfts[p])))
