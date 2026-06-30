@@ -4,6 +4,7 @@ import numpy as np
 import subprocess
 import random
 import pickle
+import shlex
 import model_ELM
 from optparse import OptionParser
 
@@ -90,6 +91,32 @@ def check_run_success(n):
     if (os.path.isfile(rundir+'/'+mycase.casename+'.elm.r.'+yst+'-01-01-00000.nc')):
         success=True
     return success
+
+def command_to_argv(command):
+    """Split a launch command for shell-free subprocess execution."""
+    return shlex.split(command)
+
+def env_size_bytes(env):
+    return sum(len(k) + len(v) + 2 for k, v in env.items())
+
+def retry_ensemble_copy(member, clean):
+    retries = max(1, int(os.environ.get('OLMT_ENSEMBLE_COPY_RETRIES', os.environ.get('OLMT_FS_RETRIES', '5'))))
+    delay = float(os.environ.get('OLMT_ENSEMBLE_COPY_RETRY_DELAY', os.environ.get('OLMT_FS_RETRY_DELAY', '2.0')))
+    for attempt in range(1, retries + 1):
+        try:
+            return mycase.ensemble_copy(member, clean=clean)
+        except (OSError, MemoryError) as e:
+            if attempt >= retries:
+                print('ensemble_copy failed after '+str(retries)+' attempts for member '+str(member))
+                raise
+            wait = min(delay * attempt, 30.0)
+            print(
+                'Warning: ensemble_copy failed on attempt '
+                +str(attempt)+'/'+str(retries)+' for member '+str(member)
+                +'; retrying in '+str(wait)+' s; error: '+repr(e),
+                flush=True,
+            )
+            time.sleep(wait)
 
 def active_processes(processes,process_jobnum,process_hang):
     """Returns the number of processes that are still running."""
@@ -290,7 +317,7 @@ if (not options.UQ_only):
                   # not enough nodes available now; wait and retry
                   time.sleep(1)
                   continue
-        mycase.ensemble_copy(n_job, clean=(not is_continue_segment))
+        retry_ensemble_copy(n_job, clean=(not is_continue_segment))
         with open(log_file_path, "w") as log_file:
           if (mycase.noslurm == False):
             # build srun. Two modes:
@@ -332,10 +359,25 @@ if (not options.UQ_only):
           # record the exact launch command for debugging in the member log
           try:
             log_file.write('LAUNCH_CMD: '+command+'\n')
+            launch_argv = command_to_argv(command)
+            arg_bytes = sum(len(arg) + 1 for arg in launch_argv)
+            log_file.write('LAUNCH_ARGC: '+str(len(launch_argv))+'\n')
+            log_file.write('LAUNCH_ARG_BYTES: '+str(arg_bytes)+'\n')
+            log_file.write('LAUNCH_ENV_BYTES: '+str(env_size_bytes(os.environ))+'\n')
+            try:
+              log_file.write('LAUNCH_ARG_MAX: '+str(os.sysconf('SC_ARG_MAX'))+'\n')
+            except Exception:
+              pass
             log_file.flush()
           except Exception:
-            pass
-          process = subprocess.Popen(command, shell=True, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
+            launch_argv = command_to_argv(command)
+          try:
+            process = subprocess.Popen(launch_argv, shell=False, stderr=subprocess.STDOUT, cwd=rundir, stdout=log_file)
+          except OSError as e:
+            log_file.write('LAUNCH_OSERROR: '+repr(e)+'\n')
+            log_file.write('LAUNCH_ARGV: '+repr(launch_argv)+'\n')
+            log_file.flush()
+            raise
           processes.append(process)
           process_jobnum.append(n_job)
           process_hang.append(0)

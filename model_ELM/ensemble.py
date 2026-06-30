@@ -1,12 +1,14 @@
 #!/usr/bin/env python
 
-import os, sys, csv, time, math
+import os, sys, csv, time, math, shlex
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
 from netCDF4 import Dataset
 import xarray as xr
 import json
+import glob
+import shutil
 import code  # For development: code.interact(local=dict(globals(), **locals()))
 
 
@@ -115,6 +117,57 @@ def parse_sbatch(case_run_path):
     except Exception:
         pass
     return parsed
+
+
+def retry_filesystem_op(description, func, retries=None, delay=None):
+    """Retry transient filesystem operations on busy shared filesystems."""
+    if retries is None:
+        retries = int(os.environ.get('OLMT_FS_RETRIES', '5'))
+    if delay is None:
+        delay = float(os.environ.get('OLMT_FS_RETRY_DELAY', '2.0'))
+    retries = max(1, int(retries))
+    for attempt in range(1, retries + 1):
+        try:
+            return func()
+        except (OSError, shutil.Error, MemoryError) as e:
+            if attempt >= retries:
+                print('Filesystem operation failed after '+str(retries)+' attempts: '+description, flush=True)
+                raise
+            wait = min(delay * attempt, 30.0)
+            print(
+                'Warning: filesystem operation failed on attempt '
+                +str(attempt)+'/'+str(retries)+': '+description+'; '
+                +'retrying in '+str(wait)+' s; error: '+repr(e),
+                flush=True,
+            )
+            time.sleep(wait)
+
+
+def require_directory(path):
+    if not os.path.isdir(path):
+        raise FileNotFoundError('Expected directory does not exist: '+path)
+    return path
+
+
+def require_file(path):
+    if not os.path.isfile(path):
+        raise FileNotFoundError('Expected file does not exist: '+path)
+    return path
+
+
+def copy_file_verified(src, dst):
+    src = os.path.abspath(src)
+    dst = os.path.abspath(dst)
+    tmp = dst+'.tmp'
+
+    def _copy():
+        require_file(src)
+        shutil.copy2(src, tmp)
+        require_file(tmp)
+        os.replace(tmp, dst)
+        return require_file(dst)
+
+    return retry_filesystem_op('copy '+src+' to '+dst, _copy)
 
 
 def write_sbatch(parsed, myfile):
@@ -227,6 +280,37 @@ def write_case_xmlchange(myfile, self, variable, value, casedir=None):
             self.apptainer+' '+cmd+'\n')
     else:
         myfile.write(cmd+'\n')
+
+
+def write_cime_pythonpath(myfile, self):
+    cimeroot = os.path.abspath(self.modelroot)+'/cime'
+    myfile.write('export PYTHONPATH='+cimeroot+':${PYTHONPATH:-}\n\n')
+
+
+def write_cime_env_eval(myfile, self, casedir):
+    """Load the CIME case environment in Python and export it to this shell."""
+    cimeroot = os.path.abspath(self.modelroot)+'/cime'
+    python_exe = shlex.quote(sys.executable)
+    myfile.write('# setup environment through CIME Case.load_env, avoiding direct Lmod init/sh sourcing\n')
+    myfile.write('eval "$('+python_exe+' - <<\'PYEOF\'\n')
+    myfile.write('import contextlib, os, re, shlex, sys\n')
+    myfile.write('sys.path.insert(0, '+repr(cimeroot)+')\n')
+    myfile.write('from CIME.case import Case\n')
+    myfile.write('valid = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")\n')
+    myfile.write('before = dict(os.environ)\n')
+    myfile.write('with contextlib.redirect_stdout(sys.stderr):\n')
+    myfile.write('    with Case('+repr(casedir)+', read_only=False) as case:\n')
+    myfile.write('        case.load_env(reset=True)\n')
+    myfile.write('keys = sorted(set(before) | set(os.environ))\n')
+    myfile.write('for key in keys:\n')
+    myfile.write('    if not valid.match(key):\n')
+    myfile.write('        continue\n')
+    myfile.write('    if key not in os.environ:\n')
+    myfile.write('        print("unset "+key)\n')
+    myfile.write('    elif before.get(key) != os.environ[key]:\n')
+    myfile.write('        print("export "+key+"="+shlex.quote(os.environ[key]))\n')
+    myfile.write('PYEOF\n')
+    myfile.write(')"\n\n')
 
 
 def find_latest_restart(finidat_path):
@@ -359,14 +443,6 @@ def create_samples(self,sampletype='monte_carlo',nsamples=100,parm_list=''):
 def create_ensemble_script(self):
     #Create the PBS script we will submit to run the ensemble
     os.chdir(self.casedir)
-    #Get the LD_LIBRARY_PATH from software environment
-    ldpath = ''
-    if os.path.exists('software_environment.txt'):
-        softenv = open('software_environment.txt','r')
-        for s in softenv:
-            if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
-                ldpath = s.split('=')[1].strip()
-        softenv.close()
     self.npernode=int(self.xmlquery('MAX_TASKS_PER_NODE'))
     nnodes = max(1, int(np.ceil((self.np_ensemble*self.np)/self.npernode)))
     case_run = os.path.join(self.casedir, '.case.run')
@@ -382,7 +458,9 @@ def create_ensemble_script(self):
     parsed_sbatch['nodes'] = int(nnodes)
     parsed_sbatch['ntasks'] = int(total_tasks)
     parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(parsed_sbatch['ntasks'])/float(parsed_sbatch['nodes'])))
-    parsed_sbatch['exclusive'] = False
+    # Ensemble jobs can run many E3SM instances at once; request whole nodes
+    # so they are not colocated with unrelated jobs on the same node.
+    parsed_sbatch['exclusive'] = True
 
     segments = get_ensemble_segments(self)
     scriptfiles = []
@@ -397,13 +475,13 @@ def create_ensemble_script(self):
         write_sbatch(parsed_sbatch.copy(), myfile)
 
         myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
+        write_cime_pythonpath(myfile, self)
+        write_cime_env_eval(myfile, self, self.casedir)
         if len(segments) > 1:
             write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears')
             write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'])
             write_case_xmlchange(myfile, self, 'REST_N', segment['run_n'])
             write_case_xmlchange(myfile, self, 'CONTINUE_RUN', 'TRUE' if segment['continue_run'] else 'FALSE')
-        if ldpath != '':
-            myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
         if (self.apptainer != ''):
           myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
                     ' --pwd '+self.caseroot+'/'+self.casename+ ' '+ \
@@ -412,7 +490,7 @@ def create_ensemble_script(self):
           myfile.write('./preview_namelists\n')
         myfile.write('ulimit -n '+str(self.nsamples+1024)+'\n')
         myfile.write('cd '+self.OLMTdir+'\n')
-        manage_cmd = './manage_ensemble.py --case '+self.casename
+        manage_cmd = shlex.quote(sys.executable)+' ./manage_ensemble.py --case '+self.casename
         if len(segments) > 1:
             segment_end_year = int(self.startyear) + int(segment['end_offset'])
             manage_cmd += ' --segment '+str(segment['index'])
@@ -436,14 +514,6 @@ def create_ensemble_script(self):
 def create_multisite_script(self,sites,scriptdir,cases_compare=""):
     #Create the PBS script we will submit to run multiple sites
     os.chdir(self.casedir)
-    #Get the LD_LIBRARY_PATH from software environment
-    ldpath = ''
-    if os.path.exists('software_environment.txt'):
-        softenv = open('software_environment.txt','r')
-        for s in softenv:
-            if s.split('=')[0].strip() == 'LD_LIBRARY_PATH':
-                ldpath = s.split('=')[1].strip()
-        softenv.close()
     self.npernode=int(self.xmlquery('MAX_TASKS_PER_NODE'))
     nruns = len(sites) if len(sites) > 0 else 1
     total_tasks = int(self.np) * int(nruns)
@@ -477,13 +547,13 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
       write_sbatch(parsed_sbatch.copy(), myfile)
 
       myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
-      if (self.apptainer != '' and ldpath != ''):
-          myfile.write('export LD_LIBRARY_PATH='+ldpath+'\n\n')
+      write_cime_pythonpath(myfile, self)
       for s in sites:
         site_casename = self.casename.replace(sites[0],s)
         site_casedir = self.caseroot+'/'+site_casename
         site_rundir = self.runroot+'/'+site_casename+'/run'
         myfile.write('cd '+site_casedir+'\n')
+        write_cime_env_eval(myfile, self, site_casedir)
         if len(segments) > 1:
           write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears', casedir=site_casedir)
           write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'], casedir=site_casedir)
@@ -582,31 +652,59 @@ def ensemble_copy(self, ens_num, clean=True):
   orig_dir = str(os.path.abspath(self.runroot)+'/'+self.casename+'/run')
   ens_dir  = str(os.path.abspath(self.rundir_UQ)+'/g'+gst[1:])
 
-  os.system('mkdir -p '+ens_dir+'/timing/checkpoints')
+  if not os.path.isdir(orig_dir):
+    raise FileNotFoundError('Original run directory not found for ensemble copy: '+orig_dir)
+  retry_filesystem_op(
+      'create ensemble directory '+ens_dir,
+      lambda: os.makedirs(ens_dir+'/timing/checkpoints', exist_ok=True),
+  )
+  retry_filesystem_op(
+      'verify ensemble directory '+ens_dir,
+      lambda: require_directory(ens_dir),
+  )
   if clean:
-    os.system('rm -f '+ens_dir+'/*.log.* '+ens_dir+'/*.nc '+ens_dir+'/rpointer*')
-  os.system('cp  '+orig_dir+'/*_in* '+ens_dir)
-  os.system('cp  '+orig_dir+'/*nml '+ens_dir)
+    for pattern in ('*.log.*', '*.nc', '*.tmp', 'rpointer*'):
+      for path in glob.glob(os.path.join(ens_dir, pattern)):
+        if os.path.isfile(path) or os.path.islink(path):
+          retry_filesystem_op('remove '+path, lambda path=path: os.remove(path))
+        elif os.path.isdir(path):
+          retry_filesystem_op('remove directory '+path, lambda path=path: shutil.rmtree(path))
+
+  copy_patterns = ['*_in*', '*nml', '*.rc', 'surf*.nc', 'domain*.nc', '*para*.nc']
   if (not ('CB' in self.casename)):
-    os.system('cp  '+orig_dir+'/*stream* '+ens_dir)
-  os.system('cp  '+orig_dir+'/*.rc '+ens_dir)
-  os.system('cp  '+orig_dir+'/surf*.nc '+ens_dir)
-  os.system('cp  '+orig_dir+'/domain*.nc '+ens_dir)
-  os.system('cp  '+orig_dir+'/*para*.nc '+ens_dir)
+    copy_patterns.insert(2, '*stream*')
+  for pattern in copy_patterns:
+    matches = glob.glob(os.path.join(orig_dir, pattern))
+    if not matches:
+      print('Warning: ensemble_copy found no files for '+os.path.join(orig_dir, pattern))
+      continue
+    for src in matches:
+      if os.path.isfile(src):
+        copy_file_verified(src, os.path.join(ens_dir, os.path.basename(src)))
 
 
   # loop through all filenames, change directories in namelists, change parameter values
-  for f in os.listdir(ens_dir):
+  ensemble_files = retry_filesystem_op(
+      'list ensemble directory '+ens_dir,
+      lambda: os.listdir(ens_dir),
+  )
+  for f in ensemble_files:
     if (os.path.isfile(ens_dir+'/'+f) and (f[-2:] == 'in' or f[-3:] == 'nml' or 'streams' in f)):
-        myinput=open(ens_dir+'/'+f)
-        myoutput=open(ens_dir+'/'+f+'.tmp','w')
+        myinput = retry_filesystem_op(
+            'open '+ens_dir+'/'+f,
+            lambda f=f: open(ens_dir+'/'+f),
+        )
+        myoutput = retry_filesystem_op(
+            'open '+ens_dir+'/'+f+'.tmp',
+            lambda f=f: open(ens_dir+'/'+f+'.tmp','w'),
+        )
         for s in myinput:
             if ('fates_paramfile' in s):
                 paramfile_orig = ((s.split()[2]).strip("'"))
                 if (paramfile_orig[0:2] == './'):
                   paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/fates_params_'+gst[1:]+'.nc'
-                os.system('cp '+paramfile_orig+' '+paramfile_new)
+                copy_file_verified(paramfile_orig, paramfile_new)
                 #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
                 #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" fates_paramfile = '"+paramfile_new+"'\n")
@@ -616,7 +714,7 @@ def ensemble_copy(self, ens_num, clean=True):
                 if (paramfile_orig[0:2] == './'):
                    paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/clm_params_'+gst[1:]+'.nc'
-                os.system('cp '+paramfile_orig+' '+paramfile_new)
+                copy_file_verified(paramfile_orig, paramfile_new)
                 #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
                 #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" paramfile = '"+paramfile_new+"'\n")
@@ -628,7 +726,7 @@ def ensemble_copy(self, ens_num, clean=True):
                 if (CNPfile_orig[0:2] == './'):
                    CNPfile_orig  = orig_dir+'/'+CNPfile_orig[2:]
                 CNPfile_new  = ens_dir+'/CNP_parameters_'+gst[1:]+'.nc'
-                os.system('cp '+CNPfile_orig+' '+CNPfile_new)
+                copy_file_verified(CNPfile_orig, CNPfile_new)
                 #os.system('nccopy -3 '+CNPfile_new+' '+CNPfile_new+'_tmp')
                 #os.system('mv '+CNPfile_new+'_tmp '+CNPfile_new)
                 myoutput.write(" fsoilordercon = '"+CNPfile_new+"'\n")
@@ -638,7 +736,7 @@ def ensemble_copy(self, ens_num, clean=True):
                 if (surffile_orig[0:2] == './'):
                   surffile_orig = orig_dir+'/'+surffile_orig[2:]
                 surffile_new = ens_dir+'/surfdata_'+gst[1:]+'.nc'
-                os.system('cp '+surffile_orig+' '+surffile_new)
+                copy_file_verified(surffile_orig, surffile_new)
                 #os.system('nccopy -3 '+surffile_new+' '+surffile_new+'_tmp')
                 #os.system('mv '+surffile_new+'_tmp '+surffile_new)
                 myoutput.write(" fsurdat = '"+surffile_new+"'\n")
@@ -683,7 +781,10 @@ def ensemble_copy(self, ens_num, clean=True):
                 myoutput.write(s.replace(orig_dir,ens_dir))
         myoutput.close()
         myinput.close()
-        os.system(' mv '+ens_dir+'/'+f+'.tmp '+ens_dir+'/'+f)
+        retry_filesystem_op(
+            'replace '+ens_dir+'/'+f,
+            lambda f=f: os.replace(ens_dir+'/'+f+'.tmp', ens_dir+'/'+f),
+        )
 
   pnum = 0
   CNP_parms = ['ks_sorption', 'r_desorp', 'r_weather', 'r_adsorp', 'k_s1_biochem', 'smax', 'k_s3_biochem', \
