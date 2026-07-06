@@ -216,6 +216,7 @@ def main():
     if (nutrients == 'none'):
         run_startyear = cfg['run_lengths'].get('startyear', run_startyear)
     resubmit_years = cfg['run_lengths'].get('resubmit_years', 0)
+    force_full_spinup_cycles = cfg['run_lengths'].get('force_full_spinup_cycles', True)
 
     # Ensemble options
     ensemble_resubmit_years = resubmit_years
@@ -473,6 +474,7 @@ def main():
         cases[c].nutrients = nutrients
         cases[c].nutrient_comp = nutrient_comp
         cases[c].soil_decomp = soil_decomp
+        cases[c].force_full_spinup_cycles = force_full_spinup_cycles
         if (use_fates):
             cases[c].fates_pft=fates_pft
             cases[c].pft_duplicates = pft_duplicates

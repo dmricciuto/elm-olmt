@@ -234,11 +234,24 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         # Handle HumHol topounit dimension
         if (self.humhol and not isdomain):
             if ('SPR' in self.site):
-                #SPRUCE fractional hum-hol areas and elevations
+                # SPRUCE is represented as three topounits:
+                # 1) boardwalk/fen bare ground, 2) bog hollow, 3) bog hummock.
+                # The bog units share a common peat/till interface set 3 m
+                # below the hollow surface, so the hummock has deeper peat by
+                # its microtopographic offset.
                 fracarea = [0.5,0.17,0.33]
-                elevations = [464.6,465.0,465.15]   #lagg, hollow, hummock
-                distances = [0, 3, 1]  # Example distances for the two topounits (in meters)
-                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, fracarea=fracarea, elevations=elevations, distances=distances)
+                elevations = [464.6,465.0,465.15]   # boardwalk/fen, hollow, hummock
+                distances = [0, 3, 1]  # distance to next lower adjacent topounit (m)
+                is_bog = [0, 1, 1]
+                bog_peat_interface_elev = elevations[1] - 3.0
+                peat_depth = [
+                    0.0 if not is_bog[i] else elevations[i] - bog_peat_interface_elev
+                    for i in range(len(elevations))
+                ]
+                till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0]  # mm/s
+                ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, \
+                        fracarea=fracarea, elevations=elevations, distances=distances, \
+                        is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat)
             else:
                 fracarea = [0.5,0.5]
                 elevations = [self.siteinfo['elev'], self.siteinfo['elev']+0.15]
@@ -260,7 +273,13 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 pct_pft = np.zeros(npfts, float)
                 pct_pft[pft] = 100.0
                 pct_nat_pft = xr.DataArray(pct_pft, dims=['natpft'])
-                ds = self.setpfts(ds, pct_nat_pft);
+                # For SPRUCE HUM_HOL, reserve topounit 1 for boardwalk/fen
+                # bare ground rather than assigning the selected vegetation
+                # PFT there.
+                if 'SPR' in self.site:
+                    ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)
+                else:
+                    ds = self.setpfts(ds, pct_nat_pft)
             print('Setting PFT_NAT_PFT to: ', self.siteinfo['PCT_NAT_PFT'])
             if (not ispftdyn):
                 if (self.siteinfo['PCT_SAND'] >= 0):
@@ -369,7 +388,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
 
 
 def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=None, \
-        elevations=None, distances=None):
+        elevations=None, distances=None, is_bog=None, peat_depth=None, till_ksat=None):
     """
     Add topounit dimension and related variables for topographic simulations
     
@@ -389,6 +408,14 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
     elevations : array-like, optional
         Elevations for each topounit (in meters asl)
         If None, default elevations will be generated
+    distances : array-like, optional
+        Lateral distance to the next lower adjacent topounit (m)
+    is_bog : array-like, optional
+        Integer flags for bog topounits, where 1=bog and 0=non-bog
+    peat_depth : array-like, optional
+        Peat depth above restrictive till for each topounit (m)
+    till_ksat : array-like, optional
+        Restrictive till saturated conductivity for each topounit (mm/s)
         
     Returns:
     --------
@@ -425,6 +452,28 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
         distances = np.array(distances)
         if len(distances) != num_topounits:
             raise ValueError(f"distances length ({len(distances)}) must equal num_topounits ({num_topounits})")
+
+    # Optional peatland metadata used by the E3SM-Peatlands branch.
+    if is_bog is None:
+        is_bog = np.zeros(num_topounits, dtype=int)
+    else:
+        is_bog = np.array(is_bog, dtype=int)
+        if len(is_bog) != num_topounits:
+            raise ValueError(f"is_bog length ({len(is_bog)}) must equal num_topounits ({num_topounits})")
+
+    if peat_depth is None:
+        peat_depth = np.zeros(num_topounits)
+    else:
+        peat_depth = np.array(peat_depth)
+        if len(peat_depth) != num_topounits:
+            raise ValueError(f"peat_depth length ({len(peat_depth)}) must equal num_topounits ({num_topounits})")
+
+    if till_ksat is None:
+        till_ksat = np.zeros(num_topounits)
+    else:
+        till_ksat = np.array(till_ksat)
+        if len(till_ksat) != num_topounits:
+            raise ValueError(f"till_ksat length ({len(till_ksat)}) must equal num_topounits ({num_topounits})")
     
     # Load the dataset into memory first
     ds = ds.load()
@@ -580,9 +629,52 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
             'units': 'meters'
         }
     )
+
+    is_bog_data = np.broadcast_to(is_bog.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitIsBog'] = xr.DataArray(
+        is_bog_data,
+        dims=dist_dims,
+        attrs={
+            'long_name': 'topounit bog flag',
+            'units': '1',
+            'flag_values': np.array([0, 1], dtype=np.int32),
+            'flag_meanings': 'false true'
+        }
+    )
+
+    peat_depth_data = np.broadcast_to(peat_depth.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitPeatDepth'] = xr.DataArray(
+        peat_depth_data,
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'topounit peat depth',
+            'units': 'm'
+        }
+    )
+
+    till_ksat_data = np.broadcast_to(till_ksat.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitTillKsat'] = xr.DataArray(
+        till_ksat_data,
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'restrictive till saturated hydraulic conductivity below topounit peat',
+            'units': 'mm s-1'
+        }
+    )
     
     # Copy attributes
     new_ds.attrs = dict(ds.attrs)
+    if num_topounits == 3 and np.array_equal(is_bog, np.array([0, 1, 1])):
+        new_ds.attrs['topounit_order'] = '1=boardwalk_fen_bareground, 2=bog_hollow, 3=bog_hummock'
+        new_ds.attrs['topounit_is_bog'] = 'boardwalk_fen=0, bog_hollow=1, bog_hummock=1'
+        new_ds.attrs['topounit_peat_depth_m'] = (
+            f'boardwalk_fen={float(peat_depth[0]):.2f}, '
+            f'bog_hollow={float(peat_depth[1]):.2f}, '
+            f'bog_hummock={float(peat_depth[2]):.2f}'
+        )
+        new_ds.attrs['topounit_till_ksat_mm_per_day'] = 'boardwalk_fen=0.0, bog_hollow=0.1, bog_hummock=0.1'
     # Close old dataset and replace with new one
     ds.close()
     return new_ds

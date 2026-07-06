@@ -109,6 +109,7 @@ class ELMcase():
         self.nopftdyn=False
         self.domainfile = ''
         self.run_n = nyears
+        self.force_full_spinup_cycles = True
         if (startyear == -1):
           if '1850' in self.compset:
               self.startyear=1
@@ -735,7 +736,8 @@ class ELMcase():
         #Set the transient run length such that last year is last year of met data
         self.run_n = self.met_endyear-self.startyear+1
     #force run length to be multiple of spinup met data years
-    if (not 'ICBELM' in self.compset and not '20TR' in self.compset and not 'trans' in self.casename):
+    if (getattr(self, 'force_full_spinup_cycles', True) and not 'ICBELM' in self.compset and \
+        not '20TR' in self.compset and not 'trans' in self.casename):
       while (self.run_n % self.nyears_spinup != 0):
           self.run_n = self.run_n+1
     if (not self.is_bypass() and not ('phase2' in self.casename)):

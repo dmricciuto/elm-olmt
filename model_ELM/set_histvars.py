@@ -86,9 +86,9 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                          'WIND','BTRAN','DAYL','T10','QBOT','TBOT']
 
       has_postproc_vars = bool(self.postproc_vars)
-      if (is_multitopounit_surface_file(self)):
-        use_humhol_routing = option_enabled(self, 'use_humhol', 'humhol')
-        use_topounit_routing = use_humhol_routing or option_enabled(self, 'use_IM2_hillslope_hydrology')
+      use_humhol_routing = option_enabled(self, 'use_humhol', 'humhol')
+      use_topounit_routing = use_humhol_routing or option_enabled(self, 'use_IM2_hillslope_hydrology')
+      if (use_humhol_routing or is_multitopounit_surface_file(self)):
         append_unique(var_list_spinup, get_multitopounit_spinup_vars( \
           include_routing=use_topounit_routing, include_humhol=use_humhol_routing))
         if (has_postproc_vars or 'ELMBC' in self.compset):
