@@ -23,6 +23,20 @@ def smart_loadtxt(filename):
     else:
         return np.loadtxt(filename)
 
+def write_fates_pft_subset_nc(source_path, output_path, fates_pft, duplicates=1):
+    """Write a FATES NetCDF parameter file subset with xarray."""
+    with xr.open_dataset(source_path, decode_timedelta=False) as ds:
+        if 'fates_pft' not in ds.sizes:
+            raise KeyError('Dimension fates_pft not found in '+source_path)
+        selected = ds.isel(fates_pft=[int(fates_pft)]).load()
+    if int(duplicates) > 1:
+        selected = xr.concat([selected.copy(deep=True) for _ in range(int(duplicates))],
+                dim='fates_pft')
+    tmp_output = output_path+'.tmp'
+    selected.to_netcdf(tmp_output, mode='w')
+    selected.close()
+    os.replace(tmp_output, output_path)
+
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', partition='', project = '',\
@@ -528,32 +542,10 @@ class ELMcase():
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
-            fname_list=[]
             print('Duplicating '+str(self.pft_duplicates)+' times.')
-            for pf in range(0,self.pft_duplicates):
-                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
-                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
-                        +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
-                fname_list.append(fname)
-            # Open and concatenate along the 'fates_pft' dimension
-            datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
-            # Find variables that have 'fates_pft' as a dimension
-            vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
-            # Subset only those vars
-            datasets_trimmed = [ds[vars_with_fpft] for ds in datasets]
-            ds_concat = xr.concat(datasets_trimmed, dim='fates_pft')
-            # Add back the rest of the variables (those without 'fates_pft')
-            vars_wo_fpft = [var for var in datasets[0].data_vars if 'fates_pft' not in datasets[0][var].dims]
-            for var in vars_wo_fpft:
-                ds_concat[var] = datasets[0][var]  # Use first file's value
-            ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
-            # Close datasets to free memory
-            for ds in datasets:
-                ds.close()
-            ds_concat.close()
-            # Clean up temporary files
-            for fname in fname_list:
-                os.remove(fname)
+            write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
+                    self.OLMTdir+'/temp/fates_paramfile.nc', self.fates_pft,
+                    duplicates=self.pft_duplicates)
           else:
             print('Duplicating '+str(self.pft_duplicates)+' times.')
             fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
@@ -570,8 +562,8 @@ class ELMcase():
                 swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
                 os.system(swapcmd)
             else:
-                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
-                    +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
+                write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
+                        fname, self.fates_pft)
 
 
     # Apply FATES parameter modifications

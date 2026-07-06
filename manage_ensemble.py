@@ -43,6 +43,8 @@ if not hasattr(mycase, 'rotate_nodes'):
 
 is_final_segment = options.final_segment
 is_continue_segment = options.continue_segment or options.segment > 1
+defer_postprocess = is_final_segment and mycase.postproc_vars != [] and not options.postproc_only
+run_completed = None
 
 def expected_restart_year():
     if options.segment_end_year > 0:
@@ -132,13 +134,26 @@ def active_processes(processes,process_jobnum,process_hang):
                 process.kill()  # Force kill the process
         else:
             pactive.append(0)
+            try:
+                process.wait(timeout=0)
+            except Exception:
+                pass
             #Post-process ensemble member if it hasn't yet been done
             member = process_jobnum[n]
             member_idx = member - 1
+            if (run_completed is not None and run_completed[member_idx] != 0):
+                n=n+1
+                continue
             if (mycase.postprocessed[member_idx] == 0):
                 print(member, check_run_success(member))
                 if (check_run_success(member)):
+                    if defer_postprocess:
+                        run_completed[member_idx] = 1
+                        n=n+1
+                        continue
                     if not is_final_segment:
+                        if run_completed is not None:
+                            run_completed[member_idx] = 1
                         mycase.postprocessed[member_idx] = 1
                         n=n+1
                         continue
@@ -146,12 +161,18 @@ def active_processes(processes,process_jobnum,process_hang):
                     if (ierr != 0):
                         print('Postprocessing failed for ensemble member ' \
                                 +str(process_jobnum[n])+', skipping')
+                        if run_completed is not None:
+                            run_completed[member_idx] = -1
                         mycase.postprocessed[member_idx] = -1
                     else:
+                        if run_completed is not None:
+                            run_completed[member_idx] = 1
                         mycase.postprocessed[member_idx] = 1
                 else:
                     print('Ensemble member '+str(process_jobnum[n])+ \
                             ' failed to complete, skipping')
+                    if run_completed is not None:
+                        run_completed[member_idx] = -1
                     mycase.postprocessed[member_idx] = -1
         n=n+1
     return pactive
@@ -159,6 +180,14 @@ def active_processes(processes,process_jobnum,process_hang):
 def postprocess_ensemble(n):
   #Postprocess
   if (mycase.postproc_vars != []):
+      try:
+        if hasattr(mycase, 'postprocess_member'):
+          mycase.postprocess_member(ens_num=n, startyear=mycase.postproc_startyear,
+                endyear=mycase.postproc_endyear)
+          return 0
+      except Exception as e:
+        print('Postprocessing failed for ensemble member '+str(n)+': '+str(e))
+        return 1
       for v in mycase.postproc_vars:
         hnum=1  #default is h1 file (usually daily output with gridcell average)
         if (mycase.postproc_freq == 'annual'):
@@ -207,25 +236,17 @@ def _postproc_worker(n):
       saved[var_out] = fpath
   return n, 0, saved
 
-workdir = os.getcwd()
-
-if (not options.UQ_only):
-  mycase.output = {}
-  mycase.postprocessed = np.zeros([mycase.nsamples], int)
-  if options.segment_years > 0:
-    print('Running ensemble segment '+str(options.segment)+' for '+ \
-          str(options.segment_years)+' years; expected restart year '+ \
-          str(expected_restart_year()))
-
-  if (options.postproc_only):
-    # Run postprocessing in parallel using a process pool (no subprocess overhead)
+def postprocess_members(member_numbers):
+    if len(member_numbers) == 0:
+        return
     import multiprocessing
-    n_parallel = min(int(mycase.np_ensemble), mycase.nsamples)
-    print('Postprocessing '+str(mycase.nsamples)+' ensemble members with ' \
+    n_parallel = int(os.environ.get('OLMT_POSTPROC_WORKERS', int(mycase.np_ensemble)))
+    n_parallel = max(1, min(n_parallel, len(member_numbers)))
+    print('Postprocessing '+str(len(member_numbers))+' ensemble members with ' \
           +str(n_parallel)+' parallel workers')
     ctx = multiprocessing.get_context('fork')
     with ctx.Pool(processes=n_parallel) as pool:
-      all_results = pool.map(_postproc_worker, range(1, mycase.nsamples+1))
+      all_results = pool.map(_postproc_worker, member_numbers)
     for n, ierr, saved in all_results:
       if ierr != 0 or saved is None:
           print('Postprocessing failed for ensemble member '+str(n)+', skipping')
@@ -247,6 +268,44 @@ if (not options.UQ_only):
               mycase.output[var_out][:, n-1] = values
       else:
           mycase.postprocessed[n-1] = 1
+
+def postprocessed_output_vars(requested_vars):
+    expanded = []
+    for var in requested_vars:
+        if var in mycase.output:
+            expanded.append(var)
+        elif '_pft' in var:
+            for p in mycase.postproc_pfts:
+                var_out = var+str(p)
+                if var_out in mycase.output:
+                    expanded.append(var_out)
+                else:
+                    print('Warning: postprocessed output '+var_out+' not found; skipping UQ')
+        elif '_col' in var:
+            for c in mycase.postproc_cols:
+                var_out = var+str(c)
+                if var_out in mycase.output:
+                    expanded.append(var_out)
+                else:
+                    print('Warning: postprocessed output '+var_out+' not found; skipping UQ')
+        else:
+            print('Warning: postprocessed output '+var+' not found; skipping UQ')
+    return expanded
+
+workdir = os.getcwd()
+
+if (not options.UQ_only):
+  mycase.output = {}
+  mycase.postprocessed = np.zeros([mycase.nsamples], int)
+  run_completed = np.zeros([mycase.nsamples], int)
+  if options.segment_years > 0:
+    print('Running ensemble segment '+str(options.segment)+' for '+ \
+          str(options.segment_years)+' years; expected restart year '+ \
+          str(expected_restart_year()))
+
+  if (options.postproc_only):
+    # Run postprocessing in parallel using a process pool (no subprocess overhead)
+    postprocess_members(list(range(1, mycase.nsamples+1)))
 
     # Mark failed members with -9999 sentinel so surrogate training excludes them
     failed = np.where(mycase.postprocessed == -1)[0]
@@ -282,14 +341,19 @@ if (not options.UQ_only):
     while (n_job <= mycase.nsamples):
       pactive = active_processes(processes,process_jobnum,process_hang)
       if check_run_success(n_job):
-        if is_final_segment:
+        if is_final_segment and defer_postprocess:
+          run_completed[n_job-1] = 1
+        elif is_final_segment:
           ierr = postprocess_ensemble(n_job)
           if (ierr != 0):
             print('Postprocessing failed for ensemble member '+str(n_job)+', skipping')
+            run_completed[n_job-1] = -1
             mycase.postprocessed[n_job-1] = -1
           else:
+            run_completed[n_job-1] = 1
             mycase.postprocessed[n_job-1] = 1
         else:
+          run_completed[n_job-1] = 1
           mycase.postprocessed[n_job-1] = 1
         n_job = n_job+1
         continue
@@ -389,6 +453,15 @@ if (not options.UQ_only):
       pactive = active_processes(processes,process_jobnum,process_hang)
       time.sleep(1)
 
+    if defer_postprocess:
+      completed_members = [i+1 for i in range(mycase.nsamples) if run_completed[i] == 1]
+      failed_members = [i+1 for i in range(mycase.nsamples) if run_completed[i] == -1]
+      if len(failed_members) > 0:
+          print(str(len(failed_members))+' ensemble members failed before postprocessing')
+          for n in failed_members:
+              mycase.postprocessed[n-1] = -1
+      postprocess_members(completed_members)
+
     if is_final_segment:
       # Mark failed members with -9999 sentinel so surrogate training excludes them
       failed = np.where(mycase.postprocessed == -1)[0]
@@ -410,16 +483,24 @@ if (not options.UQ_only):
 #UQ part of code
 
 if (is_final_segment and mycase.postproc_vars != []):
+    # Save postprocessed ensemble outputs in a portable NetCDF file before UQ analysis.
+    mycase.write_postprocessed_netcdf()
+
+    uq_vars = postprocessed_output_vars(mycase.postproc_vars)
+    if len(uq_vars) == 0:
+        print('No postprocessed output variables available for UQ; skipping UQ analysis')
+        sys.exit(0)
+
     #Train surrogate models
-    mycase.train_surrogate(mycase.postproc_vars)
-    mycase.plot_surrogate(mycase.postproc_vars)
+    mycase.train_surrogate(uq_vars)
+    mycase.plot_surrogate(uq_vars)
 
     #run GSA
-    mycase.GSA(mycase.postproc_vars)
-    mycase.plot_GSA(mycase.postproc_vars)
+    mycase.GSA(uq_vars)
+    mycase.plot_GSA(uq_vars)
 
     # Plot ensemble percentiles for each postprocessed variable
-    for var in mycase.postproc_vars:
+    for var in uq_vars:
       mycase.plot_ensemble(var)
     
     #Save postprocessed output
@@ -429,7 +510,7 @@ if (is_final_segment and mycase.postproc_vars != []):
     #Set intial values for parameters
     if (mycase.obs):
         #Run MCMC for the observation variables
-        obs_mcmc = [v for v in mycase.postproc_vars if v in mycase.obs.keys()]
+        obs_mcmc = [v for v in uq_vars if v in mycase.obs.keys()]
         # Always run single-site MCMC first
         mycase.nobs_vars = 3
         nwalkers = max(24, (mycase.nparms_ensemble+mycase.nobs_vars)*2)

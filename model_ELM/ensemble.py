@@ -1,10 +1,10 @@
 #!/usr/bin/env python
 
-import os, sys, csv, time, math, shlex
+import os, sys, csv, time, math, shlex, re
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
-from netCDF4 import Dataset
+from netCDF4 import Dataset, chartostring
 import xarray as xr
 import json
 import glob
@@ -705,8 +705,6 @@ def ensemble_copy(self, ens_num, clean=True):
                   paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/fates_params_'+gst[1:]+'.nc'
                 copy_file_verified(paramfile_orig, paramfile_new)
-                #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
-                #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" fates_paramfile = '"+paramfile_new+"'\n")
                 fates_paramfile = ens_dir+'/fates_params_'+gst[1:]+'.nc'
             elif ('paramfile' in s):
@@ -715,8 +713,6 @@ def ensemble_copy(self, ens_num, clean=True):
                    paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
                 paramfile_new  = ens_dir+'/clm_params_'+gst[1:]+'.nc'
                 copy_file_verified(paramfile_orig, paramfile_new)
-                #os.system('nccopy -3 '+paramfile_new+' '+paramfile_new+'_tmp')
-                #os.system('mv '+paramfile_new+'_tmp '+paramfile_new)
                 myoutput.write(" paramfile = '"+paramfile_new+"'\n")
                 pftfile = ens_dir+'/clm_params_'+gst[1:]+'.nc'
             elif ('ppmv' in s and 'co2' in self.ensemble_parms):
@@ -727,8 +723,6 @@ def ensemble_copy(self, ens_num, clean=True):
                    CNPfile_orig  = orig_dir+'/'+CNPfile_orig[2:]
                 CNPfile_new  = ens_dir+'/CNP_parameters_'+gst[1:]+'.nc'
                 copy_file_verified(CNPfile_orig, CNPfile_new)
-                #os.system('nccopy -3 '+CNPfile_new+' '+CNPfile_new+'_tmp')
-                #os.system('mv '+CNPfile_new+'_tmp '+CNPfile_new)
                 myoutput.write(" fsoilordercon = '"+CNPfile_new+"'\n")
                 CNPfile = ens_dir+'/CNP_parameters_'+gst[1:]+'.nc'
             elif ('fsurdat =' in s):
@@ -737,8 +731,6 @@ def ensemble_copy(self, ens_num, clean=True):
                   surffile_orig = orig_dir+'/'+surffile_orig[2:]
                 surffile_new = ens_dir+'/surfdata_'+gst[1:]+'.nc'
                 copy_file_verified(surffile_orig, surffile_new)
-                #os.system('nccopy -3 '+surffile_new+' '+surffile_new+'_tmp')
-                #os.system('mv '+surffile_new+'_tmp '+surffile_new)
                 myoutput.write(" fsurdat = '"+surffile_new+"'\n")
                 surffile = ens_dir+'/surfdata_'+gst[1:]+'.nc'
             elif ('finidat = ' in s and self.has_finidat):
@@ -843,8 +835,7 @@ def ensemble_copy(self, ens_num, clean=True):
       #       fates_seed_zeroed[1]=True
       #    param[parm_indices[pnum]] = parm_values[pnum]             
       elif (p == 'dayl_scaling' or p == 'vcmaxse'):
-        os.system('ncap2 -O -s "'+p+' = flnr" '+myfile+' '+myfile)
-        print('Creting netcdf variable for '+p)
+        print('Creating netcdf variable for '+p)
         param = self.getncvar(myfile,'flnr')
         param[:] = parm_values[pnum]
       elif (p == 'psi50'):
@@ -874,6 +865,270 @@ def ensemble_copy(self, ens_num, clean=True):
   #      param2[i] = param2[i]/sumparam
   #  ierr = self.putncvar(myfile, 'fates_seed_alloc', param)      
   #  ierr = self.putncvar(myfile, 'fates_seed_alloc_mature', param2)
+
+def _netcdf_var_name(name, used_names):
+    """Return a NetCDF-safe variable name while preserving a collision-free map."""
+    safe = re.sub(r'[^A-Za-z0-9_]', '_', str(name))
+    if safe == '' or safe[0].isdigit():
+        safe = 'v_'+safe
+    candidate = safe
+    n = 2
+    while candidate in used_names:
+        candidate = safe+'_'+str(n)
+        n = n+1
+    used_names.add(candidate)
+    return candidate
+
+def _indexed_postproc_metadata(var_name):
+    match = re.match(r'^(.*_(pft|col))(-?\d+)$', str(var_name))
+    if not match:
+        return None
+    return {
+        'source_variable': match.group(1),
+        'index_type': match.group(2),
+        'index': int(match.group(3)),
+    }
+
+def _decode_netcdf_string_array(values):
+    arr = np.asarray(values)
+    try:
+        decoded = chartostring(arr)
+        return [str(s).strip() for s in np.asarray(decoded).tolist()]
+    except Exception:
+        pass
+    if arr.dtype.kind == 'S':
+        if arr.ndim == 1:
+            return [x.decode('utf-8', errors='ignore').strip() for x in arr]
+        return [b''.join(row).decode('utf-8', errors='ignore').strip() for row in arr]
+    if arr.dtype.kind == 'U':
+        if arr.ndim == 1:
+            return [str(x).strip() for x in arr]
+        return [''.join(row).strip() for row in arr]
+    return []
+
+def _decode_pft_names(values):
+    names = _decode_netcdf_string_array(values)
+    if names:
+        return names
+    arr = np.asarray(values)
+    if arr.ndim == 0:
+        return [str(arr.item()).strip()]
+    if arr.ndim == 1:
+        return [str(v).strip() for v in arr.tolist()]
+    return [''.join([str(v) for v in row]).strip() for row in arr.tolist()]
+
+def _read_pft_names_from_file(path, variable_names):
+    try:
+        if str(path).lower().endswith('.json'):
+            with open(path, 'r') as f:
+                data = json.load(f)
+            parameters = data.get('parameters', data)
+            for variable_name in variable_names:
+                if variable_name in parameters:
+                    raw = parameters[variable_name]
+                    if isinstance(raw, dict) and 'data' in raw:
+                        raw = raw['data']
+                    names = _decode_pft_names(raw)
+                    return {i: name for i, name in enumerate(names) if name != ''}
+            return {}
+        with Dataset(path, 'r') as ds:
+            for variable_name in variable_names:
+                if variable_name in ds.variables:
+                    names = _decode_pft_names(ds.variables[variable_name][:])
+                    return {i: name for i, name in enumerate(names) if name != ''}
+            return {}
+    except Exception as e:
+        print('Warning: unable to read PFT names from '+str(path)+': '+str(e))
+        return {}
+
+def _is_fates_active(self):
+    compset = str(getattr(self, 'compset', ''))
+    return 'FATES' in compset or 'ED' in compset
+
+def _add_unique_path(paths, path):
+    if path and path not in paths:
+        paths.append(path)
+
+def _ensemble_member_dirs(self):
+    if not hasattr(self, 'rundir_UQ') or not os.path.isdir(self.rundir_UQ):
+        return []
+    member_dirs = [
+        path for path in glob.glob(os.path.join(self.rundir_UQ, 'g[0-9][0-9][0-9][0-9][0-9]'))
+        if os.path.isdir(path)
+    ]
+    return sorted(member_dirs)
+
+def _find_ensemble_param_pft_names(self):
+    """Read PFT names from the parameter file copied into an ensemble member dir."""
+    if hasattr(self, 'rundir_UQ'):
+        preferred_member = os.path.join(self.rundir_UQ, 'g00001')
+        member_dirs = [preferred_member] + [d for d in _ensemble_member_dirs(self) if d != preferred_member]
+    else:
+        member_dirs = []
+
+    for member_dir in member_dirs:
+        candidate_files = []
+        if _is_fates_active(self):
+            for path in sorted(glob.glob(os.path.join(member_dir, 'fates_params_*'))):
+                _add_unique_path(candidate_files, path)
+            for suffix in ('nc', 'json'):
+                _add_unique_path(candidate_files, os.path.join(member_dir, 'fates_params_00001.'+suffix))
+        else:
+            for path in sorted(glob.glob(os.path.join(member_dir, 'clm_params_*.nc'))):
+                _add_unique_path(candidate_files, path)
+            _add_unique_path(candidate_files, os.path.join(member_dir, 'clm_params_00001.nc'))
+
+        for path in candidate_files:
+            if path and os.path.isfile(path):
+                variable_names = ['fates_pftname', 'pftname'] if _is_fates_active(self) else ['pftname']
+                pft_names = _read_pft_names_from_file(path, variable_names)
+                if pft_names:
+                    return pft_names, path
+    return {}, ''
+
+def _find_history_pft_type_map(self):
+    """Map history-file PFT slot index to parameter-file PFT index."""
+    if not hasattr(self, 'casename'):
+        return {}, ''
+    for member_dir in _ensemble_member_dirs(self):
+        history_files = sorted(glob.glob(os.path.join(member_dir, self.casename+'.elm.h2.*.nc')))
+        for path in history_files:
+            try:
+                with Dataset(path, 'r') as ds:
+                    if 'pfts1d_itype_veg' not in ds.variables:
+                        continue
+                    values = np.asarray(ds.variables['pfts1d_itype_veg'][:]).squeeze()
+                    if values.ndim == 0:
+                        values = np.asarray([values.item()])
+                    return {i: int(values[i]) for i in range(len(values))}, path
+            except Exception as e:
+                print('Warning: unable to read PFT coordinate metadata from '+str(path)+': '+str(e))
+    return {}, ''
+
+def _find_pft_metadata(self):
+    param_pft_names, param_path = _find_ensemble_param_pft_names(self)
+    if not param_pft_names:
+        return {}
+    history_to_param, history_path = _find_history_pft_type_map(self)
+    if not history_to_param:
+        print('Warning: unable to map history PFT indices to parameter PFT names; missing pfts1d_itype_veg')
+        return {}
+
+    pft_metadata = {}
+    for history_index, param_index in history_to_param.items():
+        if param_index in param_pft_names:
+            pft_metadata[history_index] = {
+                'pft_name': param_pft_names[param_index],
+                'parameter_pft_index': param_index,
+                'parameter_file': param_path,
+                'history_coordinate_file': history_path,
+            }
+    return pft_metadata
+
+def write_postprocessed_netcdf(self, filename=''):
+    """Write ensemble postprocessed output to one NetCDF file."""
+    if not hasattr(self, 'output') or not self.output or 'taxis' not in self.output:
+        print('No postprocessed output available; skipping NetCDF output')
+        return ''
+    if filename == '':
+        filename = os.path.join(self.rundir_UQ, 'postprocessed_output.nc')
+    os.makedirs(os.path.dirname(filename), exist_ok=True)
+
+    taxis = np.asarray(self.output['taxis'], dtype=float)
+    nsamples = int(getattr(self, 'nsamples', 0))
+    if nsamples <= 0:
+        for key, values in self.output.items():
+            if key == 'taxis':
+                continue
+            arr = np.asarray(values)
+            if arr.ndim == 2:
+                nsamples = arr.shape[1]
+                break
+    if nsamples <= 0:
+        nsamples = 1
+    pft_metadata = _find_pft_metadata(self)
+
+    with Dataset(filename, 'w') as ds:
+        ds.createDimension('time', len(taxis))
+        ds.createDimension('ensemble', nsamples)
+        time_var = ds.createVariable('time', 'f8', ('time',))
+        time_var[:] = taxis
+        time_var.long_name = 'postprocessed time axis'
+        time_var.units = 'model year'
+        member_var = ds.createVariable('ensemble_member', 'i4', ('ensemble',))
+        member_var[:] = np.arange(1, nsamples+1)
+        member_var.long_name = 'ensemble member number'
+
+        if hasattr(self, 'postprocessed'):
+            status = ds.createVariable('postprocessed', 'i4', ('ensemble',))
+            status[:] = np.asarray(self.postprocessed, dtype=int)
+            status.long_name = 'postprocessing status by ensemble member'
+            status.flag_values = '-1, 0, 1'
+            status.flag_meanings = 'failed not_processed success'
+
+        ds.title = 'OLMT ensemble postprocessed output'
+        ds.case = getattr(self, 'casename', '')
+        ds.postprocessing_frequency = getattr(self, 'postproc_freq', '')
+        ds.postprocessing_startyear = int(getattr(self, 'postproc_startyear', -1))
+        ds.postprocessing_endyear = int(getattr(self, 'postproc_endyear', -1))
+        if hasattr(self, 'postproc_vars'):
+            ds.postprocessing_variables = ','.join([str(v) for v in self.postproc_vars])
+        if hasattr(self, 'postproc_pfts'):
+            ds.postprocessing_pfts = ','.join([str(v) for v in self.postproc_pfts])
+        if hasattr(self, 'postproc_cols'):
+            ds.postprocessing_cols = ','.join([str(v) for v in self.postproc_cols])
+        if pft_metadata:
+            first_pft_meta = next(iter(pft_metadata.values()))
+            ds.pft_name_parameter_file = first_pft_meta['parameter_file']
+            ds.pft_history_coordinate_file = first_pft_meta['history_coordinate_file']
+            ds.pft_index_mapping = 'PFT variable index attributes are history-file pft indices; parameter_pft_index maps to the parameter-file pftname entry.'
+
+        used_names = set(ds.variables.keys())
+        for key in sorted(self.output.keys()):
+            if key == 'taxis':
+                continue
+            data = np.ma.asarray(self.output[key], dtype=float)
+            dims = ('time', 'ensemble')
+            if data.ndim == 1:
+                if len(data) == len(taxis):
+                    dims = ('time',)
+                elif len(data) == nsamples:
+                    dims = ('ensemble',)
+                else:
+                    dim_name = _netcdf_var_name(key+'_dim', used_names)
+                    ds.createDimension(dim_name, len(data))
+                    dims = (dim_name,)
+            elif data.ndim == 2:
+                if data.shape == (len(taxis), nsamples):
+                    dims = ('time', 'ensemble')
+                elif data.shape == (nsamples, len(taxis)):
+                    data = data.T
+                    dims = ('time', 'ensemble')
+                else:
+                    dim0 = _netcdf_var_name(key+'_dim0', used_names)
+                    dim1 = _netcdf_var_name(key+'_dim1', used_names)
+                    ds.createDimension(dim0, data.shape[0])
+                    ds.createDimension(dim1, data.shape[1])
+                    dims = (dim0, dim1)
+            else:
+                print('Skipping NetCDF output for '+str(key)+' with unsupported shape '+str(data.shape))
+                continue
+
+            nc_name = _netcdf_var_name(key, used_names)
+            out_var = ds.createVariable(nc_name, 'f8', dims, fill_value=-9999.0)
+            out_var[:] = data
+            out_var.original_name = str(key)
+            indexed_meta = _indexed_postproc_metadata(key)
+            if indexed_meta is not None:
+                out_var.source_variable = indexed_meta['source_variable']
+                out_var.index_type = indexed_meta['index_type']
+                out_var.index = indexed_meta['index']
+                if indexed_meta['index_type'] == 'pft' and indexed_meta['index'] in pft_metadata:
+                    out_var.pft_name = pft_metadata[indexed_meta['index']]['pft_name']
+                    out_var.parameter_pft_index = pft_metadata[indexed_meta['index']]['parameter_pft_index']
+
+    print('Wrote postprocessed NetCDF output: '+filename)
+    return filename
 
 def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1):
     UQ_output = self.UQ_output + '/ensemble'
