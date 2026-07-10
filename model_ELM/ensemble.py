@@ -451,7 +451,7 @@ def create_ensemble_script(self):
         print('Debug queue selected, setting walltime to 2 hours')
         self.walltime=2
     total_tasks = int(self.np_ensemble) * int(self.np)
-    parsed_sbatch['qos'] = self.queue
+    parsed_sbatch['qos'] = self.slurm_qos() if hasattr(self, 'slurm_qos') else self.queue
     if getattr(self, 'partition', '') != '':
         parsed_sbatch['partition'] = self.partition
     parsed_sbatch['time'] = str(self.walltime)+':00:00'
@@ -527,7 +527,7 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
     if (self.queue == 'debug'):
         print('Debug queue selected, setting walltime to 2 hours')
         self.walltime=2
-    parsed_sbatch['qos'] = self.queue
+    parsed_sbatch['qos'] = self.slurm_qos() if hasattr(self, 'slurm_qos') else self.queue
     if getattr(self, 'partition', '') != '':
         parsed_sbatch['partition'] = self.partition
     parsed_sbatch['time'] = str(self.walltime)+':00:00'

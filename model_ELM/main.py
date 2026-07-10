@@ -200,6 +200,58 @@ class ELMcase():
         if self.queue == '':
             self.queue='batch'
 
+  def cime_job_queue(self):
+    # Pathfinder's CIME queue is the machine-XML queue name (`parallel`).
+    # OLMT's `queue` config is used as the Slurm QoS there.
+    if (self.machine == 'pathfinder'):
+      return 'parallel'
+    return self.queue
+
+  def slurm_partition(self):
+    if (self.partition != ''):
+      return self.partition
+    if (self.machine == 'pathfinder'):
+      return 'parallel'
+    return ''
+
+  def slurm_qos(self):
+    if (self.machine == 'pathfinder' and self.slurm_partition() == 'hpcl-cli185'):
+      return 'hpcl-cli185'
+    return self.queue
+
+  def replace_slurm_submit_option(self, flags, option_names, output_name, value):
+    filtered = []
+    skip_next = False
+    for flag in flags:
+      if skip_next:
+        skip_next = False
+        continue
+      if flag in option_names:
+        skip_next = True
+        continue
+      if any(flag.startswith(option+'=') for option in option_names):
+        continue
+      filtered.append(flag)
+    if (value != ''):
+      filtered += [output_name, value]
+    return filtered
+
+  def pathfinder_batch_command_flags(self, base_flags=''):
+    flags = shlex.split(base_flags) if base_flags != '' else []
+    partition = self.slurm_partition()
+    qos = self.slurm_qos()
+    flags = self.replace_slurm_submit_option(flags, ['-p', '--partition'], '-p', partition)
+    flags = self.replace_slurm_submit_option(flags, ['--qos'], '--qos', qos)
+    return ' '.join([shlex.quote(str(f)) for f in flags])
+
+  def cime_batch_command_flags(self, subgroup='case.run'):
+    result = subprocess.run(['./xmlquery', '--subgroup', subgroup, '--no-resolve', '--value',
+                             'BATCH_COMMAND_FLAGS'], stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                            text=True)
+    if (result.returncode > 0):
+      return ''
+    return result.stdout.strip()
+
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
       print('Error:  Model root '+self.modelroot+' does not exist.')
@@ -632,8 +684,9 @@ class ELMcase():
       cmd = cmd+' --compiler '+self.compiler
     if (self.mpilib != ''):
       cmd = cmd+' --mpilib '+self.mpilib
-    if (self.queue != ''):
-      cmd = cmd+' --queue '+self.queue
+    case_queue = self.cime_job_queue()
+    if (case_queue != ''):
+      cmd = cmd+' --queue '+case_queue
     #ADD MPILIB OPTION HERE
     cmd = cmd+' > '+self.OLMTdir+'/create_newcase.log'
     os.chdir(self.modelroot+'/cime/scripts')
@@ -832,8 +885,8 @@ class ELMcase():
       self.xmlchange('NTASKS_'+c,value=str(self.np))
       self.xmlchange('NTHRDS_'+c,value='1')
 
-    # Pathfinder queue-specific override: match requested hardware capacity.
-    if (self.machine == 'pathfinder' and self.queue == 'hpcl-cli185'):
+    # Pathfinder partition-specific override: match requested hardware capacity.
+    if (self.machine == 'pathfinder' and self.slurm_partition() == 'hpcl-cli185'):
       self.xmlchange('MAX_TASKS_PER_NODE', value='128')
 
     self.xmlchange('STOP_OPTION',value='nyears')
@@ -853,6 +906,13 @@ class ELMcase():
     # for spinup and transient runs, PIO_TYPENAME is pnetcdf, which now not works well
     if('mac' in self.machine or 'cades' in self.machine or 'linux' in self.machine): 
       self.xmlchange('PIO_TYPENAME',value='netcdf')
+
+    if (self.machine == 'pathfinder'):
+      base_flags = self.cime_batch_command_flags('case.run')
+      batch_flags = self.pathfinder_batch_command_flags(base_flags)
+      if (batch_flags != ''):
+        subprocess.run(['./xmlchange', '--subgroup', 'case.run',
+                        'BATCH_COMMAND_FLAGS='+batch_flags], check=True)
 
     if (self.has_finidat):
         self.customize_namelist(variable='finidat',value="'"+self.finidat+"'")
@@ -1075,7 +1135,8 @@ class ELMcase():
             # Wrap build command with srun to run on a compute node (avoids OOM on login node)
             project_opt = ' --account='+self.project if self.project != '' else ''
             build_partition = self.partition if self.partition != '' else 'serial'
-            qos_opt = ' --qos='+self.queue if self.queue != '' else ''
+            build_qos = self.slurm_qos()
+            qos_opt = ' --qos='+build_qos if build_qos != '' else ''
             resource_wait_minutes = 60
             build_timeout = resource_wait_minutes * 60
             srun_prefix = 'srun --nodes=1 --ntasks=1 --mem=32gb --time=1:00:00'+ \
