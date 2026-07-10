@@ -152,6 +152,7 @@ def main():
     runroot = cfg['machine'].get('runroot', rootdir + '/e3sm_run')
     modelroot = cfg['machine'].get('modelroot', '')
     exeroot = cfg['machine'].get('exeroot', '')
+    debug = cfg['machine'].get('debug', False)
     walltime = cfg['machine'].get('walltime', 24)
     apptainer = cfg['machine'].get('apptainer', '')
     print('Run root directory:  '+runroot)
@@ -447,7 +448,7 @@ def main():
             res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind, \
-            offline_driver=offline_driver, resubmit_years=resubmit_years)
+            offline_driver=offline_driver, resubmit_years=resubmit_years, debug=debug)
         #Save the other site names in first site's cases (for use in multi-site calibration)
         if site == sites[-1]:
             cases[c].all_sites = [s for s in sites]

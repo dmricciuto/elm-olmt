@@ -1,5 +1,5 @@
 import socket, os, sys, csv, time, math, numpy
-import glob, re, subprocess
+import glob, re, subprocess, shlex
 import pickle
 import json
 from .makepointdata import makepointdata
@@ -43,7 +43,7 @@ class ELMcase():
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
             point_list=[], namelist_options=[],casename='',mpilib='', olmtdir='', walltime=24, 
-            apptainer='', apptainer_bind = '/', offline_driver=False, resubmit_years=0):
+            apptainer='', apptainer_bind = '/', offline_driver=False, resubmit_years=0, debug=False):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -60,6 +60,7 @@ class ELMcase():
         self.runroot=runroot
         self.caseroot=caseroot
         self.exeroot=exeroot
+        self.debug=debug
         if olmtdir == '':
             self.OLMTdir = os.getcwd()+'/..'
         else:
@@ -783,8 +784,8 @@ class ELMcase():
     self.xmlchange('PIO_VERSION',value=str(self.pio_version))
     self.xmlchange('MOSART_MODE',value='NULL')
     self.xmlchange('ROF_GRID',value='null')
-    #if (self.debug):
-    #  self.xmlchange('DEBUG',value='TRUE')
+    if (self.debug):
+      self.xmlchange('DEBUG',value='TRUE')
     #-------------- env_run.xml modifications -------------------------
     self.xmlchange('RUNDIR',value=self.rundir)
     self.xmlchange('DIN_LOC_ROOT',value=self.inputdata_path)
@@ -841,12 +842,13 @@ class ELMcase():
     if (self.site == ''):
         self.xmlchange('REST_N',value='20')
 
-    # user-defined PFT numbers (default is 17)
-    #if (options.maxpatch_pft != 17):
-    #  print('resetting maxpatch_pft to '+str(options.maxpatch_pft))
-    #  xval = subprocess.check_output('./xmlquery --value CLM_BLDNML_OPTS', cwd=casedir, shell=True)
-    #  xval = '-maxpft '+str(options.maxpatch_pft)+' '+xval
-    #  os.system("./xmlchange CLM_BLDNML_OPTS = '" + xval + "'")
+    # User-defined PFT count is a build-namelist option, not a runtime
+    # namelist field. Surface files with custom lsmpft dimensions need this
+    # before preview_namelists generates lnd_in.
+    if ('maxpatch_pft' in self.case_options):
+      maxpatch_pft = int(self.case_options['maxpatch_pft'])
+      if (maxpatch_pft != 17):
+        self.xmlchange('ELM_BLDNML_OPTS', append="'-maxpft "+str(maxpatch_pft)+"'")
 
     # for spinup and transient runs, PIO_TYPENAME is pnetcdf, which now not works well
     if('mac' in self.machine or 'cades' in self.machine or 'linux' in self.machine): 
@@ -953,7 +955,8 @@ class ELMcase():
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
-              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'variable', 'name', 'nyears']
+              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
+              'variable', 'name', 'nyears']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
@@ -1071,17 +1074,20 @@ class ELMcase():
         if (self.interactive_build):
             # Wrap build command with srun to run on a compute node (avoids OOM on login node)
             project_opt = ' --account='+self.project if self.project != '' else ''
+            build_partition = self.partition if self.partition != '' else 'serial'
+            qos_opt = ' --qos='+self.queue if self.queue != '' else ''
             resource_wait_minutes = 60
             build_timeout = resource_wait_minutes * 60
             srun_prefix = 'srun --nodes=1 --ntasks=1 --mem=32gb --time=1:00:00'+ \
-                    ' -q normal -c 1 --partition=serial --kill-on-bad-exit=1' + project_opt + ' '
+                    qos_opt+' -c 1 --partition='+build_partition+' --kill-on-bad-exit=1' + \
+                    project_opt + ' '
             cmd = srun_prefix+cmd
             print('Building on compute node: '+cmd)
-            sinfo = subprocess.run('sinfo -h -p serial -t idle -o "%D"', stdout=subprocess.PIPE,
+            sinfo = subprocess.run('sinfo -h -p '+shlex.quote(build_partition)+' -t idle -o "%D"', stdout=subprocess.PIPE,
                     stderr=subprocess.PIPE, text=True, shell=True)
-            idle_nodes = sinfo.stdout.strip()
-            if not idle_nodes or int(idle_nodes) == 0:
-                print('Warning: no idle nodes in serial partition; waiting for one to become available ' + \
+            idle_nodes = sum([int(x) for x in sinfo.stdout.split() if x.isdigit()])
+            if idle_nodes == 0:
+                print('Warning: no idle nodes in '+build_partition+' partition; waiting for one to become available ' + \
                         '(will time out after '+str(resource_wait_minutes)+' minutes).')
         if (clean):
           result = subprocess.run(cmd+' --clean-all', stdout=subprocess.PIPE, stderr=subprocess.PIPE, \

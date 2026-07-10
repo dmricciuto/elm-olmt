@@ -477,10 +477,14 @@ def create_ensemble_script(self):
         myfile.write('cd '+self.caseroot+'/'+self.casename+'\n')
         write_cime_pythonpath(myfile, self)
         write_cime_env_eval(myfile, self, self.casedir)
+        # Ensemble completion is detected from the restart file at the segment
+        # end. Global cases otherwise default to 20-year restarts, which can
+        # miss the final year for runs whose length is not a multiple of 20.
+        write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears')
+        write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'])
+        write_case_xmlchange(myfile, self, 'REST_OPTION', 'end')
+        write_case_xmlchange(myfile, self, 'REST_N', '1')
         if len(segments) > 1:
-            write_case_xmlchange(myfile, self, 'STOP_OPTION', 'nyears')
-            write_case_xmlchange(myfile, self, 'STOP_N', segment['run_n'])
-            write_case_xmlchange(myfile, self, 'REST_N', segment['run_n'])
             write_case_xmlchange(myfile, self, 'CONTINUE_RUN', 'TRUE' if segment['continue_run'] else 'FALSE')
         if (self.apptainer != ''):
           myfile.write('apptainer exec --bind '+self.apptainer_bind+' '+ \
