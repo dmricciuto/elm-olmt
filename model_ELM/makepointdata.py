@@ -174,6 +174,7 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
     #If year is specified, set PCT_NAT_PFT for that year and all years after
     # Make a copy to avoid view assignment issues
     ds = ds.copy()
+    ds, pct_pft = self.normalize_pct_nat_pft(ds, pct_pft)
     if year is not None and 'time' in ds.dims:
         # Find the time index for the specified year
         years = ds['time'].values
@@ -225,6 +226,39 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
                 idx_nat0[nat_i] = 0
                 arr.values[tuple(idx_nat0)] = 100.0
     return ds
+
+
+def normalize_pct_nat_pft(self, ds, pct_pft):
+    """Make a site PFT vector compatible with the surface-data natpft axis."""
+    if 'PCT_NAT_PFT' not in ds:
+        raise KeyError('PCT_NAT_PFT not found in surface dataset')
+    if 'natpft' not in ds['PCT_NAT_PFT'].sizes:
+        raise KeyError('PCT_NAT_PFT does not have a natpft dimension')
+
+    pct_values = pct_pft.values if hasattr(pct_pft, 'values') else pct_pft
+    pct_values = np.asarray(pct_values, dtype=float)
+    if pct_values.ndim != 1:
+        raise ValueError(f'Expected 1D PCT_NAT_PFT vector, got shape {pct_values.shape}')
+
+    target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
+    if pct_values.size > target_natpft:
+        if target_natpft == 17 and pct_values.size == 22:
+            ds = self.expand_natpft_dimension(ds, target_natpft=22)
+            target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
+        elif np.allclose(pct_values[target_natpft:], 0.0):
+            pct_values = pct_values[:target_natpft]
+        else:
+            raise ValueError(
+                f'Site PFT vector has {pct_values.size} entries but surface data has '
+                f'natpft={target_natpft}; refusing to drop nonzero PFT fractions'
+            )
+
+    if pct_values.size < target_natpft:
+        padded = np.zeros(target_natpft, dtype=float)
+        padded[:pct_values.size] = pct_values
+        pct_values = padded
+
+    return ds, xr.DataArray(pct_values, dims=['natpft'])
 
 
 def is_peatlands_sitegroup(self):
