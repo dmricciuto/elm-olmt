@@ -13,6 +13,8 @@ config_files/*
 # files to retain in directories to otherwise ignore (e.g. example files)
 !temp/.gitkeep    # retains an empty directory 
 !config_files/BGC_site.cfg
+!config_files/Marcell_S2_diag50hydro.cfg
+!config_files/Marcell_S2_diag50hydro_regwt.cfg
 
 # files created by OLMT executions
 run.*
