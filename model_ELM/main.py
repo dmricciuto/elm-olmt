@@ -37,6 +37,24 @@ def write_fates_pft_subset_nc(source_path, output_path, fates_pft, duplicates=1)
     selected.close()
     os.replace(tmp_output, output_path)
 
+def elm_spatial_cell_count(path, file_kind):
+    with xr.open_dataset(path, decode_times=False) as ds:
+        sizes = dict(ds.sizes)
+    if file_kind == 'domain':
+        if 'ni' in sizes and 'nj' in sizes:
+            return sizes['ni'] * sizes['nj'], sizes
+        if 'gridcell' in sizes:
+            return sizes['gridcell'], sizes
+    elif file_kind == 'surfdata':
+        if 'gridcell' in sizes:
+            return sizes['gridcell'], sizes
+        if 'lsmlat' in sizes and 'lsmlon' in sizes:
+            return sizes['lsmlat'] * sizes['lsmlon'], sizes
+        if 'lat' in sizes and 'lon' in sizes:
+            return sizes['lat'] * sizes['lon'], sizes
+    raise ValueError('Could not determine '+file_kind+' spatial cell count for '+path+
+            ' from dimensions '+str(sizes))
+
 class ELMcase():
   def __init__(self,caseid='',compset='ICBELMBC',suffix='',site='',sitegroup='AmeriFlux', \
             res='',tstep=1,np=1,nyears=1,startyear=-1, machine='', queue='', partition='', project = '',\
@@ -236,10 +254,28 @@ class ELMcase():
       filtered += [output_name, value]
     return filtered
 
+  def cime_walltime_string(self):
+    if (isinstance(self.walltime, str) and ':' in self.walltime):
+      fields = self.walltime.split(':')
+      if (len(fields) == 2):
+        return fields[0]+':'+fields[1]+':00'
+      return self.walltime
+    walltime_hours = float(self.walltime)
+    hours = int(walltime_hours)
+    minutes = int(round((walltime_hours-hours)*60))
+    if (minutes == 60):
+      hours += 1
+      minutes = 0
+    return str(hours)+':'+str(minutes).zfill(2)+':00'
+
   def pathfinder_batch_command_flags(self, base_flags=''):
     flags = shlex.split(base_flags) if base_flags != '' else []
+    walltime = self.cime_walltime_string()
     partition = self.slurm_partition()
     qos = self.slurm_qos()
+    if (self.project == ''):
+      flags = self.replace_slurm_submit_option(flags, ['-A', '--account'], '--account', '')
+    flags = self.replace_slurm_submit_option(flags, ['-t', '--time'], '--time', walltime)
     flags = self.replace_slurm_submit_option(flags, ['-p', '--partition'], '-p', partition)
     flags = self.replace_slurm_submit_option(flags, ['--qos'], '--qos', qos)
     return ' '.join([shlex.quote(str(f)) for f in flags])
@@ -251,6 +287,12 @@ class ELMcase():
     if (result.returncode > 0):
       return ''
     return result.stdout.strip()
+
+  def cime_case_setup_flags(self):
+    flags = []
+    if (self.machine == 'pathfinder'):
+      flags.append('--disable-git')
+    return (' '+' '.join(flags)) if len(flags) > 0 else ''
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -666,8 +708,7 @@ class ELMcase():
         os.system('rm -rf '+self.casedir)    
     print("CASE directory is: "+self.casedir)
     #create the case
-    timestr=str(int(float(self.walltime)))+':'+str(int((float(self.walltime)- \
-                                     int(float(self.walltime)))*60))+':00'
+    timestr=self.cime_walltime_string()
     #IF the resolution is user defined (site), we will first create a case with 
     #original resolution to get them correct domain, surface and land use files.
     if (self.apptainer != ''):
@@ -737,6 +778,21 @@ class ELMcase():
       self.makepointdata(self.surfdata_global, pft=pft)
     if (pftdynfile == '' and makepftdyn and not (self.nopftdyn)):
       self.makepointdata(self.pftdyn_global, pft=pft)
+    domain_check_file = domainfile
+    surf_check_file = surffile
+    if (domain_check_file == '' and makedomain):
+      domain_check_file = self.OLMTdir+'/temp/domain.nc'
+    if (surf_check_file == '' and makesurfdat):
+      surf_check_file = self.OLMTdir+'/temp/surfdata.nc'
+    if (domain_check_file != '' and surf_check_file != '' and
+            os.path.exists(domain_check_file) and os.path.exists(surf_check_file)):
+      domain_count, domain_dims = elm_spatial_cell_count(domain_check_file, 'domain')
+      surf_count, surf_dims = elm_spatial_cell_count(surf_check_file, 'surfdata')
+      if (domain_count != surf_count):
+        raise ValueError('Domain/surfdata spatial cell mismatch: domain has '+
+                str(domain_count)+' cells '+str(domain_dims)+' in '+domain_check_file+
+                '; surfdata has '+str(surf_count)+' cells '+str(surf_dims)+' in '+
+                surf_check_file)
     if (domainfile != ''):
       print('\nDomain file:             '+ domainfile)
     if (surffile != ''):
@@ -917,11 +973,12 @@ class ELMcase():
     if (self.has_finidat):
         self.customize_namelist(variable='finidat',value="'"+self.finidat+"'")
     #Setup the new case
+    setup_flags = self.cime_case_setup_flags()
     if (self.apptainer != ''):
         cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer + \
-                    ' ./case.setup'
+                    ' ./case.setup'+setup_flags
     else:
-        cmd = './case.setup'
+        cmd = './case.setup'+setup_flags
     result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, \
             shell=True)
     if (result.returncode > 0):
@@ -1093,6 +1150,7 @@ class ELMcase():
 
   def build_case(self, clean=True):
       os.chdir(self.casedir)
+      setup_flags = self.cime_case_setup_flags()
       #If using DATM, set the resolution to ELM_USRDAT
       if (not self.is_bypass()):
         #assume single point
@@ -1105,15 +1163,15 @@ class ELMcase():
         if (self.apptainer != ''):
           if self.offline_driver:
             cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer+ \
-                ' bash -lc "export CMAKE_ARGS=\"-DBUILD_ELM_OFFLINE_DRIVER=ON\" && ./case.setup"'
+                ' bash -lc "export CMAKE_ARGS=\"-DBUILD_ELM_OFFLINE_DRIVER=ON\" && ./case.setup'+setup_flags+'"'
           else:
             cmd = 'apptainer exec --bind '+self.apptainer_bind+' --pwd '+self.casedir+' '+self.apptainer+ \
-                ' ./case.setup'
+                ' ./case.setup'+setup_flags
         else:
           if self.offline_driver:
-            cmd = 'export CMAKE_ARGS="-DBUILD_ELM_OFFLINE_DRIVER=ON" && ./case.setup'
+            cmd = 'export CMAKE_ARGS="-DBUILD_ELM_OFFLINE_DRIVER=ON" && ./case.setup'+setup_flags
           else:
-            cmd = './case.setup'
+            cmd = './case.setup'+setup_flags
         result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, \
             shell=True)
 

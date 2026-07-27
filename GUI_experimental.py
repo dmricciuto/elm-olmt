@@ -665,7 +665,7 @@ class E3SMConfigurator(tk.Toplevel):   #Tk):
 
             # Simulation section
             sim_keys = ["runtype", "case_suffix", "sites", "sitegroup", "res", "mettype", "use_cpl_bypass", "lat_bounds", \
-                        "lon_bounds", "numproc", "metdir", "name"]
+                        "lon_bounds", "numproc", "metdir", "name", "offline_driver"]
             sim_section = {k: config[k] for k in sim_keys if k in config}
             write_section(f, "simulation", sim_section)
 

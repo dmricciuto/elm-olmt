@@ -69,7 +69,6 @@ def bypass_format(filename, met_data, lat, lon, startyear, endyear, edge=0.1, ti
   all_hourly = Dataset(filename,'w')
   all_hourly.createDimension('DTIME', nt)
   all_hourly.createDimension('gridcell',1)
-  all_hourly.createDimension('scalar',1)
   for v in metvars:
     all_hourly.createVariable(v.strip(), 'f', ('gridcell','DTIME',))
     nshift = int(abs(time_offset*int(npd/24)))
@@ -125,9 +124,6 @@ def bypass_format(filename, met_data, lat, lon, startyear, endyear, edge=0.1, ti
 
   all_hourly.close()
 
-  import os
-  os.system('ncpdq '+filename+' '+filename+'_pk')
-  os.system('mv    '+filename+'_pk '+filename)
   output_data = Dataset(filename,'a')
   output_data.createDimension('scalar', 1)
   output_data.createVariable('DTIME', 'f8', 'DTIME')
@@ -241,4 +237,3 @@ def bypass_format(filename, met_data, lat, lon, startyear, endyear, edge=0.1, ti
   #  for m in range(0,12):
   #    mst = str(101+m)[1:]
   #    monthly = Dataset('1x1pt_'+site+'/'+str(y)+'-'+mst+'.nc','w')
-
