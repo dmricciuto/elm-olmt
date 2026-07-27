@@ -1,11 +1,11 @@
 #!/usr/bin/env python
 import re, sys
-import model_ELM
 from OLMTutils import get_machine_info, get_site_info, get_point_list, get_default_diag_vars
 import os, glob
 import numpy as np
 import configparser
 import argparse
+import importlib.util
 
 def load_config(config_file):
     """Load configuration from file and return as dictionary"""
@@ -31,7 +31,7 @@ def load_config(config_file):
                 cfg[section][key] = value.lower() == 'true'
             elif not ',' in value:
                 # Handle single values
-                if value.isdigit() or 'hist_nhtfrq' in key:
+                if value.isdigit() or key in ['hist_nhtfrq', 'nhtfrq', 'hist_mfilt', 'mfilt']:
                     cfg[section][key] = int(value)
                 elif value.replace('.', '').replace('-', '').isdigit():
                     cfg[section][key] = float(value)
@@ -49,7 +49,7 @@ def load_config(config_file):
                 # Try to convert to numeric types
                 try:
                     # Try int first
-                    if key in ['hist_nhtfrq', 'hist_mfilt']:
+                    if key in ['hist_nhtfrq', 'nhtfrq', 'hist_mfilt', 'mfilt']:
                         # Store as comma-separated string for Fortran namelist
                         cfg[section][key] = ', '.join(str(int(x)) for x in items)
                     else:
@@ -166,6 +166,7 @@ def main():
     metdir = cfg['simulation'].get('metdir', '')
     case_suffix = cfg['simulation'].get('case_suffix', '')
     case_prefix = cfg['simulation'].get('case_prefix', '')
+    emulator_enabled = cfg['simulation'].get('emulator', False)
 
     # Site configuration
     if runtype == 'site':
@@ -297,15 +298,16 @@ def main():
         has_obs = True
 
 
-    # Remove specific file types from temp directory
-    temp_dir = 'temp'
-    for pattern in ['*.nc', '*.tmp']:
-        files_to_remove = glob.glob(os.path.join(temp_dir, pattern))
-        for file_path in files_to_remove:
-            try:
-                os.remove(file_path)
-            except OSError as e:
-                print(f"Warning: Could not remove {file_path}: {e}")
+    if not emulator_enabled:
+        # Remove specific file types from temp directory
+        temp_dir = 'temp'
+        for pattern in ['*.nc', '*.tmp']:
+            files_to_remove = glob.glob(os.path.join(temp_dir, pattern))
+            for file_path in files_to_remove:
+                try:
+                    os.remove(file_path)
+                except OSError as e:
+                    print(f"Warning: Could not remove {file_path}: {e}")
 
     if (runtype == 'site'):
         # Check to see if all reqested sites exist
@@ -430,6 +432,52 @@ def main():
             print('Ensemble resubmit interval: '+str(ensemble_resubmit_years)+' years\n')
     elif len(sites) > 1 and resubmit_years:
         print('Multi-site resubmit interval: '+str(resubmit_years)+' years\n')
+
+    if emulator_enabled:
+        emulator_adapter_path = os.path.join(
+            os.path.dirname(os.path.abspath(__file__)),
+            'model_ELM',
+            'emulator.py',
+        )
+        emulator_adapter_spec = importlib.util.spec_from_file_location(
+            'olmt_emulator_adapter',
+            emulator_adapter_path,
+        )
+        if emulator_adapter_spec is None or emulator_adapter_spec.loader is None:
+            raise ImportError('Could not load ELM emulator adapter: '+emulator_adapter_path)
+        emulator_adapter = importlib.util.module_from_spec(emulator_adapter_spec)
+        emulator_adapter_spec.loader.exec_module(emulator_adapter)
+
+        emulator_adapter.run_emulator_cases(
+            cfg=cfg,
+            sites=sites,
+            siteinfo=siteinfo if sites[0] != '' else {},
+            point_list=point_list,
+            runtype=runtype,
+            region_name=region_name,
+            mettype=mettype,
+            metdir=metdir,
+            use_cpl_bypass=use_cpl_bypass,
+            inputdata=inputdata,
+            runroot=runroot,
+            caseroot=caseroot,
+            modelroot=modelroot,
+            compsets=compsets,
+            suffix=suffix,
+            case_suffix=case_suffix,
+            startyear=startyear,
+            nyears=nyears,
+            depends=depends,
+            istreatment=istreatment,
+            treatment_options=treatment_options,
+            case_options=case_options,
+            lat_bounds=lat_bounds,
+            lon_bounds=lon_bounds,
+            scriptdir=os.getcwd(),
+        )
+        return
+
+    import model_ELM
 
     nsites = len(sites)
     jobnum = np.zeros(len(compsets),int)  #list of submitted job ids
