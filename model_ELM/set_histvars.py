@@ -56,6 +56,10 @@ def option_enabled(self, *names):
                 return True
     return False
 
+def is_peatlands_sitegroup(self):
+    sitegroup = str(getattr(self, 'sitegroup', '')).strip().strip("'\"")
+    return sitegroup.lower() == 'peatlands'
+
 def get_multitopounit_spinup_vars(indexed=False, include_routing=False, include_humhol=False):
     base_vars = ['ZWT', 'ZWT_PERCH', 'WA', 'FSAT', 'H2OSFC', 'QDRAI', 'QDRAI_PERCH',
                  'QDRAI_XS', 'QOVER', 'QH2OSFC', 'QRUNOFF', 'QRUNOFF_NODYNLNDUSE']
@@ -128,9 +132,13 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
           for v in self.postproc_vars:
               if (is_indexed_postproc_var(v)):
                   # PFT- or column-specific outputs (put in h2 file)
-                  vst_pp_pft=vst_pp_pft+"'"+get_postproc_basevar(v)+"',"
+                  pft_var = get_postproc_basevar(v)
+                  if ("'"+pft_var+"'," not in vst_pp_pft):
+                      vst_pp_pft=vst_pp_pft+"'"+pft_var+"',"
               else:
                   vst_pp=vst_pp+"'"+v+"',"
+                  if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
+                      vst_pp_pft=vst_pp_pft+"'"+v+"',"
           #Write daily for requested postprocessed variables
           if (vst_pp_pft != ''):
               if (self.postproc_freq == 'hourly'):
@@ -165,9 +173,13 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
         for v in self.postproc_vars:
             if (is_indexed_postproc_var(v)):
                 # PFT- or column-specific outputs (put in h2 file)
-                vst_pp_pft=vst_pp_pft+"'"+get_postproc_basevar(v)+"',"
+                pft_var = get_postproc_basevar(v)
+                if ("'"+pft_var+"'," not in vst_pp_pft):
+                    vst_pp_pft=vst_pp_pft+"'"+pft_var+"',"
             else:
                 vst_pp=vst_pp+"'"+v+"',"
+                if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
+                    vst_pp_pft=vst_pp_pft+"'"+v+"',"
         if (vst_pp_pft != ''):
             self.customize_namelist(variable='hist_mfilt',value='1,365,365')
             self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24,-24')

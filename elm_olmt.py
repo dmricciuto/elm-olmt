@@ -279,6 +279,7 @@ def main():
         postproc_freq = cfg['postprocessing'].get('frequency', 'monthly')
         postproc_pfts = cfg['postprocessing'].get('pfts', [0])
         postproc_cols = cfg['postprocessing'].get('cols', [0])
+        postproc_topounit = cfg['postprocessing'].get('topounit', -1)
         postproc_timeaverage = cfg['postprocessing'].get('timeaverage', 1)
         sens_plot_ntimesteps = cfg['postprocessing'].get('sens_plot_ntimesteps', None)
 
@@ -570,6 +571,7 @@ def main():
             cases[c].postproc_freq = postproc_freq
             cases[c].postproc_pfts = postproc_pfts
             cases[c].postproc_cols = postproc_cols
+            cases[c].postproc_topounit = postproc_topounit
             cases[c].postproc_timeaverage = postproc_timeaverage
             cases[c].sens_plot_ntimesteps = sens_plot_ntimesteps
             # Also get the observations if requested, use postproc

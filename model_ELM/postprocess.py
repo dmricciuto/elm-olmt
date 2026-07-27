@@ -189,6 +189,69 @@ def _postprocess_factor(units, annualmean=False):
             factor = 24*3600
     return factor, units
 
+def _case_is_peatlands(self):
+    sitegroup = str(getattr(self, 'sitegroup', '')).strip().strip("'\"")
+    return sitegroup.lower() == 'peatlands'
+
+def _requested_peatlands_topounit(self):
+    topounit_value = str(getattr(self, 'postproc_topounit', -1)).strip().strip("'\"")
+    topounit = int(topounit_value)
+    if topounit < 0 and hasattr(self, 'siteinfo'):
+        topounit = int(str(self.siteinfo.get('topounit', -1)).strip().strip("'\""))
+    if topounit < 0:
+        topounit = 1
+    return topounit
+
+def _history_topounits_for_request(topounit):
+    # Peatlands topoindices are zero-based in Peatlands_pftdata.txt/configs,
+    # while ELM's pfts1d_topounit history coordinate is one-based.
+    # Peatlands topoindex 1 represents the bog aggregate: hollow+hummock.
+    if int(topounit) == 1:
+        return [2, 3]
+    return [int(topounit) + 1]
+
+def _unique_preserve_order(values):
+    out = []
+    for value in values:
+        if value not in out:
+            out.append(value)
+    return out
+
+def _aggregate_history_pfts(data, pft_topounit, pft_type, pft_weight, pft_active,
+        requested_topounits, npfts=22):
+    values_out = np.ma.masked_all((data.shape[0], npfts), dtype=float)
+    pft_topounit = np.asarray(pft_topounit, dtype=int)
+    pft_type = np.asarray(pft_type, dtype=int)
+    pft_weight = np.asarray(pft_weight, dtype=float)
+    pft_active = np.asarray(pft_active, dtype=int)
+    requested_topounits = np.asarray(requested_topounits, dtype=int)
+    for pft in range(npfts):
+        mask = (
+            np.isin(pft_topounit, requested_topounits) &
+            (pft_type == pft) &
+            (pft_active > 0) &
+            (pft_weight > 0.0)
+        )
+        if not np.any(mask):
+            continue
+        weights = pft_weight[mask]
+        values_out[:, pft] = np.ma.average(data[:, mask], axis=1, weights=weights)
+    return values_out
+
+def _aggregate_history_columns(data, col_topounit, col_weight, col_active, requested_topounits):
+    col_topounit = np.asarray(col_topounit, dtype=int)
+    col_weight = np.asarray(col_weight, dtype=float)
+    col_active = np.asarray(col_active, dtype=int)
+    requested_topounits = np.asarray(requested_topounits, dtype=int)
+    mask = (
+        np.isin(col_topounit, requested_topounits) &
+        (col_active > 0) &
+        (col_weight > 0.0)
+    )
+    if not np.any(mask):
+        return np.ma.masked_all((data.shape[0],), dtype=float)
+    return np.ma.average(data[:, mask], axis=1, weights=col_weight[mask])
+
 def _finalize_postprocess_values(self, values, units, startyear, hist_nhtfrq, nperyear,
         dailytomonthly=False, annualmean=False):
     factor, units = _postprocess_factor(units, annualmean=annualmean)
@@ -216,6 +279,169 @@ def _finalize_postprocess_values(self, values, units, startyear, hist_nhtfrq, np
     for t in range(0,len(values_out)):
         taxis[t] = startyear+t/nperyear_out
     return values_out, taxis, units
+
+def write_peatlands_pft_postprocessed_netcdf(self, filename='', startyear=-1, endyear=9999,
+        gindex=0, xindex=0, yindex=0):
+    """Write Peatlands postprocessed h2 output as time x 22-PFT arrays."""
+    if not _case_is_peatlands(self):
+        return ''
+    if len(getattr(self, 'postproc_vars', [])) == 0:
+        return ''
+
+    rundir = _postprocess_rundir(self, ens_num=0)
+    file_list, firstyear, _, hist_nhtfrq, nperyear = _postprocess_file_list(
+            self, rundir, 2, startyear=startyear, endyear=endyear)
+    if len(file_list) == 0:
+        print('No h2 PFT output files found for Peatlands postprocessed NetCDF in '+rundir)
+        return ''
+
+    topounit = _requested_peatlands_topounit(self)
+    history_topounits = _history_topounits_for_request(topounit)
+    requested_vars = _unique_preserve_order([
+        get_postproc_basevar(v) for v in self.postproc_vars
+    ])
+    dailytomonthly = (str(getattr(self, 'postproc_freq', '')).lower() == 'monthly')
+    annualmean = (str(getattr(self, 'postproc_freq', '')).lower() == 'annual')
+
+    pft_values_by_var = {}
+    col_values_by_var = {}
+    units_by_var = {}
+    pft_topounit = None
+    pft_type = None
+    pft_weight = None
+    pft_weight_name = ''
+    pft_active = None
+    col_topounit = None
+    col_weight = None
+    col_weight_name = ''
+    col_active = None
+    for fname in file_list:
+        with Dataset(fname, 'r') as ds:
+            if pft_topounit is None:
+                if 'pfts1d_topounit' in ds.variables:
+                    pft_topounit = np.asarray(ds.variables['pfts1d_topounit'][:])
+                    pft_type = np.asarray(ds.variables['pfts1d_itype_veg'][:])
+                    if 'pfts1d_wtgcell' in ds.variables:
+                        pft_weight = np.asarray(ds.variables['pfts1d_wtgcell'][:])
+                        pft_weight_name = 'pfts1d_wtgcell'
+                    else:
+                        pft_weight = np.asarray(ds.variables['pfts1d_wttopounit'][:])
+                        pft_weight_name = 'pfts1d_wttopounit'
+                    if 'pfts1d_active' in ds.variables:
+                        pft_active = np.asarray(ds.variables['pfts1d_active'][:])
+                    else:
+                        pft_active = np.ones_like(pft_type)
+            if col_topounit is None:
+                if 'cols1d_topounit' in ds.variables:
+                    col_topounit = np.asarray(ds.variables['cols1d_topounit'][:])
+                    if 'cols1d_wtgcell' in ds.variables:
+                        col_weight = np.asarray(ds.variables['cols1d_wtgcell'][:])
+                        col_weight_name = 'cols1d_wtgcell'
+                    else:
+                        col_weight = np.asarray(ds.variables['cols1d_wttopounit'][:])
+                        col_weight_name = 'cols1d_wttopounit'
+                    if 'cols1d_active' in ds.variables:
+                        col_active = np.asarray(ds.variables['cols1d_active'][:])
+                    else:
+                        col_active = np.ones_like(col_topounit)
+            for var in requested_vars:
+                if var not in ds.variables:
+                    continue
+                ncvar = ds.variables[var]
+                if var not in units_by_var:
+                    units_by_var[var] = getattr(ncvar, 'units', '')
+                if 'pft' in ncvar.dimensions:
+                    pft_axis = ncvar.dimensions.index('pft')
+                    if pft_axis != 1 or len(ncvar.dimensions) != 2:
+                        print('Skipping Peatlands PFT postprocessing for '+var+
+                                ': expected dimensions (time,pft), found '+str(ncvar.dimensions))
+                        continue
+                    pft_values_by_var.setdefault(var, []).append(np.ma.asarray(ncvar[:]))
+                elif 'column' in ncvar.dimensions:
+                    col_axis = ncvar.dimensions.index('column')
+                    if col_axis != 1 or len(ncvar.dimensions) != 2:
+                        print('Skipping Peatlands column postprocessing for '+var+
+                                ': expected dimensions (time,column), found '+str(ncvar.dimensions))
+                        continue
+                    col_values_by_var.setdefault(var, []).append(np.ma.asarray(ncvar[:]))
+                else:
+                    print('Skipping Peatlands PFT postprocessing for '+var+
+                            ': expected pft or column dimension, found '+str(ncvar.dimensions))
+
+    if len(pft_values_by_var) == 0 and len(col_values_by_var) == 0:
+        print('No requested PFT or column variables found in h2 output for Peatlands postprocessed NetCDF')
+        return ''
+
+    processed_pft = {}
+    processed_col = {}
+    taxis = None
+    units_out = {}
+    for var, chunks in pft_values_by_var.items():
+        raw = np.ma.concatenate(chunks, axis=0)
+        pft_values = _aggregate_history_pfts(raw, pft_topounit, pft_type, pft_weight,
+                pft_active, history_topounits, npfts=22)
+        finalized = []
+        for pft in range(22):
+            values_out, taxis_var, units = _finalize_postprocess_values(
+                    self, pft_values[:, pft], units_by_var.get(var, ''), firstyear,
+                    hist_nhtfrq, nperyear, dailytomonthly=dailytomonthly,
+                    annualmean=annualmean)
+            finalized.append(values_out)
+            taxis = taxis_var
+            units_out[var] = units
+        processed_pft[var] = np.ma.vstack(finalized).T
+    for var, chunks in col_values_by_var.items():
+        raw = np.ma.concatenate(chunks, axis=0)
+        col_values = _aggregate_history_columns(raw, col_topounit, col_weight,
+                col_active, history_topounits)
+        values_out, taxis_var, units = _finalize_postprocess_values(
+                self, col_values, units_by_var.get(var, ''), firstyear,
+                hist_nhtfrq, nperyear, dailytomonthly=dailytomonthly,
+                annualmean=annualmean)
+        processed_col[var] = values_out
+        taxis = taxis_var
+        units_out[var] = units
+
+    if filename == '':
+        outdir = os.path.join(rundir, '..', 'diagnostics')
+        os.makedirs(outdir, exist_ok=True)
+        filename = os.path.join(outdir, self.casename+
+                '_peatlands_topounit'+str(topounit)+'_pft_postprocessed.nc')
+
+    with Dataset(filename, 'w') as ds_out:
+        ds_out.createDimension('time', len(taxis))
+        ds_out.createDimension('natpft', 22)
+        time_var = ds_out.createVariable('time', 'f8', ('time',))
+        time_var[:] = taxis
+        time_var.long_name = 'postprocessed time axis'
+        pft_var = ds_out.createVariable('natpft', 'i4', ('natpft',))
+        pft_var[:] = np.arange(22)
+        pft_var.long_name = 'ELM natural vegetation PFT index'
+        for var, values in processed_pft.items():
+            outvar = ds_out.createVariable(var, 'f8', ('time', 'natpft'),
+                    fill_value=1.0e36)
+            outvar[:, :] = np.ma.filled(values, 1.0e36)
+            outvar.units = units_out.get(var, '')
+            outvar.long_name = var+' aggregated to requested Peatlands topounit PFT classes'
+        for var, values in processed_col.items():
+            outvar = ds_out.createVariable(var, 'f8', ('time',), fill_value=1.0e36)
+            outvar[:] = np.ma.filled(values, 1.0e36)
+            outvar.units = units_out.get(var, '')
+            outvar.long_name = var+' aggregated to requested Peatlands topounit columns'
+        ds_out.title = 'OLMT Peatlands topounit postprocessed output'
+        ds_out.case = getattr(self, 'casename', '')
+        ds_out.site = getattr(self, 'site', '')
+        ds_out.sitegroup = getattr(self, 'sitegroup', '')
+        ds_out.requested_topounit = int(topounit)
+        ds_out.requested_topounit_indexing = 'zero-based Peatlands topoindex'
+        ds_out.history_topounits = ','.join([str(v) for v in history_topounits])
+        ds_out.history_topounit_indexing = 'one-based ELM pfts1d_topounit'
+        ds_out.postprocessing_frequency = getattr(self, 'postproc_freq', '')
+        ds_out.postprocessing_variables = ','.join(requested_vars)
+        ds_out.pft_weight_variable = pft_weight_name
+        ds_out.column_weight_variable = col_weight_name
+    print('Wrote Peatlands PFT postprocessed NetCDF output: '+filename)
+    return filename
 
 def postprocess_member(self, ens_num=0, startyear=-1, endyear=9999, gindex=0, xindex=0, yindex=0):
     """Postprocess all configured variables for one member with one pass per history stream."""

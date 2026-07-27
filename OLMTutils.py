@@ -125,6 +125,7 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
             siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([npfts], float)
             siteinfo[sitename]['PCT_SAND'] = -999
             siteinfo[sitename]['PCT_CLAY'] = -999
+            siteinfo[sitename]['topounit'] = -1
             if(use_crop):
                 siteinfo[sitename]['PCT_CFT'] = np.zeros([36],float)
         snum += 1
@@ -135,10 +136,22 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
     snum = 0
     for s in lines:
         if snum > 0:
-            sitename = s.split(',')[0]
+            fields = [field.strip() for field in s.strip().split(',')]
+            sitename = fields[0]
+            pair_start = 1
+            if len(fields) > 1 and len(fields[1]) > 0:
+                try:
+                    siteinfo[sitename]['topounit'] = int(fields[1])
+                    pair_start = 2
+                except ValueError:
+                    pair_start = 1
             for p in range(0, 5):
-                pindex = int(s[:-1].split(',')[p * 2 + 2])
-                ppct = float(s[:-1].split(',')[p * 2 + 1])
+                pct_idx = pair_start + p * 2
+                pft_idx = pct_idx + 1
+                if pft_idx >= len(fields):
+                    continue
+                ppct = float(fields[pct_idx])
+                pindex = int(fields[pft_idx])
                 if ppct > 0:
                     #siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
                     if(use_crop):

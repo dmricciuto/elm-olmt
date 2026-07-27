@@ -155,6 +155,7 @@ class ELMcase():
         self.postproc_endyear=9999
         self.postproc_pfts=[0]
         self.postproc_cols=[0]
+        self.postproc_topounit=-1
         self.postproc_freq='monthly'
         self.postproc_timeaverage=1
         self.sens_plot_ntimesteps=None  # None means plot all timesteps
@@ -1438,8 +1439,32 @@ class ELMcase():
           jobnum = int(output.split()[-1])
           print('\nSubmitted '+str(jobnum)+' from '+script)
           jobnum_depend=jobnum
+    if (not ensemble and multisite_script == '' and getattr(self, 'postproc_vars', [])):
+      postproc_script = self.create_postprocess_script()
+      if (self.noslurm):
+          log_file_path='./case_submit.log'
+          with open(log_file_path, "a") as log_file:
+              subprocess.run([postproc_script], stderr=subprocess.STDOUT, stdout=log_file)
+      else:
+          cmd = [mysubmit, '--dependency=afterok:'+str(jobnum), postproc_script]
+          result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
+          output = result.stdout.strip()
+          postproc_jobnum = int(output.split()[-1])
+          print('\nSubmitted '+str(postproc_jobnum)+' from '+postproc_script)
     os.chdir(self.OLMTdir)
     return jobnum
+
+  def create_postprocess_script(self):
+    scriptfile = self.casedir+'/case.postprocess'
+    log_file = self.rundir+'/postprocess.log'
+    with open(scriptfile, 'w') as myfile:
+        myfile.write('#!/bin/bash\n')
+        myfile.write('set -e\n')
+        myfile.write('cd '+shlex.quote(self.OLMTdir)+'\n')
+        myfile.write('python manage_postproc.py --case '+shlex.quote(self.casename)+' > '+
+                shlex.quote(log_file)+' 2>&1\n')
+    os.chmod(scriptfile, 0o755)
+    return scriptfile
 
   def create_pkl(self, outdir='./pklfiles'):
     os.chdir(self.OLMTdir)

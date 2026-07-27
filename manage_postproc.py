@@ -112,3 +112,9 @@ else:
             else:
                 # Close the figure we created but didn't use for single case
                 plt.close()
+
+    for case_name, case_obj in cases.items():
+        if hasattr(case_obj, 'write_peatlands_pft_postprocessed_netcdf'):
+            case_obj.write_peatlands_pft_postprocessed_netcdf(
+                    startyear=case_obj.postproc_startyear,
+                    endyear=case_obj.postproc_endyear)
