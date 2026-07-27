@@ -491,17 +491,24 @@ if (is_final_segment and mycase.postproc_vars != []):
         print('No postprocessed output variables available for UQ; skipping UQ analysis')
         sys.exit(0)
 
-    #Train surrogate models
-    mycase.train_surrogate(uq_vars)
+    # Plot raw ensemble percentiles before surrogate training so these diagnostics
+    # are available even when some variables cannot train a surrogate.
+    for var in uq_vars:
+      mycase.plot_ensemble(var)
+
+    # Train surrogate models. Some variables can have no valid ensemble members
+    # after failed samples are masked with -9999; skip those for downstream UQ.
+    uq_vars = mycase.train_surrogate(uq_vars)
+    if len(uq_vars) == 0:
+        print('No surrogate models were trained from the available postprocessed outputs; skipping UQ analysis')
+        mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+        sys.exit(0)
+
     mycase.plot_surrogate(uq_vars)
 
     #run GSA
     mycase.GSA(uq_vars)
     mycase.plot_GSA(uq_vars)
-
-    # Plot ensemble percentiles for each postprocessed variable
-    for var in uq_vars:
-      mycase.plot_ensemble(var)
     
     #Save postprocessed output
     mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')

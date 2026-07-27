@@ -739,16 +739,17 @@ def ensemble_copy(self, ens_num, clean=True):
                 surffile = ens_dir+'/surfdata_'+gst[1:]+'.nc'
             elif ('finidat = ' in s and self.has_finidat):
                 if (self.finidat_root != ''):
-                   finidat_file_path = self.finidat_root+'/g'+gst[1:]
-                   finidat_file_name = find_latest_restart(finidat_file_path).split('/')[-1]
-                   if finidat_file_name is None:
+                   finidat_file_path = os.path.abspath(os.path.join(self.finidat_root, 'g'+gst[1:]))
+                   latest_restart = find_latest_restart(finidat_file_path)
+                   if latest_restart is None:
                           print('No valid restart file found in '+finidat_file_path+'. Exiting.')
                           sys.exit(1)
+                   finidat_file_name = os.path.basename(latest_restart)
                 else:
-                    finidat_file_path = os.path.abspath(self.rundir_UQ)+'/../'+self.dependcase+'/g'+gst[1:]
-                    finidat_file_name = self.finidat.split('/')[-1]
+                    finidat_file_path = os.path.abspath(os.path.join(self.rundir_UQ, '..', self.dependcase, 'g'+gst[1:]))
+                    finidat_file_name = os.path.basename(self.finidat)
                 #finidat_file_orig = self.finidat
-                finidat_file_new  = finidat_file_path+'/'+finidat_file_name 
+                finidat_file_new  = os.path.join(finidat_file_path, finidat_file_name)
                 print(finidat_file_new)
                 #if ('ad_spinup' in self.dependcase): 
                 #        os.system('python adjust_restart.py --rundir '+finidat_file_path+' --casename '+ \
@@ -1158,6 +1159,9 @@ def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1)
     n_total = valid_mask.shape[0]
     if n_valid < n_total:
         print(f'plot_ensemble {myvar}: using {n_valid} of {n_total} members (excluding failed)')
+    if n_valid == 0:
+        print(f'plot_ensemble {myvar}: no valid ensemble members; skipping plot')
+        return False
 
     # Calculate percentiles along the ensemble axis
     percentile_values = np.nanpercentile(data, percentiles, axis=0)
@@ -1232,6 +1236,7 @@ def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1)
     fig.tight_layout()
     fig.savefig(UQ_output+f'/{myvar}_percentiles_shaded.png', bbox_inches='tight')
     plt.close(fig)
+    return True
 
 
 ### END ###

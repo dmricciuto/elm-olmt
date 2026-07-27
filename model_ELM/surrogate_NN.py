@@ -64,6 +64,8 @@ def train_surrogate(self, myvars):
     # Initialize tracking variables
     self.svd_components = {}
     self.use_svd = {}
+    self.surrogate_skipped = {}
+    trained_vars = []
     
     for var in myvars:
         print(f"Training surrogate for {var}")
@@ -81,12 +83,21 @@ def train_surrogate(self, myvars):
         p = p[valid_indices, :].copy()
         
         print(f"Using {len(valid_indices)} valid samples out of {self.samples.shape[1]}")
+
+        if len(valid_indices) < 5:
+            reason = f"only {len(valid_indices)} valid samples"
+            print(f"  Skipping {vname}: {reason}")
+            self.surrogate_skipped[vname] = reason
+            self.use_svd[vname] = False
+            self.surrogate[vname] = {}
+            continue
+
         # Decide whether to use SVD or per-timestep approach
         if nqoi > 50:
             print(f"  {nqoi} timesteps > 50, using SVD approach")
             self.use_svd[vname] = True
             # SVD will optimize process count internally
-            self.train_svd_surrogate(vname, y, p, n_processes)
+            trained = self.train_svd_surrogate(vname, y, p, n_processes)
         else:
             print(f"  {nqoi} timesteps <= 50, using per-timestep approach")
             self.use_svd[vname] = False
@@ -94,11 +105,24 @@ def train_surrogate(self, myvars):
             n_processes_timestep = min(n_processes, nqoi)
             if n_processes_timestep < n_processes:
                 print(f"  Reducing processes from {n_processes} to {n_processes_timestep} (limited by timesteps)")
-            self.train_timestep_surrogate(vname, y, p, n_processes_timestep)
+            trained = self.train_timestep_surrogate(vname, y, p, n_processes_timestep)
+
+        if trained:
+            trained_vars.append(vname)
+        else:
+            reason = 'no surrogate models trained'
+            print(f"  Skipping downstream UQ for {vname}: {reason}")
+            self.surrogate_skipped[vname] = reason
+
+    return trained_vars
 
 def train_svd_surrogate(self, vname, y, p, n_processes):
     """Train surrogate using SVD decomposition - FIXED VERSION"""
     nsamples, nqoi = y.shape
+    if nsamples < 5 or nqoi == 0:
+        print(f"  Skipping SVD for {vname}: need at least 5 samples and 1 timestep, got {nsamples}x{nqoi}")
+        self.surrogate[vname] = {}
+        return False
     
     # Perform SVD on the output matrix
     print(f"  Performing SVD on {nsamples}x{nqoi} output matrix")
@@ -111,8 +135,18 @@ def train_svd_surrogate(self, vname, y, p, n_processes):
     U, S, Vt = np.linalg.svd(y_centered, full_matrices=False)
     
     # Calculate explained variance ratio
-    explained_variance_ratio = (S**2) / np.sum(S**2)
+    total_variance = np.sum(S**2)
+    if S.size == 0 or total_variance <= 0 or not np.isfinite(total_variance):
+        print(f"  Skipping SVD training for {vname}: output is constant across valid samples")
+        self.surrogate[vname] = {}
+        return False
+
+    explained_variance_ratio = (S**2) / total_variance
     cumulative_variance = np.cumsum(explained_variance_ratio)
+    if cumulative_variance.size == 0:
+        print(f"  Skipping SVD training for {vname}: no SVD variance components")
+        self.surrogate[vname] = {}
+        return False
     
     # Find number of components for 99% variance
     n_components = np.argmax(cumulative_variance >= 0.99) + 1
@@ -202,10 +236,16 @@ def train_svd_surrogate(self, vname, y, p, n_processes):
     print(f"  {vname} SVD summary: {len(r2_scores)}/{n_components} successful models")
     if r2_scores:
         print(f"  Average R²: {np.mean(r2_scores):.3f}")
+    return True
 
 def train_timestep_surrogate(self, vname, y, p, n_processes):
     """Train per-timestep surrogates (original approach)"""
     nqoi = y.shape[1]
+    nsamples = y.shape[0]
+    if nsamples < 5 or nqoi == 0:
+        print(f"  Skipping per-timestep training for {vname}: need at least 5 samples and 1 timestep, got {nsamples}x{nqoi}")
+        self.surrogate[vname] = {}
+        return False
     
     # Initialize qoi_bad only for per-timestep approach
     if not hasattr(self, 'qoi_bad'):
@@ -266,6 +306,7 @@ def train_timestep_surrogate(self, vname, y, p, n_processes):
     if timestep_r2_scores:
         print(f"  Average R²: {np.mean(timestep_r2_scores):.3f}")
     print(f"  Failed timesteps: {len(self.qoi_bad[vname])}")
+    return len(timestep_r2_scores) > 0
 
 def plot_surrogate(self, myvars):
     """Plot surrogate model performance for each variable"""
@@ -611,5 +652,3 @@ def run_timestep_surrogate(self, parms, vname, nsamples):
                 y_pred[:, t] = 0.0
     
     return y_pred
-
-
