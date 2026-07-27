@@ -228,6 +228,68 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
     return ds
 
 
+def peatlands_target_topounits(self):
+    """Return zero-based topounit indices that should receive site Peatlands PFTs."""
+    if not hasattr(self, 'siteinfo'):
+        return []
+    topoindex = int(str(self.siteinfo.get('topounit', -1)).strip().strip("'\""))
+    if topoindex < 0:
+        return []
+    return [topoindex]
+
+
+def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
+    """Set Peatlands site PFTs only on their requested topounit."""
+    ds = ds.copy()
+    ds, pct_pft = self.normalize_pct_nat_pft(ds, pct_pft)
+    target_topounits = self.peatlands_target_topounits()
+    if 'topounit' not in ds['PCT_NAT_PFT'].dims or len(target_topounits) == 0:
+        return self.setpfts(ds, pct_pft, zerootherlandunits=zerootherlandunits)
+
+    arr = ds['PCT_NAT_PFT']
+    dims = list(arr.dims)
+    top_i = dims.index('topounit')
+    nat_i = dims.index('natpft')
+    values = arr.values.copy()
+    pct_values = pct_pft.values
+    for topoindex in target_topounits:
+        if topoindex < 0 or topoindex >= arr.sizes['topounit']:
+            raise IndexError(
+                f"Peatlands topounit index {topoindex} is outside surface topounit "
+                f"dimension size {arr.sizes['topounit']}"
+            )
+        idx_zero = [slice(None)] * arr.ndim
+        idx_zero[top_i] = topoindex
+        target = values[tuple(idx_zero)]
+        target[:] = 0.0
+        nat_axis = nat_i if nat_i < top_i else nat_i - 1
+        pct_shape = [1] * target.ndim
+        pct_shape[nat_axis] = len(pct_values)
+        target[:] = pct_values.reshape(pct_shape)
+    upland_topounit = 3
+    if arr.sizes['topounit'] > upland_topounit:
+        idx_upland = [slice(None)] * arr.ndim
+        idx_upland[top_i] = upland_topounit
+        upland = values[tuple(idx_upland)]
+        upland[:] = 0.0
+        upland_shape = [1] * upland.ndim
+        upland_shape[nat_axis] = arr.sizes['natpft']
+        mixed_forest = np.zeros(arr.sizes['natpft'], dtype=float)
+        if arr.sizes['natpft'] > 5:
+            mixed_forest[3] = 50.0
+            mixed_forest[5] = 50.0
+        upland[:] = mixed_forest.reshape(upland_shape)
+    ds['PCT_NAT_PFT'].values[:] = values
+
+    if (zerootherlandunits):
+        ds['PCT_NATVEG'] = ds['PCT_NATVEG'] * 0 + 100.0
+        nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_CROP','PCT_GLACIER']
+        for v in nonveg:
+            if v in ds.variables:
+                ds[v] = ds[v] * 0 + 0.0
+    return ds
+
+
 def normalize_pct_nat_pft(self, ds, pct_pft):
     """Make a site PFT vector compatible with the surface-data natpft axis."""
     if 'PCT_NAT_PFT' not in ds:
@@ -243,7 +305,7 @@ def normalize_pct_nat_pft(self, ds, pct_pft):
     target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
     if pct_values.size > target_natpft:
         if target_natpft == 17 and pct_values.size == 22:
-            ds = self.expand_natpft_dimension(ds, target_natpft=22)
+            ds = self.expand_surface_pft_dimensions(ds, target_size=22)
             target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
         elif np.allclose(pct_values[target_natpft:], 0.0):
             pct_values = pct_values[:target_natpft]
@@ -266,53 +328,65 @@ def is_peatlands_sitegroup(self):
     return sitegroup.lower() == 'peatlands'
 
 
-def expand_natpft_dimension(self, ds, target_natpft=22):
-    """Expand surface-data natpft dimension, preserving existing PFT slices."""
-    if 'natpft' not in ds.sizes:
+def expand_surface_pft_dimension(self, ds, dim_name, target_size=22):
+    """Expand one surface-data PFT dimension, preserving existing slices."""
+    if dim_name not in ds.sizes:
         return ds
-    current_natpft = ds.sizes['natpft']
-    if current_natpft == target_natpft:
+    current_size = ds.sizes[dim_name]
+    if current_size == target_size:
         return ds
-    if current_natpft > target_natpft:
+    if current_size > target_size:
         raise ValueError(
-            f"Cannot shrink natpft dimension from {current_natpft} to {target_natpft}"
+            f"Cannot shrink {dim_name} dimension from {current_size} to {target_size}"
         )
-    if current_natpft != 17:
+    if current_size != 17:
         raise ValueError(
-            f"Peatlands surface-data upgrade only supports natpft 17 -> {target_natpft}; "
-            f"found natpft={current_natpft}"
+            f"Peatlands surface-data upgrade only supports {dim_name} 17 -> {target_size}; "
+            f"found {dim_name}={current_size}"
         )
 
-    print(f'Expanding natpft dimension from {current_natpft} to {target_natpft}')
+    print(f'Expanding {dim_name} dimension from {current_size} to {target_size}')
     ds = ds.load()
     expanded = xr.Dataset(attrs=dict(ds.attrs))
 
     for coord_name, coord in ds.coords.items():
-        if coord_name == 'natpft':
-            expanded.coords[coord_name] = xr.DataArray(np.arange(target_natpft), dims=['natpft'])
+        if coord_name == dim_name:
+            expanded.coords[coord_name] = xr.DataArray(np.arange(target_size), dims=[dim_name])
         else:
             expanded.coords[coord_name] = coord.copy(deep=True)
-    if 'natpft' not in expanded.coords:
-        expanded.coords['natpft'] = xr.DataArray(np.arange(target_natpft), dims=['natpft'])
+    if dim_name not in expanded.coords:
+        expanded.coords[dim_name] = xr.DataArray(np.arange(target_size), dims=[dim_name])
 
     for var_name, var_data in ds.data_vars.items():
-        if 'natpft' not in var_data.dims:
+        if dim_name not in var_data.dims:
             expanded[var_name] = var_data.copy(deep=True)
             continue
 
-        nat_axis = var_data.dims.index('natpft')
+        pft_axis = var_data.dims.index(dim_name)
         new_shape = list(var_data.shape)
-        new_shape[nat_axis] = target_natpft
+        new_shape[pft_axis] = target_size
         new_values = np.zeros(new_shape, dtype=var_data.dtype)
         old_index = [slice(None)] * var_data.ndim
         new_index = [slice(None)] * var_data.ndim
-        old_index[nat_axis] = slice(0, current_natpft)
-        new_index[nat_axis] = slice(0, current_natpft)
+        old_index[pft_axis] = slice(0, current_size)
+        new_index[pft_axis] = slice(0, current_size)
         new_values[tuple(new_index)] = var_data.values[tuple(old_index)]
         expanded[var_name] = xr.DataArray(new_values, dims=var_data.dims, attrs=var_data.attrs)
 
     ds.close()
     return expanded
+
+
+def expand_surface_pft_dimensions(self, ds, target_size=22):
+    """Expand Peatlands surface PFT dimensions used by ELM surface files."""
+    for dim_name in ('natpft', 'lsmpft'):
+        ds = self.expand_surface_pft_dimension(ds, dim_name, target_size=target_size)
+    return ds
+
+
+def expand_natpft_dimension(self, ds, target_natpft=22):
+    """Backward-compatible wrapper for older call sites."""
+    return self.expand_surface_pft_dimension(ds, 'natpft', target_size=target_natpft)
 
 
 def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
@@ -337,7 +411,7 @@ def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
         ds.attrs['topounit_order'] = '1=fen_low_outlet, 2=bog_hollow, 3=bog_hummock, 4=upland_high'
         ds.attrs['topounit_fraction_default'] = 'fen=0.25, bog_hollow=0.25, bog_hummock=0.25, upland=0.25'
 
-    ds = self.expand_natpft_dimension(ds, target_natpft=22)
+    ds = self.expand_surface_pft_dimensions(ds, target_size=22)
     return ds
 
             
@@ -418,6 +492,8 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 if 'SPR' in self.site and not self.is_peatlands_sitegroup():
                     #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
                     ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)  
+                elif self.is_peatlands_sitegroup():
+                    ds = self.set_peatlands_site_pfts(ds, pct_nat_pft)
                 else:
                     ds = self.setpfts(ds, pct_nat_pft)
             if (pft >=0):
@@ -431,6 +507,8 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 # PFT there.
                 if 'SPR' in self.site and not self.is_peatlands_sitegroup():
                     ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)
+                elif self.is_peatlands_sitegroup():
+                    ds = self.set_peatlands_site_pfts(ds, pct_nat_pft)
                 else:
                     ds = self.setpfts(ds, pct_nat_pft)
             print('Setting PFT_NAT_PFT to: ', self.siteinfo['PCT_NAT_PFT'])
