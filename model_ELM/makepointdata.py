@@ -262,7 +262,8 @@ def normalize_pct_nat_pft(self, ds, pct_pft):
 
 
 def is_peatlands_sitegroup(self):
-    return getattr(self, 'sitegroup', '').lower() == 'peatlands'
+    sitegroup = str(getattr(self, 'sitegroup', '')).strip().strip("'\"")
+    return sitegroup.lower() == 'peatlands'
 
 
 def expand_natpft_dimension(self, ds, target_natpft=22):
