@@ -107,14 +107,21 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
     snum = 0
     if(use_crop):
         npfts = 15
+    elif sitegroup.lower() == 'peatlands':
+        npfts = 22
     else:
         npfts = 17
     for s in lines:
         if snum > 0:
-            sitename = s.split(',')[0]
+            fields = s.strip().split(',')
+            if len(fields) < 6:
+                snum += 1
+                continue
+            sitename = fields[0]
             siteinfo[sitename] = {}
-            siteinfo[sitename]['lon'] = float(s.split(',')[3])
-            siteinfo[sitename]['lat'] = float(s.split(',')[4])
+            siteinfo[sitename]['lon'] = float(fields[3])
+            siteinfo[sitename]['lat'] = float(fields[4])
+            siteinfo[sitename]['elev'] = float(fields[5])
             siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([npfts], float)
             siteinfo[sitename]['PCT_SAND'] = -999
             siteinfo[sitename]['PCT_CLAY'] = -999
@@ -140,6 +147,11 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
                         else:
                             siteinfo[sitename]['PCT_CFT'][pindex - 15] = ppct
                     else:
+                        if pindex >= len(siteinfo[sitename]['PCT_NAT_PFT']):
+                            raise IndexError(
+                                f"PFT index {pindex} in {pftdata_path} exceeds "
+                                f"natpft count {len(siteinfo[sitename]['PCT_NAT_PFT'])}"
+                            )
                         siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
         snum += 1
 
@@ -177,6 +189,11 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
                                 else:
                                     siteinfo[sitename]['transitions'][trans_year]['PCT_CFT'][pindex - 15] = ppct
                             else:
+                                if pindex >= len(siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT']):
+                                    raise IndexError(
+                                        f"PFT index {pindex} in {landuse_path} exceeds "
+                                        f"natpft count {len(siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'])}"
+                                    )
                                 siteinfo[sitename]['transitions'][trans_year]['PCT_NAT_PFT'][pindex] = ppct
                         siteinfo[sitename]['transitions'][trans_year]['HARVEST'] = harvpct
                 snum += 1
