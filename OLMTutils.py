@@ -62,6 +62,35 @@ def get_machine_info(machine_name=''):
         machine = 'docker'
     return machine, rootdir, inputdata, queue, project, hostname, apptainer_bind
 
+def pathfinder_compute_node_error(machine, configured_machine_name=''):
+    configured_machine_name = configured_machine_name.lower()
+    current_host = socket.gethostname()
+    current_host_lower = current_host.lower()
+    pathfinder_requested = (
+        machine == 'pathfinder' or
+        'pathfinder' in configured_machine_name or
+        'pflogin' in configured_machine_name
+    )
+    pathfinder_runtime = (
+        'pathfinder' in current_host_lower or
+        'pflogin' in current_host_lower or
+        os.path.exists('/projects/hpcl-cli185')
+    )
+    if (not pathfinder_requested and not pathfinder_runtime):
+        return
+
+    slurm_vars = ['SLURM_JOB_ID', 'SLURM_JOBID', 'SLURM_NODELIST', 'SLURM_JOB_NODELIST']
+    in_slurm_allocation = any(os.environ.get(var, '') != '' for var in slurm_vars)
+    host_is_login = 'pflogin' in current_host_lower
+
+    if (in_slurm_allocation and not host_is_login):
+        job_id = os.environ.get('SLURM_JOB_ID', os.environ.get('SLURM_JOBID', 'unknown'))
+        raise RuntimeError(
+            'elm_olmt.py should be run from a Pathfinder login node, not from a '
+            'compute node. Current host: '+current_host+'. Slurm job: '+job_id+
+            '. Start OLMT on pflogin and let OLMT submit/build jobs through Slurm.'
+        )
+
 #Function to get the available site groups
 def get_sitegroups(inputdata, sftp=None):
     PTCLM = inputdata + '/lnd/clm2/PTCLM'

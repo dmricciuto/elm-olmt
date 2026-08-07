@@ -1,6 +1,12 @@
 #!/usr/bin/env python
 import re, sys
-from OLMTutils import get_machine_info, get_site_info, get_point_list, get_default_diag_vars
+from OLMTutils import (
+    get_machine_info,
+    get_site_info,
+    get_point_list,
+    get_default_diag_vars,
+    pathfinder_compute_node_error,
+)
 import os, glob
 import numpy as np
 import configparser
@@ -141,6 +147,11 @@ def main():
     machine_name = cfg['machine'].get('machine_name', '')
     machine, rootdir, inputdata, queue, project, hostname, apptainer_bind = \
         get_machine_info(machine_name=machine_name)
+    try:
+        pathfinder_compute_node_error(machine, configured_machine_name=machine_name)
+    except RuntimeError as err:
+        print('ERROR: '+str(err), file=sys.stderr)
+        sys.exit(1)
     print('Machine: '+machine+'\n')
     
     # Override machine defaults with config values if provided
