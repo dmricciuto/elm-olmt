@@ -521,8 +521,9 @@ def main():
             cases[c].siteinfo = siteinfo[site]
 
         # Get the namelist options for this case
+        whole_list_case_options = ['peatlands_upland_pfts', 'peatlands_upland_pft_fractions']
         for key in case_options.keys():
-            if isinstance(case_options[key], list):
+            if isinstance(case_options[key], list) and key not in whole_list_case_options:
                 cases[c].case_options[key] = case_options[key][c]
             else:
                 cases[c].case_options[key] = case_options[key]

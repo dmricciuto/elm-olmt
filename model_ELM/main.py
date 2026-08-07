@@ -1074,6 +1074,8 @@ class ELMcase():
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
               'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
+              'peatlands_upland_only', 'peatlands_upland_topounit', \
+              'peatlands_upland_pfts', 'peatlands_upland_pft_fractions', \
               'variable', 'name', 'nyears']
     #Custom namelist options
     for key in self.case_options.keys():

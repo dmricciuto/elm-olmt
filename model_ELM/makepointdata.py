@@ -6,6 +6,12 @@ from geopy.distance import geodesic
 from scipy.spatial import KDTree
 import xarray as xr
 
+PEATLANDS_UPLAND_SOURCE_TOPOUNIT = 3
+PEATLANDS_UPLAND_PFT_FRACTIONS = {
+    2: 50.0,
+    13: 50.0,
+}
+
 
 #Function to return the indices of the nearest grid cell centers for a list of points
 def get_pointindices_list(self, mylat, mylon, lat_grid, lon_grid, mask_grid=[]):
@@ -230,6 +236,8 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
 
 def peatlands_target_topounits(self):
     """Return zero-based topounit indices that should receive site Peatlands PFTs."""
+    if self.is_peatlands_upland_only():
+        return [0]
     if not hasattr(self, 'siteinfo'):
         return []
     topoindex = int(str(self.siteinfo.get('topounit', -1)).strip().strip("'\""))
@@ -238,9 +246,62 @@ def peatlands_target_topounits(self):
     return [topoindex]
 
 
+def is_peatlands_upland_only(self):
+    value = getattr(self, 'case_options', {}).get('peatlands_upland_only', False)
+    if isinstance(value, str):
+        return value.strip().strip("'\"").lower() in ['true', '.true.', 't', '1', 'yes', 'y']
+    return bool(value)
+
+
+def peatlands_upland_source_topounit(self):
+    value = getattr(self, 'case_options', {}).get(
+        'peatlands_upland_topounit',
+        PEATLANDS_UPLAND_SOURCE_TOPOUNIT
+    )
+    return int(str(value).strip().strip("'\""))
+
+
+def peatlands_upland_pct_pft(self, natpft_size):
+    pft_fractions = PEATLANDS_UPLAND_PFT_FRACTIONS.copy()
+    case_options = getattr(self, 'case_options', {})
+    if 'peatlands_upland_pft_fractions' in case_options:
+        spec = case_options['peatlands_upland_pft_fractions']
+        if isinstance(spec, str):
+            spec = [value.strip() for value in spec.split(',')]
+        if len(spec) % 2 != 0:
+            raise ValueError('peatlands_upland_pft_fractions must be pft,pct pairs')
+        pft_fractions = {}
+        for i in range(0, len(spec), 2):
+            pft_fractions[int(spec[i])] = float(spec[i + 1])
+    elif 'peatlands_upland_pfts' in case_options:
+        spec = case_options['peatlands_upland_pfts']
+        if isinstance(spec, str):
+            spec = [value.strip() for value in spec.split(',')]
+        pft_indices = [int(value) for value in spec]
+        if len(pft_indices) == 0:
+            raise ValueError('peatlands_upland_pfts must include at least one PFT index')
+        pct = 100.0 / len(pft_indices)
+        pft_fractions = {pft_index: pct for pft_index in pft_indices}
+
+    pct_values = np.zeros(natpft_size, dtype=float)
+    for pft_index, pct in pft_fractions.items():
+        if pft_index < 0 or pft_index >= natpft_size:
+            raise ValueError(
+                f'Peatlands upland PFT index {pft_index} is outside natpft size {natpft_size}'
+            )
+        pct_values[pft_index] = pct
+    pct_sum = np.sum(pct_values)
+    if pct_sum <= 0.0:
+        raise ValueError('Peatlands upland PFT fractions must sum to a positive value')
+    pct_values *= 100.0 / pct_sum
+    return xr.DataArray(pct_values, dims=['natpft'])
+
+
 def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
     """Set Peatlands site PFTs only on their requested topounit."""
     ds = ds.copy()
+    if self.is_peatlands_upland_only():
+        pct_pft = self.peatlands_upland_pct_pft(ds['PCT_NAT_PFT'].sizes['natpft'])
     ds, pct_pft = self.normalize_pct_nat_pft(ds, pct_pft)
     target_topounits = self.peatlands_target_topounits()
     if 'topounit' not in ds['PCT_NAT_PFT'].dims or len(target_topounits) == 0:
@@ -266,6 +327,15 @@ def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
         pct_shape = [1] * target.ndim
         pct_shape[nat_axis] = len(pct_values)
         target[:] = pct_values.reshape(pct_shape)
+    if self.is_peatlands_upland_only():
+        ds['PCT_NAT_PFT'].values[:] = values
+        if (zerootherlandunits):
+            ds['PCT_NATVEG'] = ds['PCT_NATVEG'] * 0 + 100.0
+            nonveg=['PCT_WETLAND','PCT_LAKE','PCT_URBAN','PCT_CROP','PCT_GLACIER']
+            for v in nonveg:
+                if v in ds.variables:
+                    ds[v] = ds[v] * 0 + 0.0
+        return ds
     upland_topounit = 3
     if arr.sizes['topounit'] > upland_topounit:
         idx_upland = [slice(None)] * arr.ndim
@@ -274,11 +344,8 @@ def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
         upland[:] = 0.0
         upland_shape = [1] * upland.ndim
         upland_shape[nat_axis] = arr.sizes['natpft']
-        mixed_forest = np.zeros(arr.sizes['natpft'], dtype=float)
-        if arr.sizes['natpft'] > 5:
-            mixed_forest[3] = 50.0
-            mixed_forest[5] = 50.0
-        upland[:] = mixed_forest.reshape(upland_shape)
+        upland_pct_pft = self.peatlands_upland_pct_pft(arr.sizes['natpft']).values
+        upland[:] = upland_pct_pft.reshape(upland_shape)
     ds['PCT_NAT_PFT'].values[:] = values
 
     if (zerootherlandunits):
@@ -395,21 +462,53 @@ def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
         return ds
 
     if 'topounit' not in ds.sizes:
-        print('Adding default 4-topounit Peatlands surface metadata')
         base_elev = self.siteinfo['elev'] if hasattr(self, 'siteinfo') and 'elev' in self.siteinfo else 0.0
-        fracarea = [0.25, 0.25, 0.25, 0.25]
-        elevations = [base_elev, base_elev + 2.925, base_elev + 3.075, base_elev + 10.0]
-        distances = [0, 150, 1, 300]
-        is_bog = [0, 1, 1, 0]
-        peat_depth = [2.0, 3.0, 3.0, 0.0]
-        till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0, 0.0]
-        ds = self.add_topounit_dimension(
-            ds, latvar, lonvar, num_topounits=4,
-            fracarea=fracarea, elevations=elevations, distances=distances,
-            is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat
-        )
-        ds.attrs['topounit_order'] = '1=fen_low_outlet, 2=bog_hollow, 3=bog_hummock, 4=upland_high'
-        ds.attrs['topounit_fraction_default'] = 'fen=0.25, bog_hollow=0.25, bog_hummock=0.25, upland=0.25'
+        if self.is_peatlands_upland_only():
+            print('Adding upland-only Peatlands surface metadata')
+            ds = self.add_topounit_dimension(
+                ds, latvar, lonvar, num_topounits=1,
+                fracarea=[1.0], elevations=[base_elev + 10.0], distances=[300],
+                is_bog=[0], peat_depth=[0.0], till_ksat=[0.0]
+            )
+            ds.attrs['topounit_order'] = '1=upland_high'
+            ds.attrs['topounit_fraction_default'] = 'upland=1.0'
+            ds.attrs['topounit_source_index'] = str(self.peatlands_upland_source_topounit())
+        else:
+            print('Adding default 4-topounit Peatlands surface metadata')
+            fracarea = [0.25, 0.25, 0.25, 0.25]
+            elevations = [base_elev, base_elev + 2.925, base_elev + 3.075, base_elev + 10.0]
+            distances = [0, 150, 1, 300]
+            is_bog = [0, 1, 1, 0]
+            peat_depth = [2.0, 3.0, 3.0, 0.0]
+            till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0, 0.0]
+            ds = self.add_topounit_dimension(
+                ds, latvar, lonvar, num_topounits=4,
+                fracarea=fracarea, elevations=elevations, distances=distances,
+                is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat
+            )
+            ds.attrs['topounit_order'] = '1=fen_low_outlet, 2=bog_hollow, 3=bog_hummock, 4=upland_high'
+            ds.attrs['topounit_fraction_default'] = 'fen=0.25, bog_hollow=0.25, bog_hummock=0.25, upland=0.25'
+    elif self.is_peatlands_upland_only():
+        source_topounit = self.peatlands_upland_source_topounit()
+        if source_topounit < 0 or source_topounit >= ds.sizes['topounit']:
+            raise IndexError(
+                f"Peatlands upland topounit index {source_topounit} is outside "
+                f"surface topounit dimension size {ds.sizes['topounit']}"
+            )
+        print(f'Keeping only Peatlands upland topounit {source_topounit}')
+        ds = ds.isel(topounit=[source_topounit]).copy()
+        ds = ds.assign_coords(topounit=xr.DataArray(np.arange(1), dims=['topounit']))
+        if 'TopounitFracArea' in ds:
+            ds['TopounitFracArea'] = ds['TopounitFracArea'] * 0 + 1.0
+        if 'topoPerGrid' in ds:
+            ds['topoPerGrid'] = ds['topoPerGrid'] * 0 + 1
+        if 'TopounitAveElv' in ds:
+            upland_elev = ds['TopounitAveElv'].isel(topounit=0, drop=True)
+            ds['TOPO2'] = upland_elev.copy(deep=True)
+            ds['MaxTopounitElv'] = upland_elev.copy(deep=True)
+        ds.attrs['topounit_order'] = '1=upland_high'
+        ds.attrs['topounit_fraction_default'] = 'upland=1.0'
+        ds.attrs['topounit_source_index'] = str(source_topounit)
 
     ds = self.expand_surface_pft_dimensions(ds, target_size=22)
     return ds
