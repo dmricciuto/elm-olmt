@@ -190,6 +190,7 @@ def main():
         lon_bounds = [-90, 90]
     else:
         sites = ['']
+        sitegroup=''
         region_name = cfg['simulation'].get('name','global')
         numproc = cfg['simulation']['numproc']
         if runtype == 'latlon_list':
