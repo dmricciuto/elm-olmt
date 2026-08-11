@@ -593,7 +593,8 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
         if len(segments) > 1:
           log_path = site_rundir+'/e3sm_log.seg'+str(1000+segment['index'])[1:]+'.txt'
         if (self.noslurm):
-          myfile.write('mpiexec -n '+str(self.np)+' '+exe_path+' > '+ \
+          mpiexec_opts = '--bind-to none ' if str(getattr(self, 'machine', '')).lower() == 'docker' else ''
+          myfile.write('mpiexec '+mpiexec_opts+'-n '+str(self.np)+' '+exe_path+' > '+ \
                        log_path+' &\n\n')
         else:
             if (self.apptainer != ''):

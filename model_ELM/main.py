@@ -23,6 +23,22 @@ def smart_loadtxt(filename):
     else:
         return np.loadtxt(filename)
 
+def parse_submit_jobnum(output):
+    submit_output = output.strip()
+    matches = re.findall(r'\bSubmitted\s+batch\s+job\s+(\d+)\b', submit_output)
+    if matches:
+        return int(matches[-1])
+
+    matches = re.findall(r'\bSubmitted\s+job\s+(\d+)\b', submit_output)
+    if matches:
+        return int(matches[-1])
+
+    matches = re.findall(r'(?<![\w.])(\d+)(?![\w.])', submit_output)
+    if matches:
+        return int(matches[-1])
+
+    raise ValueError('Could not parse submitted job id from output:\n'+submit_output)
+
 def write_fates_pft_subset_nc(source_path, output_path, fates_pft, duplicates=1):
     """Write a FATES NetCDF parameter file subset with xarray."""
     with xr.open_dataset(source_path, decode_timedelta=False) as ds:
@@ -1076,6 +1092,7 @@ class ELMcase():
               'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
               'peatlands_upland_only', 'peatlands_upland_topounit', \
               'peatlands_upland_pfts', 'peatlands_upland_pft_fractions', \
+              'site_npfts', 'site_pft_fractions', \
               'variable', 'name', 'nyears']
     #Custom namelist options
     for key in self.case_options.keys():
@@ -1094,10 +1111,8 @@ class ELMcase():
 
     #set domain file information
     if (domainfile == ''):
-      #self.xmlchange('ATM_DOMAIN_PATH',value='"\${RUNDIR}"')
-      #self.xmlchange('LND_DOMAIN_PATH',value='"\${RUNDIR}"')
-      self.xmlchange('ATM_DOMAIN_PATH',value='"${RUNDIR}"')
-      self.xmlchange('LND_DOMAIN_PATH',value='"${RUNDIR}"')
+      self.xmlchange('ATM_DOMAIN_PATH',value='"\\${RUNDIR}"')
+      self.xmlchange('LND_DOMAIN_PATH',value='"\\${RUNDIR}"')
       self.xmlchange('ATM_DOMAIN_FILE',value='domain.nc')
       self.xmlchange('LND_DOMAIN_FILE',value='domain.nc')
     else:
@@ -1150,6 +1165,28 @@ class ELMcase():
     else:
         output.write(' '+variable+' = '+value+'\n')
     output.close()
+
+  def preview_namelists(self):
+      os.chdir(self.casedir)
+      if os.path.exists(os.path.abspath(self.modelroot)+'/cime/scripts/Tools/preview_namelists'):
+        cmdpath=os.path.abspath(self.modelroot)+'/cime/scripts/Tools'
+      else:
+        cmdpath=os.path.abspath(self.modelroot)+'/cime/CIME/Tools'
+      if (self.apptainer != ''):
+          cmd = 'apptainer exec --bind '+self.apptainer_bind+' '+ \
+                ' --pwd '+self.casedir+' '+self.apptainer+' '+cmdpath+'/preview_namelists'
+      else:
+        cmd = cmdpath+'/preview_namelists'
+
+      result = subprocess.run(cmd, stdout=subprocess.PIPE, \
+            stderr=subprocess.PIPE, text=True, shell=True)
+      if (result.returncode > 0):
+        print('Error:  Failed to preview namelists.')
+        if result.stdout:
+            print(result.stdout)
+        if result.stderr:
+            print(result.stderr)
+        sys.exit(1)
 
   def build_case(self, clean=True):
       os.chdir(self.casedir)
@@ -1249,6 +1286,8 @@ class ELMcase():
       if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn) \
         and not 'flanduse_timeseries' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/surfdata.pftdyn.nc '+self.rundir)
+      if (not self.dobuild):
+         self.preview_namelists()
 
   def modify_datm_streamfiles(self):
     #stream file modifications for datm runs
@@ -1438,7 +1477,9 @@ class ELMcase():
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                   stdout=subprocess.PIPE, text=True)
           output = result.stdout.strip()
-          jobnum = int(output.split()[-1])
+          if (result.returncode != 0):
+              raise RuntimeError('Failed to submit '+script+':\n'+output)
+          jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(jobnum)+' from '+script)
           jobnum_depend=jobnum
     if (not ensemble and multisite_script == '' and getattr(self, 'postproc_vars', [])):
@@ -1451,7 +1492,9 @@ class ELMcase():
           cmd = [mysubmit, '--dependency=afterok:'+str(jobnum), postproc_script]
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
           output = result.stdout.strip()
-          postproc_jobnum = int(output.split()[-1])
+          if (result.returncode != 0):
+              raise RuntimeError('Failed to submit '+postproc_script+':\n'+output)
+          postproc_jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(postproc_jobnum)+' from '+postproc_script)
     os.chdir(self.OLMTdir)
     return jobnum
