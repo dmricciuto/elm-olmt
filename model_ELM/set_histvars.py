@@ -109,18 +109,50 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
       vst = ''
       for v in var_list_spinup:
         vst=vst+"'"+v+"',"
-      if (not 'ELMBC' in self.compset and not self.postproc_vars):
-        if ('FATES' in self.compset):
-          #All variables, annual output for FATES
-          self.customize_namelist(variable='hist_mfilt',value='1')
-          self.customize_namelist(variable='hist_nhtfrq',value='-8760')
-        else:
-          self.customize_namelist(variable='hist_empty_htapes',value='.true.')
-          self.customize_namelist(variable='hist_fincl1',value=vst[:-1])
-          self.customize_namelist(variable='hist_fincl2',value=vst[:-1])
+      if (not 'ELMBC' in self.compset and not 'FATES' in self.compset):
+        self.customize_namelist(variable='hist_empty_htapes',value='.true.')
+        self.customize_namelist(variable='hist_fincl1',value=vst[:-1])
+        self.customize_namelist(variable='hist_fincl2',value=vst[:-1])
+        spinup_nhtfrq = str(self.nyears_spinup*-8760)
+        if (not self.postproc_vars):
           self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.')
           self.customize_namelist(variable='hist_mfilt',value='1,1')
-          self.customize_namelist(variable='hist_nhtfrq',value=str(self.nyears_spinup*-8760)+','+str(self.nyears_spinup*-8760))
+          self.customize_namelist(variable='hist_nhtfrq',value=spinup_nhtfrq+','+spinup_nhtfrq)
+        else:
+          vst_pp=''
+          vst_pp_pft=''
+          for v in self.postproc_vars:
+              if (is_indexed_postproc_var(v)):
+                  # PFT- or column-specific outputs (put after the spinup h1 file)
+                  pft_var = get_postproc_basevar(v)
+                  if ("'"+pft_var+"'," not in vst_pp_pft):
+                      vst_pp_pft=vst_pp_pft+"'"+pft_var+"',"
+              else:
+                  vst_pp=vst_pp+"'"+v+"',"
+                  if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
+                      vst_pp_pft=vst_pp_pft+"'"+v+"',"
+          if (self.postproc_freq == 'hourly'):
+            pp_mfilt = '8760'
+            pp_nhtfrq = '-1'
+          else:
+            pp_mfilt = '365'
+            pp_nhtfrq = '-24'
+          if (vst_pp != '' and vst_pp_pft != ''):
+            self.customize_namelist(variable='hist_mfilt',value='1,1,'+pp_mfilt+','+pp_mfilt)
+            self.customize_namelist(variable='hist_nhtfrq',value=spinup_nhtfrq+','+spinup_nhtfrq+','+pp_nhtfrq+','+pp_nhtfrq)
+            self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.,.true.,.false.')
+            self.customize_namelist(variable='hist_fincl3',value=vst_pp[:-1])
+            self.customize_namelist(variable='hist_fincl4',value=vst_pp_pft[:-1])
+          elif (vst_pp_pft != ''):
+            self.customize_namelist(variable='hist_mfilt',value='1,1,'+pp_mfilt)
+            self.customize_namelist(variable='hist_nhtfrq',value=spinup_nhtfrq+','+spinup_nhtfrq+','+pp_nhtfrq)
+            self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.,.false.')
+            self.customize_namelist(variable='hist_fincl3',value=vst_pp_pft[:-1])
+          else:
+            self.customize_namelist(variable='hist_mfilt',value='1,1,'+pp_mfilt)
+            self.customize_namelist(variable='hist_nhtfrq',value=spinup_nhtfrq+','+spinup_nhtfrq+','+pp_nhtfrq)
+            self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.,.true.')
+            self.customize_namelist(variable='hist_fincl3',value=vst_pp[:-1])
       else:
         if (not self.postproc_vars):
           #Annual output if no postproc vars

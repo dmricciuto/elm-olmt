@@ -93,6 +93,19 @@ def _read_hist_info(rundir, hnum):
         nperyear = max(abs(8760/hist_nhtfrq), 1)
     return hist_mfilt, hist_nhtfrq, nperyear
 
+def _infer_hist_info_from_files(file_list_all):
+    if len(file_list_all) == 0:
+        return None, 0, 12
+    with Dataset(file_list_all[0], 'r') as ds:
+        if 'time' not in ds.dimensions:
+            return None, 0, 12
+        nperyear = max(len(ds.dimensions['time']), 1)
+    if (nperyear == 12):
+        hist_nhtfrq = 0
+    else:
+        hist_nhtfrq = -int(round(8760.0/nperyear))
+    return nperyear, hist_nhtfrq, nperyear
+
 def _history_file_year(fname, hist_nhtfrq):
     match = re.search(r'\.(\d{4})(?:-|$)', os.path.basename(fname))
     if match:
@@ -102,9 +115,12 @@ def _history_file_year(fname, hist_nhtfrq):
     return int(fname.split('-')[-4][-4:])
 
 def _postprocess_file_list(self, rundir, hnum, startyear=-1, endyear=9999):
-    hist_mfilt, hist_nhtfrq, nperyear = _read_hist_info(rundir, hnum)
     pattern = os.path.join(rundir, self.casename+'.elm.h'+str(hnum)+'.*.nc')
     file_list_all = np.sort(glob.glob(pattern))
+    try:
+        hist_mfilt, hist_nhtfrq, nperyear = _read_hist_info(rundir, hnum)
+    except ValueError:
+        hist_mfilt, hist_nhtfrq, nperyear = _infer_hist_info_from_files(file_list_all)
     file_list = []
     firstyear = startyear
     lastyr = None
@@ -210,6 +226,37 @@ def _history_topounits_for_request(topounit):
         return [2, 3]
     return [int(topounit) + 1]
 
+def _available_peatlands_history_topounits(pft_topounit=None, pft_active=None, pft_weight=None,
+        col_topounit=None, col_active=None, col_weight=None):
+    available = []
+
+    def add_topounits(topounit_values, active_values, weight_values):
+        if topounit_values is None:
+            return
+        topounit_values = np.asarray(topounit_values, dtype=int)
+        mask = np.ones(topounit_values.shape, dtype=bool)
+        if active_values is not None:
+            mask = mask & (np.asarray(active_values, dtype=int) > 0)
+        if weight_values is not None:
+            mask = mask & (np.asarray(weight_values, dtype=float) > 0.0)
+        for value in topounit_values[mask]:
+            value = int(value)
+            if value > 0 and value not in available:
+                available.append(value)
+
+    add_topounits(pft_topounit, pft_active, pft_weight)
+    add_topounits(col_topounit, col_active, col_weight)
+    return available
+
+def _resolve_peatlands_topounit_request(topounit, pft_topounit=None, pft_active=None,
+        pft_weight=None, col_topounit=None, col_active=None, col_weight=None):
+    available = _available_peatlands_history_topounits(
+            pft_topounit=pft_topounit, pft_active=pft_active, pft_weight=pft_weight,
+            col_topounit=col_topounit, col_active=col_active, col_weight=col_weight)
+    if len(available) == 1:
+        return 0, available
+    return topounit, _history_topounits_for_request(topounit)
+
 def _unique_preserve_order(values):
     out = []
     for value in values:
@@ -296,7 +343,6 @@ def write_peatlands_pft_postprocessed_netcdf(self, filename='', startyear=-1, en
         return ''
 
     topounit = _requested_peatlands_topounit(self)
-    history_topounits = _history_topounits_for_request(topounit)
     requested_vars = _unique_preserve_order([
         get_postproc_basevar(v) for v in self.postproc_vars
     ])
@@ -315,6 +361,7 @@ def write_peatlands_pft_postprocessed_netcdf(self, filename='', startyear=-1, en
     col_weight = None
     col_weight_name = ''
     col_active = None
+    skipped_vars = set()
     for fname in file_list:
         with Dataset(fname, 'r') as ds:
             if pft_topounit is None:
@@ -353,24 +400,35 @@ def write_peatlands_pft_postprocessed_netcdf(self, filename='', startyear=-1, en
                 if 'pft' in ncvar.dimensions:
                     pft_axis = ncvar.dimensions.index('pft')
                     if pft_axis != 1 or len(ncvar.dimensions) != 2:
-                        print('Skipping Peatlands PFT postprocessing for '+var+
-                                ': expected dimensions (time,pft), found '+str(ncvar.dimensions))
+                        if var not in skipped_vars:
+                            print('Skipping Peatlands PFT postprocessing for '+var+
+                                    ': expected dimensions (time,pft), found '+str(ncvar.dimensions))
+                            skipped_vars.add(var)
                         continue
                     pft_values_by_var.setdefault(var, []).append(np.ma.asarray(ncvar[:]))
                 elif 'column' in ncvar.dimensions:
                     col_axis = ncvar.dimensions.index('column')
                     if col_axis != 1 or len(ncvar.dimensions) != 2:
-                        print('Skipping Peatlands column postprocessing for '+var+
-                                ': expected dimensions (time,column), found '+str(ncvar.dimensions))
+                        if var not in skipped_vars:
+                            print('Skipping Peatlands column postprocessing for '+var+
+                                    ': expected dimensions (time,column), found '+str(ncvar.dimensions))
+                            skipped_vars.add(var)
                         continue
                     col_values_by_var.setdefault(var, []).append(np.ma.asarray(ncvar[:]))
                 else:
-                    print('Skipping Peatlands PFT postprocessing for '+var+
-                            ': expected pft or column dimension, found '+str(ncvar.dimensions))
+                    if var not in skipped_vars:
+                        print('Skipping Peatlands PFT postprocessing for '+var+
+                                ': expected pft or column dimension, found '+str(ncvar.dimensions))
+                        skipped_vars.add(var)
 
     if len(pft_values_by_var) == 0 and len(col_values_by_var) == 0:
         print('No requested PFT or column variables found in h2 output for Peatlands postprocessed NetCDF')
         return ''
+
+    topounit, history_topounits = _resolve_peatlands_topounit_request(
+            topounit, pft_topounit=pft_topounit, pft_active=pft_active,
+            pft_weight=pft_weight, col_topounit=col_topounit, col_active=col_active,
+            col_weight=col_weight)
 
     processed_pft = {}
     processed_col = {}
@@ -562,48 +620,45 @@ def plot_spinup(self, plotvars=[]):
 def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0, \
         dailytomonthly=False, annualmean=False,  meanseasonalcycle=False, \
         xindex=0,yindex=0, ens_num=0, plot=False):
-    if (ens_num > 0):
-        gst = str(100000+ens_num)[1:]
-        rundir = self.rundir_UQ+'/g'+gst
-    else:
-        rundir = self.rundir
+    rundir = _postprocess_rundir(self, ens_num=ens_num)
     os.chdir(rundir)
-    lnd_in = open('./lnd_in')
-    #Get history file info from lnd_in
-    for s in lnd_in:
-        if (s.split('=')[0].strip() == 'hist_mfilt'):
-            hist_mfilt = int((s.split('=')[1].strip()).split(',')[hnum].strip())
-        if (s.split('=')[0].strip() == 'hist_nhtfrq'):
-            hist_nhtfrq = int((s.split('=')[1].strip()).split(',')[hnum].strip())
-    lnd_in.close()
-    if (hist_nhtfrq == 0):
-      nperyear=12
-    else:
-      nperyear = max(abs(8760/hist_nhtfrq), 1)
-    file_list_all = np.sort(glob.glob(self.casename+'.elm.h'+str(hnum)+'.*.nc'))
-    file_list = []
-    #Filter the requested years
-    for f in file_list_all:
-        if (hist_nhtfrq == 0):
-            yr = int(f.split('-')[-2][-4:])
-        else:
-            yr = int(f.split('-')[-4][-4:])
-        if (startyear < 0):
-            startyear = yr
-        if (endyear >= 9999):
-            lastyr = yr
-        if (yr >= startyear and yr <= endyear):
-            file_list.append(f)
-    if (endyear >= 9999):
-        endyear=lastyr
-        if (nperyear != 12):
-          #If not monthly files, ignore the last file (it only represents a single timestep)
-          file_list = file_list[:-1]
+    requested_startyear = startyear
+    requested_endyear = endyear
+    basevar = get_postproc_basevar(var)
+    indexed_var = is_pft_var(var) or is_col_var(var)
+    file_list, firstyear, endyear, hist_nhtfrq, nperyear = _postprocess_file_list(
+            self, rundir, hnum, startyear=startyear, endyear=endyear)
+    if len(file_list) == 0 and hnum == 1 and not indexed_var:
+        file_list, firstyear, endyear, hist_nhtfrq, nperyear = _postprocess_file_list(
+                self, rundir, 0, startyear=requested_startyear, endyear=requested_endyear)
+        if len(file_list) > 0:
+            hnum = 0
+    startyear = firstyear
     if len(file_list) == 0:
         raise FileNotFoundError('No output files found for variable '+var+' in '+rundir)
-    basevar = get_postproc_basevar(var)
-    values, units = read_postprocess_values(file_list, basevar, var, index=index, \
-            gindex=gindex, xindex=xindex, yindex=yindex)
+    try:
+        values, units = read_postprocess_values(file_list, basevar, var, index=index, \
+                gindex=gindex, xindex=xindex, yindex=yindex)
+    except KeyError as err:
+        if hnum != 1 or indexed_var:
+            raise
+        fallback_file_list, fallback_firstyear, fallback_endyear, fallback_hist_nhtfrq, \
+                fallback_nperyear = _postprocess_file_list(
+                        self, rundir, 0, startyear=requested_startyear,
+                        endyear=requested_endyear)
+        if len(fallback_file_list) == 0:
+            raise
+        try:
+            values, units = read_postprocess_values(fallback_file_list, basevar, var,
+                    index=index, gindex=gindex, xindex=xindex, yindex=yindex)
+        except KeyError:
+            raise err
+        file_list = fallback_file_list
+        startyear = fallback_firstyear
+        endyear = fallback_endyear
+        hist_nhtfrq = fallback_hist_nhtfrq
+        nperyear = fallback_nperyear
+        hnum = 0
     #change flux units
     factor = 1.0
     if (units == 'gC/m^2/s' or units == 'gN/m^2/s' or units == 'gP/m^2/s'):
