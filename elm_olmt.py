@@ -13,6 +13,43 @@ import configparser
 import argparse
 import importlib.util
 
+def machine_path_defaults(machine, rootdir, inputdata, modelroot_name='E3SM'):
+    """Return portable path defaults for the detected OLMT machine."""
+    user = os.environ.get('USER', '')
+    inputdata = inputdata.rstrip('/')
+    modelroot_name = str(modelroot_name).strip() or 'E3SM'
+    defaults = {
+        'rootdir': rootdir,
+        'inputdata': inputdata,
+        'caseroot': os.path.join(rootdir, 'e3sm_cases'),
+        'runroot': os.path.join(rootdir, 'e3sm_run'),
+        'olmtdir': os.path.dirname(os.path.abspath(__file__)),
+    }
+    if machine == 'docker':
+        defaults['modelroot'] = '/code/'+modelroot_name
+    elif machine == 'pathfinder':
+        defaults['modelroot'] = (
+                '/projects/hpcl-cli185/proj-shared/'+user+'/'+modelroot_name)
+    elif machine == 'linux-generic':
+        defaults['modelroot'] = os.path.join(
+                os.environ.get('HOME', ''), 'models', modelroot_name)
+    else:
+        defaults['modelroot'] = ''
+    return defaults
+
+def apply_machine_defaults(cfg):
+    """Fill missing [machine] paths before resolving cross-section placeholders."""
+    machine_cfg = cfg.setdefault('machine', {})
+    machine_name = machine_cfg.get('machine_name', '')
+    modelroot_name = machine_cfg.get('modelroot_name', 'E3SM')
+    machine, rootdir, inputdata, queue, project, hostname, apptainer_bind = \
+        get_machine_info(machine_name=machine_name)
+    for key, value in machine_path_defaults(
+            machine, rootdir, inputdata, modelroot_name=modelroot_name).items():
+        if key not in machine_cfg or machine_cfg[key] == '':
+            machine_cfg[key] = value
+    return cfg
+
 def load_config(config_file):
     """Load configuration from file and return as dictionary"""
     config = configparser.ConfigParser(interpolation=configparser.ExtendedInterpolation())
@@ -74,6 +111,7 @@ def load_config(config_file):
                                 items = [f"'{x}'" for x in items]
                             cfg[section][key] = ', '.join(items)
 
+    cfg = apply_machine_defaults(cfg)
     cfg = resolve_placeholders(cfg)
     return cfg
 
@@ -161,7 +199,9 @@ def main():
     inputdata = cfg['machine'].get('inputdata', inputdata)
     caseroot = cfg['machine'].get('caseroot', rootdir + '/e3sm_cases')
     runroot = cfg['machine'].get('runroot', rootdir + '/e3sm_run')
-    modelroot = cfg['machine'].get('modelroot', '')
+    modelroot = cfg['machine'].get('modelroot',
+            machine_path_defaults(machine, rootdir, inputdata,
+                modelroot_name=cfg['machine'].get('modelroot_name', 'E3SM'))['modelroot'])
     exeroot = cfg['machine'].get('exeroot', '')
     debug = cfg['machine'].get('debug', False)
     walltime = cfg['machine'].get('walltime', 24)
@@ -328,7 +368,8 @@ def main():
             sites=[sites]
 
     if (sites[0] != ''):
-        siteinfo = get_site_info(inputdata, sitegroup=sitegroup)
+        site_npfts = case_options.get('site_npfts', case_options.get('maxpatch_pft', None))
+        siteinfo = get_site_info(inputdata, sitegroup=sitegroup, npfts=site_npfts)
         if sites[0] == 'all':
             sites = list(siteinfo.keys())
             print('Running all sites in '+sitegroup+' site group:')
@@ -340,6 +381,21 @@ def main():
                     print('Available sites: ',siteinfo.keys())
                     sys.exit(1)
             print('Running site(s): ', sites)
+        if 'site_pft_fractions' in case_options:
+            spec = case_options['site_pft_fractions']
+            if isinstance(spec, str):
+                spec = [x.strip() for x in spec.split(',') if x.strip()]
+            if len(spec) % 2 != 0:
+                raise ValueError('site_pft_fractions must be pft,pct pairs')
+            max_pft = max(int(spec[i]) for i in range(0, len(spec), 2))
+            for s in sites:
+                if max_pft >= len(siteinfo[s]['PCT_NAT_PFT']):
+                    expanded = np.zeros(max_pft + 1, float)
+                    expanded[:len(siteinfo[s]['PCT_NAT_PFT'])] = siteinfo[s]['PCT_NAT_PFT']
+                    siteinfo[s]['PCT_NAT_PFT'] = expanded
+                siteinfo[s]['PCT_NAT_PFT'][:] = 0.0
+                for i in range(0, len(spec), 2):
+                    siteinfo[s]['PCT_NAT_PFT'][int(spec[i])] = float(spec[i + 1])
         point_list  = []
         region_name = ''
     else:
@@ -521,7 +577,8 @@ def main():
             cases[c].siteinfo = siteinfo[site]
 
         # Get the namelist options for this case
-        whole_list_case_options = ['peatlands_upland_pfts', 'peatlands_upland_pft_fractions']
+        whole_list_case_options = ['peatlands_upland_pfts', 'peatlands_upland_pft_fractions',
+                'site_pft_fractions']
         for key in case_options.keys():
             if isinstance(case_options[key], list) and key not in whole_list_case_options:
                 cases[c].case_options[key] = case_options[key][c]

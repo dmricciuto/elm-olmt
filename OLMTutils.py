@@ -8,12 +8,13 @@ def get_machine_info(machine_name=''):
     project = ''
     hostname = ''
     apptainer_bind = ''
-    if (machine_name == ''):
+    machine_name = str(machine_name).strip()
+    if (machine_name == '' or machine_name.lower() == 'auto'):
         if ('HOSTNAME' in os.environ):
             machine_name=os.environ['HOSTNAME']
         else:
             result = subprocess.run(['hostname'], capture_output=True, text=True)
-            machine_name = result.stdout
+            machine_name = result.stdout.strip()
     if ('baseline' in machine_name):
         rootdir = '/gpfs/wolf2/cades/cli185/scratch/'+os.environ['USER']
         inputdata = '/gpfs/wolf2/cades/cli185/world-shared/e3sm/inputdata/'
@@ -29,8 +30,8 @@ def get_machine_info(machine_name=''):
         hostname = 'or-login.ornl.gov'
         queue = 'batch'
         apptainer_bind = '/lustre/or-scratch'
-    if ('pflogin' in machine_name or 'pathfinder' in machine_name):
-        rootdir = '/projects/hpcl-cli185/users/'+os.environ['USER']
+    elif ('pflogin' in machine_name or 'pathfinder' in machine_name):
+        rootdir = '/scratch/hpcl-cli185/'+os.environ['USER']
         inputdata = '/projects/hpcl-cli185/world-shared/e3sm/inputdata/'
         machine = 'pathfinder'
         hostname = 'pflogin.ornl.gov'
@@ -118,7 +119,7 @@ def get_sitegroups(inputdata, sftp=None):
     return prefixes
 
 
-def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
+def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False, npfts=None):
     base = inputdata + '/lnd/clm2/PTCLM/'
     siteinfo = {}
     # Helper to read lines from local or remote file
@@ -134,7 +135,9 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False):
     sitedata_path = base + sitegroup + '_sitedata.txt'
     lines = readlines(sitedata_path)
     snum = 0
-    if(use_crop):
+    if npfts is not None:
+        npfts = int(npfts)
+    elif(use_crop):
         npfts = 15
     elif sitegroup.lower() == 'peatlands':
         npfts = 22
