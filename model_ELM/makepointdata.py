@@ -215,23 +215,40 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
             if v in ds.variables:
                 ds[v] = ds[v] * 0 + 0.0  # Use assignment instead of in-place
 
-    # If requested, make the first topounit bareground: zero all natpft fractions and set natpft 0 to 100
     if first_bareground:
-        if 'PCT_NAT_PFT' in ds:
-            arr = ds['PCT_NAT_PFT']
-            dims = list(arr.dims)
-            nd = arr.ndim
-            if 'topounit' in dims and 'natpft' in dims:
-                top_i = dims.index('topounit')
-                nat_i = dims.index('natpft')
-                idx_zero = [slice(None)] * nd
-                idx_zero[top_i] = 0
-                arr.values[tuple(idx_zero)] = 0.0
-                idx_nat0 = [slice(None)] * nd
-                idx_nat0[top_i] = 0
-                idx_nat0[nat_i] = 0
-                arr.values[tuple(idx_nat0)] = 100.0
+        ds = self.set_first_topounit_bareground(ds)
     return ds
+
+
+def set_first_topounit_bareground(self, ds):
+    """Make topounit index 0 bare ground by setting natpft 0 to 100%."""
+    if 'PCT_NAT_PFT' not in ds:
+        return ds
+    arr = ds['PCT_NAT_PFT']
+    dims = list(arr.dims)
+    if 'topounit' not in dims or 'natpft' not in dims:
+        return ds
+    top_i = dims.index('topounit')
+    nat_i = dims.index('natpft')
+    idx_zero = [slice(None)] * arr.ndim
+    idx_zero[top_i] = 0
+    arr.values[tuple(idx_zero)] = 0.0
+    idx_nat0 = [slice(None)] * arr.ndim
+    idx_nat0[top_i] = 0
+    idx_nat0[nat_i] = 0
+    arr.values[tuple(idx_nat0)] = 100.0
+    return ds
+
+
+def is_standalone_spruce_three_topounit_surface(self, ds):
+    """Return true for the non-Peatlands SPRUCE HUM_HOL 3-topounit surface."""
+    if self.is_peatlands_sitegroup() or not getattr(self, 'humhol', False):
+        return False
+    if 'SPR' not in str(getattr(self, 'site', '')):
+        return False
+    if 'PCT_NAT_PFT' not in ds or 'topounit' not in ds['PCT_NAT_PFT'].dims:
+        return False
+    return ds['PCT_NAT_PFT'].sizes['topounit'] == 3
 
 
 def peatlands_target_topounits(self):
@@ -336,6 +353,14 @@ def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
                 if v in ds.variables:
                     ds[v] = ds[v] * 0 + 0.0
         return ds
+    hollow_topounit = 1
+    hummock_topounit = 2
+    if arr.sizes['topounit'] > hummock_topounit:
+        idx_hollow = [slice(None)] * arr.ndim
+        idx_hummock = [slice(None)] * arr.ndim
+        idx_hollow[top_i] = hollow_topounit
+        idx_hummock[top_i] = hummock_topounit
+        values[tuple(idx_hummock)] = values[tuple(idx_hollow)]
     upland_topounit = 3
     if arr.sizes['topounit'] > upland_topounit:
         idx_upland = [slice(None)] * arr.ndim
@@ -371,8 +396,8 @@ def normalize_pct_nat_pft(self, ds, pct_pft):
 
     target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
     if pct_values.size > target_natpft:
-        if target_natpft == 17 and pct_values.size == 22:
-            ds = self.expand_surface_pft_dimensions(ds, target_size=22)
+        if target_natpft == 17:
+            ds = self.expand_surface_pft_dimensions(ds, target_size=pct_values.size)
             target_natpft = ds['PCT_NAT_PFT'].sizes['natpft']
         elif np.allclose(pct_values[target_natpft:], 0.0):
             pct_values = pct_values[:target_natpft]
@@ -562,18 +587,15 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
             if ('SPR' in self.site):
                 # SPRUCE is represented as three topounits:
                 # 1) boardwalk/fen bare ground, 2) bog hollow, 3) bog hummock.
-                # The bog units share a common peat/till interface set 3 m
-                # below the hollow surface, so the hummock has deeper peat by
-                # its microtopographic offset.
+                # The fen and bog units share a common peat/till interface set
+                # 3 m below the hollow surface, so topounit peat depth follows
+                # each unit's microtopographic offset.
                 fracarea = [0.5,0.17,0.33]
                 elevations = [464.6,465.0,465.15]   # boardwalk/fen, hollow, hummock
                 distances = [0, 3, 1]  # distance to next lower adjacent topounit (m)
                 is_bog = [0, 1, 1]
                 bog_peat_interface_elev = elevations[1] - 3.0
-                peat_depth = [
-                    0.0 if not is_bog[i] else elevations[i] - bog_peat_interface_elev
-                    for i in range(len(elevations))
-                ]
+                peat_depth = [elev - bog_peat_interface_elev for elev in elevations]
                 till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0]  # mm/s
                 ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, \
                         fracarea=fracarea, elevations=elevations, distances=distances, \
@@ -588,7 +610,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
             #Set site PFT and soil texture
             if (sum(self.siteinfo['PCT_NAT_PFT']) > 0):
                 pct_nat_pft = xr.DataArray(self.siteinfo['PCT_NAT_PFT'], dims=['natpft'])
-                if 'SPR' in self.site and not self.is_peatlands_sitegroup():
+                if self.is_standalone_spruce_three_topounit_surface(ds):
                     #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
                     ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)  
                 elif self.is_peatlands_sitegroup():
@@ -604,7 +626,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 # For SPRUCE HUM_HOL, reserve topounit 1 for boardwalk/fen
                 # bare ground rather than assigning the selected vegetation
                 # PFT there.
-                if 'SPR' in self.site and not self.is_peatlands_sitegroup():
+                if self.is_standalone_spruce_three_topounit_surface(ds):
                     ds = self.setpfts(ds, pct_nat_pft, first_bareground=True)
                 elif self.is_peatlands_sitegroup():
                     ds = self.set_peatlands_site_pfts(ds, pct_nat_pft)
@@ -641,7 +663,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 for year in self.siteinfo['transitions'].keys():
                     #Set PFTS for this year and all subsequent years
                     pct_nat_pft = xr.DataArray(self.siteinfo['transitions'][year]['PCT_NAT_PFT'], dims=['natpft'])
-                    if ('SPR' in self.site and not self.is_peatlands_sitegroup()):
+                    if self.is_standalone_spruce_three_topounit_surface(ds):
                         #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
                         ds = self.setpfts(ds, pct_nat_pft, first_bareground=True, year=int(year))
                     else:
@@ -649,6 +671,8 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                     #Set harvest for this year
                     year_indices = np.where(years == int(year))[0]
                     ds['HARVEST_VH1'].values[year_indices] = self.siteinfo['transitions'][year]['HARVEST']
+            if self.is_standalone_spruce_three_topounit_surface(ds):
+                ds = self.set_first_topounit_bareground(ds)
 
         if (self.shift_lon):
             mylon[mylon < 0] +=360
