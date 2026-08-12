@@ -483,12 +483,12 @@ class ELMcase():
             nc.setncattr('history', history_entry)
 
   def set_param_file(self):
-    #set the ELM parameter file
+    # set the ELM parameter file
     if (self.paramfile == ''):
-      #Get parameter filename from case directory
+      # Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
-    print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to the temp directory
+    print('ELM parameter file: '+self.paramfile)
+    # Copy the parameter file to the temp directory
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
@@ -506,16 +506,28 @@ class ELMcase():
     if (self.fates_paramfile == ''):
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     print('FATES parameter file : '+self.fates_paramfile)
-    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  #determine if json or nc
-
+    # determine if json or nc & copy to temp dir
+    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  
     fbase = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
     os.system('cp '+self.fates_paramfile+' '+fbase)
-    if (self.fates_pft >= 0):
-        print('Extracting PFT '+str(self.fates_pft))
+
+    # convert scalar to vector, allows specification of multiple PFTs in config file   
+    if isinstance(self.fates_pft, int):
+      self.fates_pft = [self.fates_pft]
+      pft_list = False 
+    else: 
+      pft_list = True 
+    if all(p >= 0 for p in self.fates_pft):
+    #if (self.fates_pft >= 0):
+        if (len(self.fates_pft) == 1):
+          self.fates_pft = int(self.fates_pft[0]) 
+        print('Extracting FATES PFT(s) '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
             fname_list=[]
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            print('Duplicating PFT '+str(self.pft_duplicates)+' times.')
+            if pft_list:
+                print('Multiple PFTs and duplicating not compatible when fates paramfiles are netcdf, will prob fail.')
             for pf in range(0,self.pft_duplicates):
                 fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
                 os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
@@ -541,19 +553,28 @@ class ELMcase():
             for fname in fname_list:
                 os.remove(fname)
           else:
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            print('Duplicating PFT(s) '+str(self.pft_duplicates)+' times.')
             fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
             pft_indices = ''
+            if pft_list:
+                pft_indices1 = ",".join(map(str, self.fates_pft))
+            else:
+                pft_indices1 = str(self.fates_pft) 
             for pf in range(0,self.pft_duplicates):
-                pft_indices = pft_indices+str(self.fates_pft)+','
+                pft_indices = pft_indices+pft_indices1+','
             swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
             swapcmd=swapper_path+' --pft-indices='+pft_indices[:-1]+' --fin='+fbase+' --fout='+fname+' --silent'
             os.system(swapcmd)
         else:
             fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
             if (self.fates_param_type == 'json'):
+                if pft_list:
+                    pft_indices = ",".join(map(str, self.fates_pft))
+                else:
+                    pft_indices = str(self.fates_pft) 
                 swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
-                swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
+                swapcmd=swapper_path+' --pft-indices='+pft_indices+' --fin='+fbase+' --fout='+fname+' --silent'
+                #print(swapcmd)
                 os.system(swapcmd)
             else:
                 os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
@@ -617,7 +638,9 @@ class ELMcase():
            ' --handle-preexisting-dirs u' 
     else:
       cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
-           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u' 
+           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u'
+    # APW: edit re MOAB
+    cmd = cmd+' --driver mct'
     if (self.project != ''):
       cmd = cmd+' --project '+self.project
     if (self.compiler != ''):
@@ -679,7 +702,7 @@ class ELMcase():
     if (domainfile != ''):
       print('\nDomain file:             '+ domainfile)
     if (surffile != ''):
-      print('surface data file:       '+ surffile)  
+      print('Surface data file:       '+ surffile)  
     if (pftdynfile != ''):
       print('20th landuse data file: '+pftdynfile+"'\n")
 
@@ -1276,9 +1299,19 @@ class ELMcase():
         #code.interact(local=dict(globals(), **locals())) 
         result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                 stdout=subprocess.PIPE, text=True)
-        output = result.stdout.strip()
+        #output = result.stdout.strip()
+        #outputerror = result.stderr.strip()
+        output  = (result.stdout or "").strip()
+        stderr = (result.stderr or "").strip()
+        print(output)
+        if stderr:
+            print('\n'+stderr)
+        else:
+            print(' ... no submission errors.')        
+        #print('\nSubmitted: '+stderr)
         jobnum = int(output.split()[-1])
-        print('\nSubmitted '+str(jobnum))
+        #print('\nSubmitted '+str(jobnum))
+        print('')
     os.chdir(self.OLMTdir)
     return jobnum
 

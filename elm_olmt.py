@@ -255,11 +255,12 @@ def main():
 
      # Post-processing
     if ('postprocessing' in cfg):
-           # Set default postproc years based on whether treatments exist
+        # Set default postproc years based on whether treatments exist
         # Default to transition period or run period
         def_postproc_startyear = run_startyear
         def_postproc_endyear = run_startyear + nyears_trans - 1 
-        if treatments:  # If treatment cases exist
+        # If treatment cases exist
+        if treatments:  
             # Default to treatment period
             def_postproc_startyear = run_startyear + nyears_trans
             def_postproc_endyear = run_startyear + nyears_trans + max([treatment_options[t]['nyears'] for t in treatments]) - 1
@@ -407,7 +408,7 @@ def main():
         print('Compset '+str(c+1)+': '+compsets[c])
         print('   Simulation starting year: '+str(startyear[c]))
         if (nyears[c] > 0):
-            print('   Simulation length:        '+str(nyears[c]))
+            print('   Nominal simulation length:        '+str(nyears[c]))
         multisite_scripts.append('')
         if (istreatment[c]):
             tname = suffix[c]
@@ -523,6 +524,10 @@ def main():
         else:
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))
+        if (use_fates):
+            print('  check above postproc_vars are FATES output variables') 
+            print('')
+        
 
         # Determine if we want a dynamic PFT file
         if (use_fates):
@@ -568,7 +573,8 @@ def main():
         cases[c].build_case()
     
         # Submit the case
-        print('Submitting case')
+        print('')
+        print('Submitting case: '+compsets[c])
         jobnum_depend=-1
         if (depends[c] >= 0):
             jobnum_depend = jobnum[depends[c]]

@@ -210,12 +210,22 @@ def get_point_list(fname):
 #TODO:  Function to return met data path for various options
 
 def get_default_diag_vars(nutrients, use_fates):
-    if (nutrients == 'none'):
-        return ['TLAI','FPSN','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','SNOWDP','QRUNOFF','QDRAI','QOVER']
+    if (use_fates):
+        if (nutrients == 'none'):
+            return ['FATES_LAI','FATES_GPP','TLAI','FATES_AUTORESP','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','QRUNOFF','QDRAI','QOVER']
+        else:
+            return ['NEE','FATES_NEP','TLAI','FATES_NPP','FATES_GPP','FATES_VEGC','FATES_VEGC_ABOVEGROUND',\
+                    'TOTSOMC','TOTLITC','TOTECOSYSC',\
+                    'QVEGT','QVEGE','EFLX_LH_TOT','QOVER','QSOIL','QDRAI','QRUNOFF','FSH','SNOWDP','ZWT',\
+                    'FATES_EXCESS_RESP','FATES_AUTORESP','FATES_HET_RESP','FATES_NO3UPTAKE','FATES_NH4UPTAKE','FATES_NDEMAND','FATES_PUPTAKE','FATES_PDEMAND',\
+                    'FATES_STOREC','FATES_STOREN','FATES_STOREP','NDEP_TO_SMINN','NFIX_TO_SMINN']
     else:
-        return ['NEE','NBP','TLAI','TOTSOMC','CWDC','TOTLITC','TOTECOSYSC','NPP','GPP','QVEGT','QVEGE','EFLX_LH_TOT','TOTVEGC_ABG',\
-                'TOTVEGC','QOVER','QSOIL','XR','ER','AR','HR','FSH','SNOWDP','ZWT','CPOOL','NPOOL','PPOOL','FPG','FPI','NDEP_TO_SMINN', \
-                'NFIX_TO_SMINN','NEP','QDRAI','QRUNOFF']
+        if (nutrients == 'none'):
+            return ['TLAI','FPSN','QVEGT','QVEGE','QSOIL','EFLX_LH_TOT','FSH','SNOWDP','QRUNOFF','QDRAI','QOVER']
+        else:
+            return ['NEE','NBP','TLAI','TOTSOMC','CWDC','TOTLITC','TOTECOSYSC','NPP','GPP','QVEGT','QVEGE','EFLX_LH_TOT','TOTVEGC_ABG',\
+                    'TOTVEGC','QOVER','QSOIL','XR','ER','AR','HR','FSH','SNOWDP','ZWT','CPOOL','NPOOL','PPOOL','FPG','FPI','NDEP_TO_SMINN', \
+                    'NFIX_TO_SMINN','NEP','QDRAI','QRUNOFF']
 
 def docker_to_host_path(path):
     # Only translate if path starts with /inputdata
