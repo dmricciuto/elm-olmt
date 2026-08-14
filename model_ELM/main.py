@@ -87,6 +87,8 @@ class ELMcase():
         myinstance=pickle.load(case_file)
         for k in myinstance.__dict__.keys():
           setattr(self, k, getattr(myinstance, k))
+        if not hasattr(self, 'mask_grid'):
+          self.mask_grid = []
       else:
         self.model_name='elm'
         self.modelroot=modelroot
@@ -128,6 +130,7 @@ class ELMcase():
         self.project=project
         self.interactive_build=False
         self.get_machine(machine=machine)
+        self.mask_grid=[]
         # Apptainer container image (optional)
         self.apptainer = apptainer
         self.apptainer_bind = apptainer_bind
@@ -296,6 +299,22 @@ class ELMcase():
     flags = self.replace_slurm_submit_option(flags, ['-p', '--partition'], '-p', partition)
     flags = self.replace_slurm_submit_option(flags, ['--qos'], '--qos', qos)
     return ' '.join([shlex.quote(str(f)) for f in flags])
+
+  def slurm_submit_args(self, include_time=False, ntasks=None):
+    args = []
+    partition = self.slurm_partition()
+    if (partition != ''):
+      args += ['-p', partition]
+    if (ntasks is not None):
+      args += ['-n', str(ntasks)]
+    qos = self.slurm_qos() if self.machine == 'pathfinder' else ''
+    if (qos != ''):
+      args += ['--qos='+qos]
+    if (self.project != ''):
+      args += ['--account='+self.project]
+    if (include_time):
+      args += ['--time='+self.cime_walltime_string()]
+    return args
 
   def cime_batch_command_flags(self, subgroup='case.run'):
     result = subprocess.run(['./xmlquery', '--subgroup', subgroup, '--no-resolve', '--value',
@@ -1093,7 +1112,7 @@ class ELMcase():
               'peatlands_upland_only', 'peatlands_upland_topounit', \
               'peatlands_upland_pfts', 'peatlands_upland_pft_fractions', \
               'site_npfts', 'site_pft_fractions', \
-              'variable', 'name', 'nyears']
+              'srcmods', 'variable', 'name', 'nyears']
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
@@ -1232,7 +1251,7 @@ class ELMcase():
         if (self.interactive_build):
             # Wrap build command with srun to run on a compute node (avoids OOM on login node)
             project_opt = ' --account='+self.project if self.project != '' else ''
-            build_partition = self.partition if self.partition != '' else 'serial'
+            build_partition = self.slurm_partition()
             build_qos = self.slurm_qos()
             qos_opt = ' --qos='+build_qos if build_qos != '' else ''
             resource_wait_minutes = 60
@@ -1456,14 +1475,15 @@ class ELMcase():
     jobnum=0
     jobnum_depend=depend
     for script in scriptfiles:
+      raw_sbatch_args = self.slurm_submit_args() if (ensemble or multisite_script != '') else []
       if (jobnum_depend > 0 and not self.noslurm):
         if (ensemble or multisite_script != ''):
-            cmd = [mysubmit,'--dependency=afterok:'+str(jobnum_depend),script]
+            cmd = [mysubmit,'--dependency=afterok:'+str(jobnum_depend)] + raw_sbatch_args + [script]
         else:
             cmd = [script,'--prereq',str(jobnum_depend)]
       else:
         if ((ensemble or multisite_script != '') and not self.noslurm):
-            cmd = [mysubmit,script]
+            cmd = [mysubmit] + raw_sbatch_args + [script]
         else:
             cmd = [script]
       if (self.noslurm):
@@ -1489,7 +1509,7 @@ class ELMcase():
           with open(log_file_path, "a") as log_file:
               subprocess.run([postproc_script], stderr=subprocess.STDOUT, stdout=log_file)
       else:
-          cmd = [mysubmit, '--dependency=afterok:'+str(jobnum), postproc_script]
+          cmd = [mysubmit, '--dependency=afterok:'+str(jobnum)] + self.slurm_submit_args(ntasks=1) + [postproc_script]
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
           output = result.stdout.strip()
           if (result.returncode != 0):
@@ -1504,6 +1524,16 @@ class ELMcase():
     log_file = self.rundir+'/postprocess.log'
     with open(scriptfile, 'w') as myfile:
         myfile.write('#!/bin/bash\n')
+        partition = self.slurm_partition()
+        if (partition != ''):
+            myfile.write('#SBATCH -p '+partition+'\n')
+        myfile.write('#SBATCH -n 1\n')
+        qos = self.slurm_qos() if self.machine == 'pathfinder' else ''
+        if (qos != ''):
+            myfile.write('#SBATCH --qos='+qos+'\n')
+        if (self.project != ''):
+            myfile.write('#SBATCH --account='+self.project+'\n')
+        myfile.write('#SBATCH --time='+self.cime_walltime_string()+'\n')
         myfile.write('set -e\n')
         myfile.write('cd '+shlex.quote(self.OLMTdir)+'\n')
         myfile.write('python manage_postproc.py --case '+shlex.quote(self.casename)+' > '+

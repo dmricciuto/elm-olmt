@@ -590,6 +590,8 @@ def main():
             tname = suffix[c]
             for key in treatment_options[tname].keys():
                 cases[c].case_options[key] = treatment_options[tname][key]
+        if ('srcmods' in cases[c].case_options):
+            cases[c].srcmods = cases[c].case_options['srcmods']
         # Other options
         cases[c].nutrients = nutrients
         cases[c].nutrient_comp = nutrient_comp
@@ -696,7 +698,7 @@ def main():
                         finidat_root=thisfinidat_root, resubmit_years=ensemble_resubmit_years)
         if ('20TR' in compsets[c] and not use_fates):
             # Get the dynamic PFT data
-            cases[c].mask_grid = cases[0].mask_grid          #Get the mask from the first case
+            cases[c].mask_grid = getattr(cases[0], 'mask_grid', [])          #Get the mask from the first case
             if (not cases[c].nopftdyn):
                 cases[c].setup_domain_surfdata(makepftdyn=True)
 

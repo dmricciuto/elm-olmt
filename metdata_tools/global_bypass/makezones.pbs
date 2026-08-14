@@ -1,18 +1,20 @@
 #!/bin/bash -f
-#SBATCH --time=48:00:00
-#SBATCH -A ccsi
-#SBATCH -p batch
-#SBATCH --mem=32G
-#SBATCH --ntasks-per-node 32
-#SBATCH  --job-name=run.makezones
-#SBATCH  --nodes=1
-#SBATCH  --output=makezones 
+#SBATCH --time=24:00:00
+#SBATCH -A hpcl-cli185
+#SBATCH -p parallel
+#SBATCH -q normal
+#SBATCH --nodes=1
+#SBATCH --ntasks=7
+#SBATCH --cpus-per-task=1
+#SBATCH --mem=64G
+#SBATCH --job-name=makezones_trendy2026
+#SBATCH --output=run.makezones_trendy2026.%j.out
 
-module unload python
-module unload scipy
-module unload numpy
-module load cray-netcdf
-module load python/2.7-anaconda
-module load nco
-cd  $HOME/models/metdata_tools/global_bypass
-mpirun -np 7 ./a.out
+workdir=/projects/hpcl-cli185/world-shared/e3sm/inputdata/atm/datm7/atm_forcing.CRUJRA_trendy_2026/cpl_bypass_full
+
+set -euo pipefail
+cd "${workdir}"
+
+export LD_LIBRARY_PATH=/software/baseline/nsp/spack-envs/base-25.05/opt/gcc-12.4.0/netcdf-fortran-4.6.1-dpqjrikidtzwxfym4vsrrmobz77mlzwo/lib:/software/baseline/nsp/spack-envs/base-25.05/opt/gcc-12.4.0/netcdf-c-4.9.2-tr7a3kauxhjzi6donei4k6a4cvrbpllp/lib:${LD_LIBRARY_PATH:-}
+
+srun -n 7 ./makezones_reanalysis.exe
