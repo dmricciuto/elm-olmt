@@ -74,6 +74,204 @@ def get_pointindices_bbox(self, lat_bounds, lon_bounds, lat_grid, lon_grid, mask
     return index_out
 
 
+def _case_option_bool(case_options, key, default=False):
+    value = case_options.get(key, default)
+    if isinstance(value, str):
+        return value.strip().strip("'\"").lower() in ['true', '.true.', 't', '1', 'yes', 'y']
+    return bool(value)
+
+
+def _case_option_float(case_options, key, default=None):
+    value = case_options.get(key, default)
+    if value is None or value == '':
+        return default
+    return float(str(value).strip().strip("'\""))
+
+
+def _case_option_values(case_options, key):
+    value = case_options.get(key, '')
+    if value == '':
+        return []
+    if isinstance(value, (list, tuple, np.ndarray)):
+        return [float(v) for v in value]
+    return [float(v.strip()) for v in str(value).strip().strip("'\"").split(',') if v.strip()]
+
+
+def _normalize_lon(lon):
+    lon = np.asarray(lon, dtype=float).copy()
+    lon[lon > 180.0] -= 360.0
+    return lon
+
+
+def load_external_mask_source(self):
+    """Load and cache an optional external spatial mask from case_options."""
+    case_options = getattr(self, 'case_options', {})
+    mask_file = str(case_options.get('external_mask_file', '')).strip().strip("'\"")
+    if mask_file == '':
+        return None
+    if hasattr(self, '_external_mask_source'):
+        cached = self._external_mask_source
+        if cached.get('mask_file', '') == mask_file:
+            return cached
+    if not os.path.exists(mask_file):
+        raise FileNotFoundError('external_mask_file does not exist: '+mask_file)
+
+    with xr.open_dataset(mask_file, decode_times=False) as ds:
+        mask_var = str(case_options.get('external_mask_var', '')).strip().strip("'\"")
+        if mask_var == '':
+            coord_names = {'lat', 'latitude', 'lon', 'longitude', 'LATIXY', 'LONGXY', 'xc', 'yc'}
+            candidates = [
+                name for name, var in ds.data_vars.items()
+                if name not in coord_names and var.ndim >= 2
+            ]
+            if len(candidates) == 0:
+                raise ValueError('No 2D mask variable found in '+mask_file)
+            mask_var = candidates[0]
+        if mask_var not in ds:
+            raise KeyError('external_mask_var '+mask_var+' not found in '+mask_file)
+
+        mask_data = ds[mask_var].squeeze().load()
+        if mask_data.ndim != 2:
+            raise ValueError(
+                'external_mask_var '+mask_var+' must be 2D after squeeze; got '+
+                str(mask_data.shape)
+            )
+        raw_values = np.asarray(mask_data.values)
+
+        mask_values = _case_option_values(case_options, 'external_mask_values')
+        if mask_values:
+            mask = np.isin(raw_values, mask_values)
+        else:
+            mask_min = _case_option_float(case_options, 'external_mask_min', 0.5)
+            mask_max = _case_option_float(case_options, 'external_mask_max', None)
+            mask = raw_values >= mask_min
+            if mask_max is not None:
+                mask = np.logical_and(mask, raw_values <= mask_max)
+        if _case_option_bool(case_options, 'external_mask_invert', False):
+            mask = np.logical_not(mask)
+
+        lat_name = str(case_options.get('external_mask_lat_var', '')).strip().strip("'\"")
+        lon_name = str(case_options.get('external_mask_lon_var', '')).strip().strip("'\"")
+        if lat_name == '':
+            for candidate in ['LATIXY', 'yc', 'lat', 'latitude', 'LAT']:
+                if candidate in ds:
+                    lat_name = candidate
+                    break
+        if lon_name == '':
+            for candidate in ['LONGXY', 'xc', 'lon', 'longitude', 'LON']:
+                if candidate in ds:
+                    lon_name = candidate
+                    break
+        if lat_name == '' or lon_name == '':
+            raise KeyError(
+                'Could not infer external mask latitude/longitude variables in '+mask_file+
+                '; set external_mask_lat_var and external_mask_lon_var'
+            )
+
+        lat = np.asarray(ds[lat_name].squeeze().values, dtype=float)
+        lon = np.asarray(ds[lon_name].squeeze().values, dtype=float)
+        if lat.ndim == 1 and lon.ndim == 1:
+            lon, lat = np.meshgrid(lon, lat)
+        if lat.shape != mask.shape or lon.shape != mask.shape:
+            raise ValueError(
+                'External mask coordinate shape mismatch for '+mask_file+
+                ': mask '+str(mask.shape)+', lat '+str(lat.shape)+', lon '+str(lon.shape)
+            )
+
+    source = {
+        'mask_file': mask_file,
+        'mask_var': mask_var,
+        'mask': np.asarray(mask, dtype=bool),
+        'lat': lat,
+        'lon': _normalize_lon(lon),
+    }
+    source['tree'] = KDTree(list(zip(source['lat'].flatten(), source['lon'].flatten())))
+    self._external_mask_source = source
+    print(
+        'Loaded external mask '+mask_var+' from '+mask_file+
+        ' with '+str(int(np.count_nonzero(source['mask'])))+' active cells'
+    )
+    return source
+
+
+def external_mask_for_grid(self, lat_grid, lon_grid):
+    source = self.load_external_mask_source()
+    if source is None:
+        return None
+
+    lat_target = np.asarray(lat_grid, dtype=float)
+    lon_target = _normalize_lon(lon_grid)
+    if lat_target.shape == source['mask'].shape:
+        same_lat = np.allclose(lat_target, source['lat'], equal_nan=True)
+        same_lon = np.allclose(lon_target, source['lon'], equal_nan=True)
+        if same_lat and same_lon:
+            return source['mask'].copy()
+
+    target_points = list(zip(lat_target.flatten(), lon_target.flatten()))
+    _, indices = source['tree'].query(target_points)
+    return source['mask'].flatten()[indices].reshape(lat_target.shape)
+
+
+def combined_external_mask(self, lat_grid, lon_grid, native_mask=[]):
+    external = self.external_mask_for_grid(lat_grid, lon_grid)
+    if external is None:
+        return native_mask
+    if len(native_mask) == len(lat_grid):
+        native = np.asarray(native_mask) > 0
+    else:
+        native = np.ones(external.shape, dtype=bool)
+    combined = np.logical_and(native, external)
+    print(
+        'External mask selected '+str(int(np.count_nonzero(combined)))+
+        ' active cells after combining with the native domain mask'
+    )
+    return combined.astype(np.int32)
+
+
+def apply_external_mask_to_domain(self, ds, latvar, lonvar):
+    external = self.external_mask_for_grid(ds[latvar].values, ds[lonvar].values)
+    if external is None:
+        return ds
+    ds = ds.load()
+    if 'mask' in ds:
+        combined = np.logical_and(np.asarray(ds['mask'].values) > 0, external)
+        ds['mask'].values[:] = combined.astype(ds['mask'].dtype)
+    else:
+        combined = external
+    if 'frac' in ds:
+        ds['frac'].values[:] = np.where(combined, ds['frac'].values, 0.0)
+    return ds
+
+
+def apply_external_mask_to_surface(self, ds, latvar, lonvar):
+    case_options = getattr(self, 'case_options', {})
+    if not _case_option_bool(case_options, 'external_mask_zero_surface', False):
+        return ds
+    external = self.external_mask_for_grid(ds[latvar].values, ds[lonvar].values)
+    if external is None:
+        return ds
+    ds = ds.load()
+    spatial_dims = tuple(ds[latvar].dims)
+    for var_name in [
+        'PCT_NATVEG', 'PCT_GLACIER', 'PCT_LAKE', 'PCT_WETLAND',
+        'PCT_URBAN', 'PCT_CROP', 'PCT_NAT_PFT', 'PCT_CFT',
+    ]:
+        if var_name not in ds:
+            continue
+        dims = ds[var_name].dims
+        if not all(dim in dims for dim in spatial_dims):
+            continue
+        mask_shape = [1] * ds[var_name].ndim
+        for i, dim in enumerate(spatial_dims):
+            mask_shape[dims.index(dim)] = external.shape[i]
+        ds[var_name].values[:] = np.where(
+            external.reshape(mask_shape),
+            ds[var_name].values,
+            0.0
+        )
+    return ds
+
+
 def subset_netcdf(self, index, input_file, output_file, keep2d=False):
     # Load the input NetCDF file
     original_ds = xr.open_dataset(input_file, mode='r')
@@ -556,7 +754,9 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         infile  = self.domain_global
         outfile = self.OLMTdir+'/temp/domain.nc'
         #Save mask for other datasets
-        self.mask_grid = mydata['mask'][:].copy()
+        self.mask_grid = self.combined_external_mask(
+            mydata[latvar][:], mydata[lonvar][:], native_mask=mydata['mask'][:].copy()
+        )
         isdomain=True
     elif ('landuse' in filename.split('/')[-1] or 'pftdyn' in filename.split('/')[-1]):
         infile = self.pftdyn_global
@@ -569,15 +769,26 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         print('Creating surface data from ', filename)
         if hasattr(self, 'add_surfdata') and self.add_surfdata:
             modifysurfdat=True
+
+    selection_mask = self.mask_grid
+    if (not isdomain and self.load_external_mask_source() is not None):
+        selection_mask = self.external_mask_for_grid(
+            mydata[latvar][:], mydata[lonvar][:]
+        ).astype(np.int32)
     
     #Get the site lat/lon
     if (self.site != ''):
         mylat = np.array([self.siteinfo['lat']])
         mylon = np.array([self.siteinfo['lon']])
         mylon[mylon > 180] -= 360
-        index = self.get_pointindices_list(mylat, mylon, mydata[latvar][:], mydata[lonvar][:], mask_grid=self.mask_grid) 
+        index = self.get_pointindices_list(mylat, mylon, mydata[latvar][:],
+                mydata[lonvar][:], mask_grid=selection_mask)
         self.subset_netcdf(index, infile,  outfile)
         ds = xr.open_dataset(outfile, mode='r+')
+        if (isdomain):
+            ds = self.apply_external_mask_to_domain(ds, latvar, lonvar)
+        elif (not ispftdyn):
+            ds = self.apply_external_mask_to_surface(ds, latvar, lonvar)
 
         if (self.is_peatlands_sitegroup() and not isdomain and not ispftdyn):
             ds = self.prepare_peatlands_surface_data(ds, latvar, lonvar)
@@ -591,7 +802,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 # 3 m below the hollow surface, so topounit peat depth follows
                 # each unit's microtopographic offset.
                 fracarea = [0.5,0.17,0.33]
-                elevations = [464.6,465.0,465.15]   # boardwalk/fen, hollow, hummock
+                elevations = [464.95,465.0,465.15]   # boardwalk/fen, hollow, hummock
                 distances = [0, 3, 1]  # distance to next lower adjacent topounit (m)
                 is_bog = [0, 1, 1]
                 bog_peat_interface_elev = elevations[1] - 3.0
@@ -695,9 +906,13 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
             point_lons = np.array([lon for lat, lon in self.point_list])
         point_lons[point_lons > 180] -= 360
         index = self.get_pointindices_list(point_lats, point_lons, mydata[latvar][:], \
-                mydata[lonvar][:], mask_grid=self.mask_grid)
+                mydata[lonvar][:], mask_grid=selection_mask)
         self.subset_netcdf(index, infile,  outfile, keep2d = False)
         ds = xr.open_dataset(outfile, mode='r+')
+        if (isdomain):
+            ds = self.apply_external_mask_to_domain(ds, latvar, lonvar)
+        elif (not ispftdyn):
+            ds = self.apply_external_mask_to_surface(ds, latvar, lonvar)
 
         if (self.is_peatlands_sitegroup() and not isdomain and not ispftdyn):
             ds = self.prepare_peatlands_surface_data(ds, latvar, lonvar)
@@ -734,9 +949,19 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
     else:  #USe lat lon bounding box
         if (self.lat_bounds[1]-self.lat_bounds[0] < 180 and self.lon_bounds[1]-self.lon_bounds[0] < 360):
             index = self.get_pointindices_bbox(self.lat_bounds, self.lon_bounds, mydata[latvar][:], mydata[lonvar][:], \
-                mask_grid=self.mask_grid)
+                mask_grid=selection_mask)
             keep2d_subset = len(index) > 0 and isinstance(index[0], (tuple, list))
             self.subset_netcdf(index, infile,  outfile, keep2d=keep2d_subset)
+            if (isdomain or (not ispftdyn and _case_option_bool(getattr(self, 'case_options', {}),
+                    'external_mask_zero_surface', False))):
+                ds = xr.open_dataset(outfile, mode='r+')
+                if (isdomain):
+                    ds = self.apply_external_mask_to_domain(ds, latvar, lonvar)
+                else:
+                    ds = self.apply_external_mask_to_surface(ds, latvar, lonvar)
+                ds.to_netcdf(outfile+'.tmp')
+                ds.close()
+                os.system('mv '+outfile+'.tmp '+outfile)
             if (self.is_peatlands_sitegroup() and not isdomain and not ispftdyn):
                 ds = xr.open_dataset(outfile, mode='r+')
                 ds = self.prepare_peatlands_surface_data(ds, latvar, lonvar)
@@ -748,8 +973,23 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 self.modify_ncinput_file(outfile, self.add_surfdata, file_description="surface data")
         else:
             print('Global simulation requested.  Using original file.')
-            self.mask_grid=[]
+            if (isdomain):
+                self.mask_grid = self.combined_external_mask(
+                    mydata[latvar][:], mydata[lonvar][:], native_mask=mydata['mask'][:].copy()
+                )
+            else:
+                self.mask_grid=[]
             os.system('cp '+infile+' '+outfile)
+            if (isdomain or (not ispftdyn and _case_option_bool(getattr(self, 'case_options', {}),
+                    'external_mask_zero_surface', False))):
+                ds = xr.open_dataset(outfile, mode='r+')
+                if (isdomain):
+                    ds = self.apply_external_mask_to_domain(ds, latvar, lonvar)
+                else:
+                    ds = self.apply_external_mask_to_surface(ds, latvar, lonvar)
+                ds.to_netcdf(outfile+'.tmp')
+                ds.close()
+                os.system('mv '+outfile+'.tmp '+outfile)
             if (self.is_peatlands_sitegroup() and not isdomain and not ispftdyn):
                 ds = xr.open_dataset(outfile, mode='r+')
                 ds = self.prepare_peatlands_surface_data(ds, latvar, lonvar)
