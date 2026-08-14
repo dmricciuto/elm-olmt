@@ -888,14 +888,21 @@ def _netcdf_var_name(name, used_names):
     return candidate
 
 def _indexed_postproc_metadata(var_name):
-    match = re.match(r'^(.*_(pft|col))(-?\d+)$', str(var_name))
+    match = re.match(r'^(.*_(pft|col))(-?\d+)(?:_topounit(-?\d+)|_part(\d+))?$', str(var_name))
     if not match:
         return None
-    return {
+    metadata = {
         'source_variable': match.group(1),
         'index_type': match.group(2),
         'index': int(match.group(3)),
     }
+    if match.group(4) is not None:
+        metadata['split_type'] = 'topounit'
+        metadata['split_index'] = int(match.group(4))
+    elif match.group(5) is not None:
+        metadata['split_type'] = 'part'
+        metadata['split_index'] = int(match.group(5))
+    return metadata
 
 def _decode_netcdf_string_array(values):
     arr = np.asarray(values)
@@ -1033,6 +1040,49 @@ def _find_pft_metadata(self):
             }
     return pft_metadata
 
+def split_flattened_postprocessed_outputs(self):
+    """Split flattened time-by-topounit ensemble outputs before UQ analysis."""
+    if not hasattr(self, 'output') or 'taxis' not in self.output:
+        return []
+    nt = len(np.asarray(self.output['taxis']))
+    if nt <= 0:
+        return []
+
+    split_names = []
+    cols = list(getattr(self, 'postproc_cols', []))
+    for key in sorted(list(self.output.keys())):
+        if key == 'taxis':
+            continue
+        indexed_meta = _indexed_postproc_metadata(key)
+        if indexed_meta is None or indexed_meta.get('index_type') != 'pft':
+            continue
+        data = np.asarray(self.output[key])
+        if data.ndim != 2 or data.shape[0] == nt or data.shape[0] % nt != 0:
+            continue
+        nsplit = int(data.shape[0]/nt)
+        if nsplit <= 1:
+            continue
+
+        if len(cols) == nsplit:
+            labels = [int(c) for c in cols]
+            label_type = 'topounit'
+        else:
+            labels = list(range(nsplit))
+            label_type = 'part'
+
+        reshaped = data.reshape((nt, nsplit, data.shape[1]))
+        del self.output[key]
+        for i, label in enumerate(labels):
+            suffix = '_topounit'+str(label) if label_type == 'topounit' else '_part'+str(label)
+            split_key = key + suffix
+            self.output[split_key] = reshaped[:, i, :]
+            split_names.append(split_key)
+        print(
+            'Split flattened postprocessed output '+str(key)+' with shape '+str(data.shape)+
+            ' into '+str(nsplit)+' '+label_type+' time series of length '+str(nt)
+        )
+    return split_names
+
 def write_postprocessed_netcdf(self, filename=''):
     """Write ensemble postprocessed output to one NetCDF file."""
     if not hasattr(self, 'output') or not self.output or 'taxis' not in self.output:
@@ -1131,6 +1181,9 @@ def write_postprocessed_netcdf(self, filename=''):
                 out_var.source_variable = indexed_meta['source_variable']
                 out_var.index_type = indexed_meta['index_type']
                 out_var.index = indexed_meta['index']
+                if 'split_type' in indexed_meta:
+                    out_var.split_type = indexed_meta['split_type']
+                    out_var.split_index = indexed_meta['split_index']
                 if indexed_meta['index_type'] == 'pft' and indexed_meta['index'] in pft_metadata:
                     out_var.pft_name = pft_metadata[indexed_meta['index']]['pft_name']
                     out_var.parameter_pft_index = pft_metadata[indexed_meta['index']]['parameter_pft_index']
@@ -1149,8 +1202,17 @@ def plot_ensemble(self, myvar, percentiles=[1, 5, 25, 50, 75, 95, 99], factor=1)
         x_axis (list or numpy.ndarray): x-axis values (e.g., time).
         output_file (str): Path to save the plot.
     """
+    raw_data = np.asarray(self.output[myvar])
+    nt = len(np.asarray(self.output['taxis']))
+    if raw_data.ndim != 2 or raw_data.shape[0] != nt:
+        print(
+            'plot_ensemble '+str(myvar)+': expected shape ('+str(nt)+
+            ', ensemble), got '+str(raw_data.shape)+'; skipping plot'
+        )
+        return False
+
     # Percentiles to calculate
-    data=self.output[myvar].transpose()
+    data=raw_data.transpose()
 
     # Mask failed members (sentinel -9999) before computing percentiles
     data = data.astype(float).copy()

@@ -271,6 +271,11 @@ def postprocess_members(member_numbers):
 
 def postprocessed_output_vars(requested_vars):
     expanded = []
+    def split_outputs(var_out):
+        matches = []
+        for suffix in ['_topounit', '_part']:
+            matches.extend([key for key in mycase.output if key.startswith(var_out+suffix)])
+        return sorted(matches)
     for var in requested_vars:
         if var in mycase.output:
             expanded.append(var)
@@ -280,7 +285,11 @@ def postprocessed_output_vars(requested_vars):
                 if var_out in mycase.output:
                     expanded.append(var_out)
                 else:
-                    print('Warning: postprocessed output '+var_out+' not found; skipping UQ')
+                    split_vars = split_outputs(var_out)
+                    if len(split_vars) > 0:
+                        expanded.extend(split_vars)
+                    else:
+                        print('Warning: postprocessed output '+var_out+' not found; skipping UQ')
         elif '_col' in var:
             for c in mycase.postproc_cols:
                 var_out = var+str(c)
@@ -483,6 +492,8 @@ if (not options.UQ_only):
 #UQ part of code
 
 if (is_final_segment and mycase.postproc_vars != []):
+    if hasattr(mycase, 'split_flattened_postprocessed_outputs'):
+        mycase.split_flattened_postprocessed_outputs()
     # Save postprocessed ensemble outputs in a portable NetCDF file before UQ analysis.
     mycase.write_postprocessed_netcdf()
 
