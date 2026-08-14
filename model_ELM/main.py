@@ -1,5 +1,6 @@
 import socket, os, sys, csv, time, math, numpy
 import glob, re, subprocess, shlex
+import shutil
 import pickle
 import json
 from .makepointdata import makepointdata
@@ -214,6 +215,51 @@ class ELMcase():
     self.yscaler={}
     self.obs=obs
     self.obs_err=obs_err
+
+  def temp_file_path(self, filename):
+    case_name = getattr(self, 'casename', 'case')
+    safe_case = re.sub(r'[^A-Za-z0-9_.-]+', '_', case_name)
+    self.case_temp_dir = self.OLMTdir+'/temp/'+safe_case
+    os.makedirs(self.case_temp_dir, exist_ok=True)
+    return self.case_temp_dir+'/'+filename
+
+  def clean_input_path(self, path):
+    if (not isinstance(path, str)):
+      return path
+    clean_path = path.strip()
+    try:
+      parts = shlex.split(clean_path)
+      if (len(parts) == 1):
+        return parts[0]
+    except ValueError:
+      pass
+    return clean_path.strip("'\"")
+
+  def cleanup_case_temp_dir(self):
+    case_temp_dir = getattr(self, 'case_temp_dir', '')
+    if (case_temp_dir == '' or not os.path.isdir(case_temp_dir)):
+      return
+    temp_root = os.path.abspath(self.OLMTdir+'/temp')
+    target = os.path.abspath(case_temp_dir)
+    if (not target.startswith(temp_root+os.sep)):
+      print('Warning: refusing to remove unexpected temp directory '+case_temp_dir)
+      return
+    for attempt in range(3):
+      try:
+        shutil.rmtree(case_temp_dir)
+        return
+      except FileNotFoundError:
+        return
+      except OSError:
+        if (attempt < 2):
+          time.sleep(0.5*(attempt+1))
+          continue
+        try:
+          remaining = os.listdir(case_temp_dir)
+        except FileNotFoundError:
+          return
+        print('Warning: failed to remove OLMT temp directory '+case_temp_dir+
+                '; remaining entries: '+str(remaining[:10]))
 
   def get_machine(self,machine=''):
     if (machine == ''):
@@ -647,40 +693,46 @@ class ELMcase():
     if (self.paramfile == ''):
       #Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
+    self.paramfile = self.clean_input_path(self.paramfile)
     print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to the temp directory
-    os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
+    #Copy the parameter file to a case-specific temp path. Shared temp
+    #filenames are unsafe when multiple OLMT launches set up cases at once.
+    self.paramfile_temp = self.temp_file_path('clm_params.nc')
+    shutil.copy2(self.paramfile, self.paramfile_temp)
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
-        param_path = self.OLMTdir + '/temp/clm_params.nc'
-        self.modify_ncinput_file(param_path, self.add_parameter, "parameter")
+        self.modify_ncinput_file(self.paramfile_temp, self.add_parameter, "parameter")
 
   def set_CNP_param_file(self,filename=''):
     if (filename == ''):
         self.CNPparm_file = self.get_namelist_variable('fsoilordercon')
     else:
         self.CNPparm_file = filename
-    os.system('cp '+self.CNPparm_file+' '+self.OLMTdir+'/temp/CNP_parameters.nc')
+    self.CNPparm_file = self.clean_input_path(self.CNPparm_file)
+    self.CNPparm_file_temp = self.temp_file_path('CNP_parameters.nc')
+    shutil.copy2(self.CNPparm_file, self.CNPparm_file_temp)
 
   def set_fates_param_file(self):
     if (self.fates_paramfile == ''):
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
+    self.fates_paramfile = self.clean_input_path(self.fates_paramfile)
     print('FATES parameter file : '+self.fates_paramfile)
     self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  #determine if json or nc
 
-    fbase = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
-    os.system('cp '+self.fates_paramfile+' '+fbase)
+    fbase = self.temp_file_path('fates_paramfile.'+self.fates_param_type)
+    self.fates_paramfile_temp = fbase
+    shutil.copy2(self.fates_paramfile, fbase)
     if (self.fates_pft >= 0):
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
             print('Duplicating '+str(self.pft_duplicates)+' times.')
-            write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
-                    self.OLMTdir+'/temp/fates_paramfile.nc', self.fates_pft,
+            write_fates_pft_subset_nc(self.fates_paramfile_temp,
+                    self.fates_paramfile_temp, self.fates_pft,
                     duplicates=self.pft_duplicates)
           else:
             print('Duplicating '+str(self.pft_duplicates)+' times.')
-            fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
+            fname = self.fates_paramfile_temp
             pft_indices = ''
             for pf in range(0,self.pft_duplicates):
                 pft_indices = pft_indices+str(self.fates_pft)+','
@@ -688,19 +740,19 @@ class ELMcase():
             swapcmd=swapper_path+' --pft-indices='+pft_indices[:-1]+' --fin='+fbase+' --fout='+fname+' --silent'
             os.system(swapcmd)
         else:
-            fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
+            fname = self.fates_paramfile_temp
             if (self.fates_param_type == 'json'):
                 swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
                 swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
                 os.system(swapcmd)
             else:
-                write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
+                write_fates_pft_subset_nc(self.fates_paramfile_temp,
                         fname, self.fates_pft)
 
 
     # Apply FATES parameter modifications
     if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
-        fates_param_path = self.OLMTdir + '/temp/fates_paramfile.'+self.fates_param_type
+        fates_param_path = self.fates_paramfile_temp
         if (self.fates_param_type == 'json'):
             self.modify_jsoninput_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
         else:
@@ -1296,11 +1348,15 @@ class ELMcase():
       #Copy customized parameter, surface and domain files to run directory
       os.system('mkdir -p '+self.OLMTdir+'/temp')
       #if (not 'paramfile' in self.case_options.keys()):
-      os.system('cp '+self.OLMTdir+'/temp/clm_params.nc '+self.rundir)
+      param_temp = getattr(self, 'paramfile_temp', self.OLMTdir+'/temp/clm_params.nc')
+      shutil.copy2(param_temp, self.rundir+'/clm_params.nc')
       if (not 'fsoilordercon' in self.case_options.keys()):
-        os.system('cp '+self.OLMTdir+'/temp/CNP_parameters.nc '+self.rundir)
+        CNP_temp = getattr(self, 'CNPparm_file_temp', self.OLMTdir+'/temp/CNP_parameters.nc')
+        shutil.copy2(CNP_temp, self.rundir+'/CNP_parameters.nc')
       if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
-        os.system('cp '+self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type+' '+self.rundir)
+        fates_temp = getattr(self, 'fates_paramfile_temp',
+                self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type)
+        shutil.copy2(fates_temp, self.rundir+'/fates_paramfile.'+self.fates_param_type)
       if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)
       if (not 'surffile' in self.case_options.keys() and not 'fsurdat' in self.case_options.keys()):
@@ -1309,6 +1365,9 @@ class ELMcase():
       if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn) \
         and not 'flanduse_timeseries' in self.case_options.keys()):
          os.system('cp '+self.OLMTdir+'/temp/surfdata.pftdyn.nc '+self.rundir)
+      case_temp_dir = getattr(self, 'case_temp_dir', '')
+      if (case_temp_dir != ''):
+         self.cleanup_case_temp_dir()
       if (not self.dobuild):
          self.preview_namelists()
 

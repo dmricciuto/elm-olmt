@@ -378,21 +378,25 @@ def read_parm_list(self, parm_list=''):
     self.nparms_ensemble = len(self.ensemble_parms)
 
 def get_default_parms(self):
-    parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
-    parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
+    parm_path = getattr(self, 'paramfile_temp', self.OLMTdir+'/temp/clm_params.nc')
+    CNP_path = getattr(self, 'CNPparm_file_temp', self.OLMTdir+'/temp/CNP_parameters.nc')
+    fates_path = getattr(self, 'fates_paramfile_temp',
+            self.OLMTdir+'/temp/fates_paramfile.'+getattr(self, 'fates_param_type', 'nc'))
+    parm_file = Dataset(parm_path,'r')
+    parm_ds = xr.open_dataset(parm_path,decode_timedelta=False)
     data_dict = parm_ds.to_dict()
     
-    parm_file = Dataset(self.OLMTdir+'/temp/clm_params.nc','r')
-    parm_ds = xr.open_dataset(self.OLMTdir+'/temp/clm_params.nc',decode_timedelta=False)
+    parm_file = Dataset(parm_path,'r')
+    parm_ds = xr.open_dataset(parm_path,decode_timedelta=False)
     data_dict = parm_ds.to_dict()
     
     if ('FATES' in self.compset or 'ED' in self.compset):
       if (self.fates_param_type == 'json'):
-        fates_parm_file = json.load(open(self.OLMTdir+'/temp/fates_paramfile.json','r'))
+        fates_parm_file = json.load(open(fates_path,'r'))
       else:
-        fates_parm_file = Dataset(self.OLMTdir+'/temp/fates_paramfile.nc','r')
+        fates_parm_file = Dataset(fates_path,'r')
     
-    CNP_parm_file = Dataset(self.OLMTdir+'/temp/CNP_parameters.nc','r')
+    CNP_parm_file = Dataset(CNP_path,'r')
     self.default_parms=[]
     CNP_parms = ['ks_sorption', 'r_desorp', 'r_weather', 'r_adsorp', 'k_s1_biochem', 'smax', 'k_s3_biochem', \
         'r_occlude', 'k_s4_biochem', 'k_s2_biochem']      
