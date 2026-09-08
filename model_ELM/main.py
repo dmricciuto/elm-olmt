@@ -643,12 +643,12 @@ class ELMcase():
             nc.setncattr('history', history_entry)
 
   def set_param_file(self):
-    #set the ELM parameter file
+    # set the ELM parameter file
     if (self.paramfile == ''):
-      #Get parameter filename from case directory
+      # Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
-    print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to the temp directory
+    print('ELM parameter file: '+self.paramfile)
+    # Copy the parameter file to the temp directory
     os.system('cp '+self.paramfile+' '+self.OLMTdir+'/temp/clm_params.nc')
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
@@ -666,32 +666,80 @@ class ELMcase():
     if (self.fates_paramfile == ''):
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     print('FATES parameter file : '+self.fates_paramfile)
-    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  #determine if json or nc
-
+    # determine if json or nc & copy to temp dir
+    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  
     fbase = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
     os.system('cp '+self.fates_paramfile+' '+fbase)
-    if (self.fates_pft >= 0):
-        print('Extracting PFT '+str(self.fates_pft))
+
+    # convert scalar to vector, allows specification of multiple PFTs in config file   
+    if isinstance(self.fates_pft, int):
+      self.fates_pft = [self.fates_pft]
+      pft_list = False 
+    else: 
+      pft_list = True 
+    if all(p >= 0 for p in self.fates_pft):
+    #if (self.fates_pft >= 0):
+        if (len(self.fates_pft) == 1):
+          self.fates_pft = int(self.fates_pft[0]) 
+        print('Extracting FATES PFT(s) '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            fname_list=[]
+            print('Duplicating PFT '+str(self.pft_duplicates)+' times.')
+            if pft_list:
+                print('Multiple PFTs and duplicating not compatible when fates paramfiles are netcdf, will prob fail.')
             write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
-                    self.OLMTdir+'/temp/fates_paramfile.nc', self.fates_pft,
-                    duplicates=self.pft_duplicates)
+                self.OLMTdir+'/temp/fates_paramfile.nc', self.fates_pft,
+                duplicates=self.pft_duplicates)
+# APW: commented for merge conflict testing 
+#            for pf in range(0,self.pft_duplicates):
+#                fname = self.OLMTdir+'/temp/fates_paramfile_'+str(pf)+'.nc'
+#                os.system('ncks -O -d fates_pft,'+str(self.fates_pft)+','+str(self.fates_pft)+' ' \
+#                    +self.OLMTdir+'/temp/fates_paramfile.nc'+' -o '+fname)
+#                    duplicates=self.pft_duplicates)
+#                fname_list.append(fname)
+#            # Open and concatenate along the 'fates_pft' dimension
+#            datasets = [xr.open_dataset(f, decode_timedelta=False) for f in fname_list]
+#            # Find variables that have 'fates_pft' as a dimension
+#            vars_with_fpft = [var for var in datasets[0].data_vars if 'fates_pft' in datasets[0][var].dims]
+#            # Subset only those vars
+#            datasets_trimmed = [ds[vars_with_fpft] for ds in datasets]
+#            ds_concat = xr.concat(datasets_trimmed, dim='fates_pft')
+#            # Add back the rest of the variables (those without 'fates_pft')
+#            vars_wo_fpft = [var for var in datasets[0].data_vars if 'fates_pft' not in datasets[0][var].dims]
+#            for var in vars_wo_fpft:
+#                ds_concat[var] = datasets[0][var]  # Use first file's value
+#            ds_concat.to_netcdf(self.OLMTdir+'/temp/fates_paramfile.nc', mode='w')
+#            # Close datasets to free memory
+#            for ds in datasets:
+#                ds.close()
+#            ds_concat.close()
+#            # Clean up temporary files
+#            for fname in fname_list:
+#                os.remove(fname)
           else:
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            print('Duplicating PFT(s) '+str(self.pft_duplicates)+' times.')
             fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
             pft_indices = ''
+            if pft_list:
+                pft_indices1 = ",".join(map(str, self.fates_pft))
+            else:
+                pft_indices1 = str(self.fates_pft) 
             for pf in range(0,self.pft_duplicates):
-                pft_indices = pft_indices+str(self.fates_pft)+','
+                pft_indices = pft_indices+pft_indices1+','
             swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
             swapcmd=swapper_path+' --pft-indices='+pft_indices[:-1]+' --fin='+fbase+' --fout='+fname+' --silent'
             os.system(swapcmd)
         else:
             fname = self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type
             if (self.fates_param_type == 'json'):
+                if pft_list:
+                    pft_indices = ",".join(map(str, self.fates_pft))
+                else:
+                    pft_indices = str(self.fates_pft) 
                 swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
-                swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
+                swapcmd=swapper_path+' --pft-indices='+pft_indices+' --fin='+fbase+' --fout='+fname+' --silent'
+                #print(swapcmd)
                 os.system(swapcmd)
             else:
                 write_fates_pft_subset_nc(self.OLMTdir+'/temp/fates_paramfile.nc',
@@ -754,7 +802,9 @@ class ELMcase():
            ' --handle-preexisting-dirs u' 
     else:
       cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
-           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u' 
+           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u'
+    # APW: edit re MOAB
+    cmd = cmd+' --driver mct'
     if (self.project != ''):
       cmd = cmd+' --project '+self.project
     if (self.compiler != ''):
@@ -832,7 +882,7 @@ class ELMcase():
     if (domainfile != ''):
       print('\nDomain file:             '+ domainfile)
     if (surffile != ''):
-      print('surface data file:       '+ surffile)  
+      print('Surface data file:       '+ surffile)  
     if (pftdynfile != ''):
       print('20th landuse data file: '+pftdynfile+"'\n")
 
@@ -1500,12 +1550,17 @@ class ELMcase():
           #code.interact(local=dict(globals(), **locals()))
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                   stdout=subprocess.PIPE, text=True)
-          output = result.stdout.strip()
+          #output = result.stdout.strip()
+          output = (result.stdout or "").strip()
+          stderr = (result.stderr or "").strip()
           if (result.returncode != 0):
-              raise RuntimeError('Failed to submit '+script+':\n'+output)
-          jobnum = parse_submit_jobnum(output)
-          print('\nSubmitted '+str(jobnum)+' from '+script)
-          jobnum_depend=jobnum
+              raise RuntimeError('\nFailed to submit '+script+':\n\n'+output+'\n\n'+stderr)
+          else:
+              print('\nSubmitted '+str(jobnum)+' from '+script)
+              print(output)
+              print('')
+              jobnum = parse_submit_jobnum(output)
+              jobnum_depend=jobnum
     if (not ensemble and multisite_script == '' and getattr(self, 'postproc_vars', [])):
       postproc_script = self.create_postprocess_script()
       if (self.noslurm):
@@ -1515,11 +1570,16 @@ class ELMcase():
       else:
           cmd = [mysubmit, '--dependency=afterok:'+str(jobnum)] + self.slurm_submit_args(ntasks=1) + [postproc_script]
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
-          output = result.stdout.strip()
+          #output = result.stdout.strip()
+          output = (result.stdout or "").strip()
+          stderr = (result.stderr or "").strip()
           if (result.returncode != 0):
-              raise RuntimeError('Failed to submit '+postproc_script+':\n'+output)
-          postproc_jobnum = parse_submit_jobnum(output)
-          print('\nSubmitted '+str(postproc_jobnum)+' from '+postproc_script)
+              raise RuntimeError('\nFailed to submit '+postproc_script+':\n\n'+output+'\n\n'+stderr)
+          else: 
+              print('\nSubmitted '+str(postproc_jobnum)+' from '+postproc_script)
+              print(output)
+              print('')
+              postproc_jobnum = parse_submit_jobnum(output)
     os.chdir(self.OLMTdir)
     return jobnum
 
