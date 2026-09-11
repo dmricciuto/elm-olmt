@@ -707,13 +707,17 @@ def ensemble_copy(self, ens_num, clean=True):
         )
         for s in myinput:
             if ('fates_paramfile' in s):
+                if (self.fates_param_type == 'json'):
+                  suffix = '.json'
+                else:
+                  suffix = '.nc'
                 paramfile_orig = ((s.split()[2]).strip("'"))
                 if (paramfile_orig[0:2] == './'):
                   paramfile_orig = orig_dir+'/'+paramfile_orig[2:]
-                paramfile_new  = ens_dir+'/fates_params_'+gst[1:]+'.nc'
+                paramfile_new  = ens_dir+'/fates_params_'+gst[1:]+suffix
                 copy_file_verified(paramfile_orig, paramfile_new)
                 myoutput.write(" fates_paramfile = '"+paramfile_new+"'\n")
-                fates_paramfile = ens_dir+'/fates_params_'+gst[1:]+'.nc'
+                fates_paramfile = ens_dir+'/fates_params_'+gst[1:]+suffix
             elif ('paramfile' in s):
                 paramfile_orig = ((s.split()[2]).strip("'"))
                 if (paramfile_orig[0:2] == './'):
@@ -821,7 +825,10 @@ def ensemble_copy(self, ens_num, clean=True):
          myfile = fates_paramfile
       else:
          myfile = pftfile
-      param = self.getncvar(myfile,p)
+      if (self.fates_param_type == 'json'):
+         param = self.getjsonvar(myfile,p)
+      else:
+         param = self.getncvar(myfile,p)
       if (('fates_prt' in p and 'stoich' in p) or ('fates_turnover' in p and 'retrans' in p)):
         #this is a 2D parameter.
          param[parm_indices[pnum] % 12 , parm_indices[pnum] / 12] = parm_values[pnum]
@@ -849,13 +856,16 @@ def ensemble_copy(self, ens_num, clean=True):
       elif (p == 'psi50'):
         param[:,parm_indices[pnum]] = parm_values[pnum]
       elif (parm_indices[pnum] > 0):
-         param[parm_indices[pnum]] = parm_values[pnum]
+        param[parm_indices[pnum]] = parm_values[pnum]
       elif (parm_indices[pnum] == 0):
          try:
            param[:] = parm_values[pnum]
          except:
            param = parm_values[pnum]
-      ierr = self.putncvar(myfile, p, param, addvar=True)
+      if (self.fates_param_type == 'json'):
+         ierr = self.putjsonvar(myfile, p, param, addvar=True)
+      else:
+         ierr = self.putncvar(myfile, p, param, addvar=True)
       #if ('fr_flig' in p):
       #   param=self.getncvar(myfile, 'fr_fcel')
       #   param[parm_indices[pnum]]=1.0-parm_values[pnum]-parm_values[pnum-1]

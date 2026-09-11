@@ -880,11 +880,12 @@ class ELMcase():
                 '; surfdata has '+str(surf_count)+' cells '+str(surf_dims)+' in '+
                 surf_check_file)
     if (domainfile != ''):
-      print('\nDomain file:             '+ domainfile)
+      print('Domain file:            '+ domainfile)
     if (surffile != ''):
-      print('Surface data file:       '+ surffile)  
+      print('Surface data file:      '+ surffile)  
     if (pftdynfile != ''):
-      print('20th landuse data file: '+pftdynfile+"'\n")
+      print('20th landuse data file: '+pftdynfile)
+    print('') 
 
   def get_metdata_year_range(self):
     #get site year information
@@ -1307,6 +1308,8 @@ class ELMcase():
             project_opt = ' --account='+self.project if self.project != '' else ''
             build_partition = self.slurm_partition()
             build_qos = self.slurm_qos()
+            build_partition = 'hpcl-cli185' 
+            build_qos = 'hpcl-cli185' 
             qos_opt = ' --qos='+build_qos if build_qos != '' else ''
             resource_wait_minutes = 60
             build_timeout = resource_wait_minutes * 60

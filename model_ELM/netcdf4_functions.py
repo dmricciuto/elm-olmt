@@ -35,3 +35,51 @@ def putncvar(self, fname, varname, varvals, operator='', addvar=False):
         ierr = 1
     nffile.close()
     return ierr
+
+# this function is designed specifically for extracting data from a FATES json PFT parameter file
+def getjsonvar(self, fname, varname):
+    import json
+    with open(fname, "r", encoding="utf-8") as jsonfile:
+        nffile = json.load(jsonfile)
+    if "parameters" not in nffile:
+        raise ValueError(f'"parameters" not in {fname}')
+    parameters = nffile["parameters"]
+    if varname not in parameters:
+        raise ValueError(f'"{varname}" not in "parameters" in {fname}')
+    variable = parameters[varname]
+    if not isinstance(variable, dict) or "data" not in variable:
+        raise ValueError(f'"parameters.{varname}" in {fname} does not contain a "data" field')
+    varvals = variable["data"] 
+    # this code below would be more generic to read the first fields in the fiel hierarchy
+    #if varname in data:
+    #    varvals = data[varname]
+    #else:
+    #    print(f"Warning: {varname} not in {fname}")
+    #    #raise ValueError(f'"{varname}" not in {fname}')
+    #    varvals = [-1]
+    return varvals
+
+
+# this function is designed specifically for adding data to a FATES json PFT parameter file
+def putjsonvar(self, fname, varname, varvals, operator="", addvar=False):
+    import json
+    with open(fname, "r", encoding="utf-8") as jsonfile:
+        nffile = json.load(jsonfile)
+    if addvar:
+      if "parameters" not in nffile:
+          raise ValueError(f'"parameters" not in {fname}')
+      parameters = nffile["parameters"]
+      if varname not in parameters:
+          raise ValueError(f'"{varname}" not in "parameters" in {fname}')
+      variable = parameters[varname]
+      if not isinstance(variable, dict) or "data" not in variable:
+          raise ValueError(f'"parameters.{varname}" in {fname} does not contain a "data" field')
+      variable["data"] = varvals
+    elif operator == "*" or not addvar:
+        raise ValueError(f'no methods yet in putjsonvar for operator {operator} or addvar False')
+    with open(fname, "w", encoding="utf-8") as jsonfile:
+        json.dump(nffile, jsonfile, indent=2)
+    return 0
+
+
+
