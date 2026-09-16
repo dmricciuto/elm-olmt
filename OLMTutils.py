@@ -1,4 +1,5 @@
 import socket, os, sys, re, glob
+import csv
 import subprocess
 import numpy as np
 
@@ -131,10 +132,26 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False, n
             with open(path, 'r') as f:
                 return f.readlines()
 
+    def csv_rows(lines):
+        return [row for row in csv.reader(lines, skipinitialspace=True) if row]
+
+    def row_dict(header, fields):
+        return {
+            header[i].strip().lower(): fields[i].strip()
+            for i in range(min(len(header), len(fields)))
+        }
+
+    def first_field(row, names, default=''):
+        for name in names:
+            key = name.lower()
+            if key in row and row[key] != '':
+                return row[key]
+        return default
+
     # sitedata
     sitedata_path = base + sitegroup + '_sitedata.txt'
     lines = readlines(sitedata_path)
-    snum = 0
+    rows = csv_rows(lines)
     if npfts is not None:
         npfts = int(npfts)
     elif(use_crop):
@@ -143,73 +160,99 @@ def get_site_info(inputdata, sitegroup='AmeriFlux', sftp=None, use_crop=False, n
         npfts = 22
     else:
         npfts = 17
-    for s in lines:
-        if snum > 0:
-            fields = s.strip().split(',')
-            if len(fields) < 6:
-                snum += 1
-                continue
-            sitename = fields[0]
-            siteinfo[sitename] = {}
-            siteinfo[sitename]['lon'] = float(fields[3])
-            siteinfo[sitename]['lat'] = float(fields[4])
-            siteinfo[sitename]['elev'] = float(fields[5])
-            siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([npfts], float)
-            siteinfo[sitename]['PCT_SAND'] = -999
-            siteinfo[sitename]['PCT_CLAY'] = -999
-            siteinfo[sitename]['topounit'] = -1
-            if(use_crop):
-                siteinfo[sitename]['PCT_CFT'] = np.zeros([36],float)
-        snum += 1
+    header = [field.strip().lower() for field in rows[0]] if rows else []
+    header_format = 'lon' in header and 'lat' in header
+    for fields in rows[1:]:
+        if len(fields) < 6:
+            continue
+        if header_format:
+            row = row_dict(header, fields)
+            sitename = first_field(row, ['site_code', 'site', 'sitename', 'site_name'])
+            lon = first_field(row, ['lon', 'longitude'])
+            lat = first_field(row, ['lat', 'latitude'])
+            elev = first_field(row, ['elev', 'elevation'])
+        else:
+            sitename = fields[0].strip()
+            lon = fields[3].strip()
+            lat = fields[4].strip()
+            elev = fields[5].strip()
+        siteinfo[sitename] = {}
+        siteinfo[sitename]['lon'] = float(lon)
+        siteinfo[sitename]['lat'] = float(lat)
+        siteinfo[sitename]['elev'] = float(elev)
+        siteinfo[sitename]['PCT_NAT_PFT'] = np.zeros([npfts], float)
+        siteinfo[sitename]['PCT_SAND'] = -999
+        siteinfo[sitename]['PCT_CLAY'] = -999
+        siteinfo[sitename]['topounit'] = -1
+        if(use_crop):
+            siteinfo[sitename]['PCT_CFT'] = np.zeros([36],float)
 
     # pftdata
     pftdata_path = base + sitegroup + '_pftdata.txt'
     lines = readlines(pftdata_path)
-    snum = 0
-    for s in lines:
-        if snum > 0:
-            fields = [field.strip() for field in s.strip().split(',')]
-            sitename = fields[0]
-            pair_start = 1
-            if len(fields) > 1 and len(fields[1]) > 0:
-                try:
-                    siteinfo[sitename]['topounit'] = int(fields[1])
-                    pair_start = 2
-                except ValueError:
-                    pair_start = 1
-            for p in range(0, 5):
-                pct_idx = pair_start + p * 2
-                pft_idx = pct_idx + 1
-                if pft_idx >= len(fields):
-                    continue
-                ppct = float(fields[pct_idx])
-                pindex = int(fields[pft_idx])
-                if ppct > 0:
-                    #siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
-                    if(use_crop):
-                        if (pindex < 15):
-                            siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
-                        else:
-                            siteinfo[sitename]['PCT_CFT'][pindex - 15] = ppct
-                    else:
-                        if pindex >= len(siteinfo[sitename]['PCT_NAT_PFT']):
-                            raise IndexError(
-                                f"PFT index {pindex} in {pftdata_path} exceeds "
-                                f"natpft count {len(siteinfo[sitename]['PCT_NAT_PFT'])}"
-                            )
+    rows = csv_rows(lines)
+    pft_header = [field.strip().lower() for field in rows[0]] if rows else []
+    header_has_topounit = (
+        len(pft_header) > 1 and
+        pft_header[1] in ['topounit', 'topo_unit', 'topoindex', 'topo_index']
+    )
+    for fields in rows[1:]:
+        fields = [field.strip() for field in fields]
+        sitename = fields[0]
+        if sitename not in siteinfo:
+            continue
+        pair_start = 1
+        if len(fields) > 1 and len(fields[1]) > 0 and (
+                header_has_topounit or (len(fields) - 1) % 2 == 1):
+            try:
+                siteinfo[sitename]['topounit'] = int(fields[1])
+                pair_start = 2
+            except ValueError:
+                pair_start = 1
+        for p in range(0, 5):
+            pct_idx = pair_start + p * 2
+            pft_idx = pct_idx + 1
+            if pft_idx >= len(fields):
+                continue
+            ppct = float(fields[pct_idx])
+            pindex = int(fields[pft_idx])
+            if ppct > 0:
+                #siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
+                if(use_crop):
+                    if (pindex < 15):
                         siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
-        snum += 1
+                    else:
+                        siteinfo[sitename]['PCT_CFT'][pindex - 15] = ppct
+                else:
+                    if pindex >= len(siteinfo[sitename]['PCT_NAT_PFT']):
+                        raise IndexError(
+                            f"PFT index {pindex} in {pftdata_path} exceeds "
+                            f"natpft count {len(siteinfo[sitename]['PCT_NAT_PFT'])}"
+                        )
+                    siteinfo[sitename]['PCT_NAT_PFT'][pindex] = ppct
 
     # soildata
     soildata_path = base + sitegroup + '_soildata.txt'
     lines = readlines(soildata_path)
-    snum = 0
-    for s in lines:
-        if snum > 0:
-            sitename = s[:-1].split(',')[0]
-            siteinfo[sitename]['PCT_SAND'] = float(s[:-1].split(',')[4])
-            siteinfo[sitename]['PCT_CLAY'] = float(s[:-1].split(',')[5])
-        snum += 1
+    rows = csv_rows(lines)
+    header = [field.strip().lower() for field in rows[0]] if rows else []
+    header_format = 'site_code' in header and 'layer_sand%' in header and 'layer_clay%' in header
+    for fields in rows[1:]:
+        if header_format:
+            row = row_dict(header, fields)
+            sitename = first_field(row, ['site_code', 'site', 'sitename', 'site_name'])
+            sand = first_field(row, ['layer_sand%', 'pct_sand', 'sand'])
+            clay = first_field(row, ['layer_clay%', 'pct_clay', 'clay'])
+        else:
+            if len(fields) < 6:
+                continue
+            sitename = fields[0].strip()
+            sand = fields[4].strip()
+            clay = fields[5].strip()
+        if sitename not in siteinfo:
+            continue
+        siteinfo[sitename]['PCT_SAND'] = float(sand)
+        siteinfo[sitename]['PCT_CLAY'] = float(clay)
 
     #Land use change information
     for sitename in siteinfo.keys():
