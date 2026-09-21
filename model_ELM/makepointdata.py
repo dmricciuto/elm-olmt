@@ -1275,6 +1275,28 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
             'units': 'mm s-1'
         }
     )
+
+    # Optional surface-structure shading defaults. These variables are always
+    # present on OLMT-generated topounit surfaces so the [surface_data] config
+    # section can set individual topounits without special-case site code.
+    new_ds['TopounitStructureShadeFrac'] = xr.DataArray(
+        np.zeros(dist_shape, dtype=float),
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'fraction of topounit covered by a surface shading structure',
+            'units': '1'
+        }
+    )
+    new_ds['TopounitStructureLightTrans'] = xr.DataArray(
+        np.ones(dist_shape, dtype=float),
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'shortwave transmissivity of topounit surface shading structure',
+            'units': '1'
+        }
+    )
     
     # Copy attributes
     new_ds.attrs = dict(ds.attrs)

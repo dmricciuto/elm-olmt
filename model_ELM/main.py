@@ -600,8 +600,6 @@ class ELMcase():
 
                 if isinstance(value, list):
                     # Handle list: indices and values
-                    if len(value) % 2 != 0:
-                        print(f"Warning: {key} list has odd length, ignoring last element")
                     # Check if first index is -1 (set all indices)
                     if len(value) >= 2 and int(value[0]) == -1:
                         if len(value) > 2:
@@ -634,6 +632,8 @@ class ELMcase():
                                 nc.variables[key][idx1, idx2] = param_value
                         elif len(var_shape) == 1 or file_description == "surface data":
                             # 1D parameter: expect pairs of [index, value]
+                            if len(value) % 2 != 0:
+                                print(f"Warning: {key} list has odd length, ignoring last element")
                             for i in range(0, len(value)-1, 2):
                                 idx = int(value[i])
                                 param_value = value[i+1]
