@@ -1169,6 +1169,12 @@ class ELMcase():
               'external_mask_lat_var', 'external_mask_lon_var', \
               'external_mask_zero_surface', \
               'srcmods', 'variable', 'name', 'nyears']
+    # ``humhol`` predates ELM's runtime switch and is retained only as a
+    # backwards-compatible OLMT alias.  New configurations use use_humhol for
+    # both ELM physics and generation of the multi-topounit surface dataset.
+    use_humhol = str(self.case_options.get('use_humhol', '')).strip().lower()
+    if use_humhol in ('.true.', 'true', '1', 'yes', 'on'):
+        self.humhol = True
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
@@ -1198,9 +1204,8 @@ class ELMcase():
       self.xmlchange('ATM_DOMAIN_FILE',value=domainfilename)
       self.xmlchange('LND_DOMAIN_FILE',value=domainfilename)
 
-    #global CPPDEF modifications
-    if (self.humhol):
-        self.cppdefs='HUM_HOL'
+    # HUMHOL physics is runtime-controlled. self.humhol is retained only for
+    # constructing the multi-topounit surface and must not change CPPDEFS.
     if (self.is_bypass()):
       macrofiles=['./Macros.make','./Macros.cmake']
       for f in macrofiles:
@@ -1221,7 +1226,7 @@ class ELMcase():
       if (os.path.isfile("./cmake_macros/universal.cmake")):
         os.system("echo 'string(APPEND CPPDEFS \" -DCPL_BYPASS\")' >> cmake_macros/universal.cmake")
     if (self.cppdefs != ''):
-      #use for HUM_HOL, MARSH, HARVMOD, other cppdefs
+      #use for MARSH, HARVMOD, and other remaining cppdefs
       for cppdef in self.cppdefs.split(','):
          print("Turning on "+cppdef+" modification\n")
          self.xmlchange('ELM_CONFIG_OPTS',append='" -cppdefs -D'+cppdef+'"')
