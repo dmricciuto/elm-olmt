@@ -1,6 +1,6 @@
 #!/usr/bin/env python
 
-import os, sys, csv, time, math, shlex, re
+import os, sys, csv, time, math, shlex, re, hashlib
 import numpy as np
 import datetime
 import matplotlib.pyplot as plt
@@ -18,7 +18,7 @@ def parse_sbatch(case_run_path):
     Returns keys (ints or strings or None):
       nodes, ntasks, ntasks_per_node, cpus_per_task,
       partition, job_name, exclusive (bool), output, error,
-      account, time, qos, mem_per_cpu, gres
+      account, time, qos, constraint, mem_per_cpu, gres
     """
     parsed = {
         'nodes': None,
@@ -33,6 +33,7 @@ def parse_sbatch(case_run_path):
         'account': None,
         'time': None,
         'qos': None,
+        'constraint': None,
         'mem_per_cpu': None,
         'gres': None,
     }
@@ -102,6 +103,12 @@ def parse_sbatch(case_run_path):
                 m = re.search(r'--qos[=\s]+(\S+)', line_content)
                 if m:
                     parsed['qos'] = m.group(1)
+                m = re.search(r'--constraint[=\s]+(\S+)', line_content)
+                if m:
+                    parsed['constraint'] = m.group(1)
+                m = re.search(r'-C\s+(\S+)', line_content)
+                if m:
+                    parsed['constraint'] = m.group(1)
                 m = re.search(r'--mem-per-cpu[=\s]+(\S+)', line_content)
                 if m:
                     parsed['mem_per_cpu'] = m.group(1)
@@ -190,6 +197,8 @@ def write_sbatch(parsed, myfile):
         myfile.write('#SBATCH --qos='+str(ps.get('qos'))+'\n')
     if ps.get('time'):
         myfile.write('#SBATCH --time='+str(ps.get('time'))+'\n')
+    if ps.get('constraint'):
+        myfile.write('#SBATCH --constraint='+str(ps.get('constraint'))+'\n')
     # tasks and cpu options
     # Ensure --ntasks-per-node is always emitted when possible (preferred).
     derived_ntasks_per_node = None
@@ -217,6 +226,19 @@ def write_sbatch(parsed, myfile):
         myfile.write('#SBATCH --mem-per-cpu='+str(ps.get('mem_per_cpu'))+'\n')
     if ps.get('gres'):
         myfile.write('#SBATCH --gres='+str(ps.get('gres'))+'\n')
+
+
+def add_pathfinder_multinode_constraint(parsed, machine):
+    """Pin multi-node Pathfinder jobs to Big Loop nodes to avoid mixed allocations."""
+    if str(machine).lower() != 'pathfinder':
+        return parsed
+    try:
+        nodes = int(parsed.get('nodes') or 1)
+    except Exception:
+        nodes = 1
+    if nodes > 1:
+        parsed['constraint'] = 'BL'
+    return parsed
 
 
 def get_resubmit_segments(self, resubmit_years):
@@ -378,10 +400,10 @@ def read_parm_list(self, parm_list=''):
     self.nparms_ensemble = len(self.ensemble_parms)
 
 def get_default_parms(self):
-    parm_path = getattr(self, 'paramfile_temp', self.OLMTdir+'/temp/clm_params.nc')
-    CNP_path = getattr(self, 'CNPparm_file_temp', self.OLMTdir+'/temp/CNP_parameters.nc')
-    fates_path = getattr(self, 'fates_paramfile_temp',
-            self.OLMTdir+'/temp/fates_paramfile.'+getattr(self, 'fates_param_type', 'nc'))
+    parm_path = getattr(self, 'paramfile_case', self.case_input_path('clm_params.nc'))
+    CNP_path = getattr(self, 'CNPparm_file_case', self.case_input_path('CNP_parameters.nc'))
+    fates_path = getattr(self, 'fates_paramfile_case',
+            self.case_input_path('fates_paramfile.'+getattr(self, 'fates_param_type', 'nc')))
     parm_file = Dataset(parm_path,'r')
     parm_ds = xr.open_dataset(parm_path,decode_timedelta=False)
     data_dict = parm_ds.to_dict()
@@ -415,7 +437,7 @@ def get_default_parms(self):
             param_var = CNP_parm_file[p]
             ndim = len(param_var.dimensions)
         elif p in surfparms:
-            surffile = Dataset(self.OLMTdir+'/temp/surfdata.nc','r')
+            surffile = Dataset(self.case_input_path('surfdata.nc'),'r')
             param_var = surffile[p]
             ndim = len(param_var.dimensions)
         else:   
@@ -463,6 +485,7 @@ def create_ensemble_script(self):
     parsed_sbatch['nodes'] = int(nnodes)
     parsed_sbatch['ntasks'] = int(total_tasks)
     parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(parsed_sbatch['ntasks'])/float(parsed_sbatch['nodes'])))
+    add_pathfinder_multinode_constraint(parsed_sbatch, getattr(self, 'machine', ''))
     # Ensemble jobs can run many E3SM instances at once; request whole nodes
     # so they are not colocated with unrelated jobs on the same node.
     parsed_sbatch['exclusive'] = True
@@ -540,6 +563,7 @@ def create_multisite_script(self,sites,scriptdir,cases_compare=""):
     parsed_sbatch['nodes'] = int(nnodes)
     parsed_sbatch['ntasks'] = int(total_tasks)
     parsed_sbatch['ntasks_per_node'] = int(math.ceil(float(total_tasks)/float(nnodes)))
+    add_pathfinder_multinode_constraint(parsed_sbatch, getattr(self, 'machine', ''))
     # Ensure we do not emit --exclusive for multisite submission either.
     parsed_sbatch['exclusive'] = False
 
@@ -1120,6 +1144,59 @@ def write_postprocessed_netcdf(self, filename=''):
         member_var = ds.createVariable('ensemble_member', 'i4', ('ensemble',))
         member_var[:] = np.arange(1, nsamples+1)
         member_var.long_name = 'ensemble member number'
+
+        # Store the exact design used by the member runs.  This makes the
+        # portable output authoritative even if an older setup pickle remains
+        # in pklfiles/ or the configured nsamples value later changes.
+        parameter_samples = np.asarray(getattr(self, 'samples', []), dtype=float)
+        if parameter_samples.ndim == 2 and parameter_samples.size > 0:
+            if parameter_samples.shape[1] == nsamples:
+                samples_by_member = parameter_samples.T
+            elif parameter_samples.shape[0] == nsamples:
+                samples_by_member = parameter_samples
+            else:
+                raise ValueError(
+                    'Parameter sample matrix shape '+str(parameter_samples.shape)+
+                    ' does not match ensemble size '+str(nsamples))
+            nparameters = samples_by_member.shape[1]
+            parameter_names = list(getattr(self, 'ensemble_parms', []))
+            if parameter_names and len(parameter_names) != nparameters:
+                raise ValueError(
+                    'Parameter metadata has '+str(len(parameter_names))+
+                    ' names for '+str(nparameters)+' sampled parameters')
+            if not parameter_names:
+                parameter_names = ['parameter_'+str(i) for i in range(nparameters)]
+
+            ds.createDimension('ensemble_parameter', nparameters)
+            sample_var = ds.createVariable(
+                'ensemble_parameter_sample', 'f8',
+                ('ensemble', 'ensemble_parameter'))
+            sample_var[:] = samples_by_member
+            sample_var.long_name = 'parameter values used by each ensemble member'
+            sample_var.sample_sha256 = hashlib.sha256(
+                np.ascontiguousarray(samples_by_member).tobytes()).hexdigest()
+
+            name_var = ds.createVariable(
+                'ensemble_parameter_name', str, ('ensemble_parameter',))
+            name_var[:] = np.asarray(parameter_names, dtype=object)
+            name_var.long_name = 'OLMT ensemble parameter name'
+
+            pfts = list(getattr(self, 'ensemble_pfts', []))
+            if len(pfts) == nparameters:
+                pft_var = ds.createVariable(
+                    'ensemble_parameter_pft', 'i4', ('ensemble_parameter',))
+                pft_var[:] = np.asarray(
+                    [-1 if value is None else int(value) for value in pfts], dtype=int)
+                pft_var.long_name = 'parameter-file PFT index; -1 means scalar parameter'
+
+            for field_name, values in (
+                    ('ensemble_parameter_min', getattr(self, 'ensemble_pmin', [])),
+                    ('ensemble_parameter_max', getattr(self, 'ensemble_pmax', []))):
+                values = np.asarray(values, dtype=float)
+                if values.size == nparameters:
+                    bounds_var = ds.createVariable(
+                        field_name, 'f8', ('ensemble_parameter',))
+                    bounds_var[:] = values
 
         if hasattr(self, 'postprocessed'):
             status = ds.createVariable('postprocessed', 'i4', ('ensemble',))

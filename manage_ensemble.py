@@ -497,7 +497,13 @@ if (is_final_segment and mycase.postproc_vars != []):
     # Save postprocessed ensemble outputs in a portable NetCDF file before UQ analysis.
     mycase.write_postprocessed_netcdf()
 
-    uq_vars = postprocessed_output_vars(mycase.postproc_vars)
+    requested_uq_vars = list(mycase.postproc_vars)
+    calibration_variables = list(getattr(mycase, 'calibration_variables', []))
+    if calibration_variables:
+        requested_uq_vars = calibration_variables
+        print('Restricting surrogate training to configured calibration variables: '+
+              str(requested_uq_vars))
+    uq_vars = postprocessed_output_vars(requested_uq_vars)
     if len(uq_vars) == 0:
         print('No postprocessed output variables available for UQ; skipping UQ analysis')
         sys.exit(0)
@@ -517,9 +523,12 @@ if (is_final_segment and mycase.postproc_vars != []):
 
     mycase.plot_surrogate(uq_vars)
 
-    #run GSA
-    mycase.GSA(uq_vars)
-    mycase.plot_GSA(uq_vars)
+    # Run global sensitivity analysis unless calibration-only execution disables it.
+    if getattr(mycase, 'calibration_run_gsa', True):
+      mycase.GSA(uq_vars)
+      mycase.plot_GSA(uq_vars)
+    else:
+      print('Skipping GSA because [calibration] run_gsa=False')
     
     #Save postprocessed output
     mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
@@ -527,17 +536,80 @@ if (is_final_segment and mycase.postproc_vars != []):
     #run MCMC
     #Set intial values for parameters
     if (mycase.obs):
+        calibration_mode = str(getattr(mycase, 'calibration_mode', 'auto')).lower()
+        if calibration_mode in ['none', 'off']:
+            print('Skipping MCMC because [calibration] mode='+calibration_mode)
+            mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+            sys.exit(0)
         #Run MCMC for the observation variables
-        obs_mcmc = [v for v in uq_vars if v in mycase.obs.keys()]
-        # Always run single-site MCMC first
-        mycase.nobs_vars = 3
-        nwalkers = max(24, (mycase.nparms_ensemble+mycase.nobs_vars)*2)
-        mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=10000, multisite=False)
-        
-        # Check if multisite MCMC should be run
-        if hasattr(mycase, 'all_sites') and mycase.all_sites is not None and len(mycase.all_sites) > 1:
-            print(f"Running multisite MCMC for {len(mycase.all_sites)} sites: {mycase.all_sites}")
-            mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=10000, multisite=True)
+        obs_mcmc = []
+        for v in uq_vars:
+            if v not in mycase.obs.keys() or v not in mycase.obs_err.keys():
+                continue
+            obs_vals = np.asarray(mycase.obs[v])
+            err_vals = np.asarray(mycase.obs_err[v])
+            if np.any((obs_vals > -9000) & (err_vals > 0)):
+                obs_mcmc.append(v)
+        if len(obs_mcmc) == 0:
+            print('No valid observations matched trained surrogate variables; skipping MCMC')
+            mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+            sys.exit(0)
+        # Resolve sampler dimensions and configured execution mode.
+        mycase.nobs_vars = len(obs_mcmc)
+        ndim = mycase.nparms_ensemble + (mycase.nobs_vars if
+                getattr(mycase, 'calibration_fit_error', True) else 0)
+        configured_nwalkers = int(getattr(mycase, 'calibration_nwalkers', 0))
+        nwalkers = configured_nwalkers if configured_nwalkers > 0 else max(24, ndim*2)
+        if nwalkers < ndim*2:
+            raise ValueError(
+                'Configured calibration_nwalkers='+str(nwalkers)+
+                ' is too small for '+str(ndim)+' dimensions; use at least '+str(ndim*2))
+        nsteps = int(getattr(mycase, 'calibration_mcmc_steps', 10000))
+        fit_error = bool(getattr(mycase, 'calibration_fit_error', True))
+        if nsteps == 0:
+            print('Skipping MCMC because [calibration] mcmc_steps=0')
+            mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')
+            sys.exit(0)
+
+        treatment_cases = getattr(mycase, 'all_treatment_cases', None)
+        has_multitreatment_launcher = (
+            treatment_cases is not None and len(treatment_cases) > 1)
+        has_multisite_launcher = (
+            hasattr(mycase, 'all_sites') and mycase.all_sites is not None and
+            len(mycase.all_sites) > 1)
+
+        if calibration_mode == 'multitreatment':
+            if has_multitreatment_launcher:
+                print('Running configured multitreatment MCMC for '+
+                      str(len(treatment_cases))+' treatment cases: '+
+                      str(list(treatment_cases.keys())))
+                mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                            fit_error=fit_error, multitreatment=True)
+            else:
+                print('Deferring multitreatment MCMC to the final treatment case')
+        elif calibration_mode == 'multisite':
+            if not has_multisite_launcher:
+                print('Deferring multisite MCMC to the multi-site launcher case')
+            else:
+                print(f"Running configured multisite MCMC for {len(mycase.all_sites)} sites: {mycase.all_sites}")
+                mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                            fit_error=fit_error, multisite=True)
+        elif calibration_mode == 'single':
+            mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                        fit_error=fit_error, multisite=False)
+        else:
+            # Historical auto mode: single case plus any available joint analyses.
+            mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                        fit_error=fit_error, multisite=False)
+            if has_multisite_launcher:
+                print(f"Running multisite MCMC for {len(mycase.all_sites)} sites: {mycase.all_sites}")
+                mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                            fit_error=fit_error, multisite=True)
+            if has_multitreatment_launcher:
+                print('Running multitreatment MCMC for '+str(len(treatment_cases))+
+                      ' treatment cases: '+str(list(treatment_cases.keys())))
+                mycase.MCMC(obs_mcmc, nwalkers=nwalkers, nsteps=nsteps,
+                            fit_error=fit_error, multitreatment=True)
             
         #Save postprocessed output
         mycase.create_pkl(outdir=mycase.OLMTdir+'/pklfiles/')

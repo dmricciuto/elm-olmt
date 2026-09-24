@@ -1,9 +1,158 @@
 import numpy as np
 import os
+import csv
 from netCDF4 import Dataset
 
+def _clean(value):
+  if value is None:
+    return ''
+  return str(value).strip().strip("'\"")
+
+def _to_float(value):
+  value = _clean(value)
+  if value == '' or value.lower() in ['nan', 'na', 'n/a', 'nd']:
+    return None
+  try:
+    return float(value)
+  except ValueError:
+    return None
+
+def _get_first(row, names):
+  for name in names:
+    if name in row:
+      return row[name]
+  return None
+
+def _infer_treatment(self):
+  treatment = _clean(getattr(self, 'treatment_name', ''))
+  if treatment != '':
+    return treatment
+  suffix = _clean(getattr(self, 'case_suffix', ''))
+  if suffix == '':
+    return ''
+  for part in suffix.split('_'):
+    if part.startswith('T') and any(ch.isdigit() for ch in part):
+      return part
+    if part == 'TAMB':
+      return part
+  return ''
+
+def _get_table_obs(self, site='US-UMB', tstep='annual', ystart=-1, yend=9999,
+  fluxnet_var='GPP', myobsdir='', valid_months=None, time_average=1,
+  error_fraction=0.15, error_floor=1.0):
+
+  obs_file = myobsdir
+  if os.path.isdir(obs_file):
+    obs_file = os.path.join(obs_file, 'observations.csv')
+  if not os.path.exists(obs_file):
+    raise FileNotFoundError('Observation table not found: '+obs_file)
+
+  tstep = _clean(tstep).lower()
+  if tstep not in ['annual', 'monthly']:
+    raise ValueError('Tabular observations support annual or monthly frequency, not '+tstep)
+
+  try:
+    error_fraction = float(error_fraction)
+  except Exception:
+    error_fraction = 0.15
+  try:
+    error_floor = float(error_floor)
+  except Exception:
+    error_floor = 1.0
+
+  rows = []
+  with open(obs_file, newline='') as handle:
+    reader = csv.DictReader(handle)
+    for row in reader:
+      row_var = _clean(_get_first(row, ['model_var', 'variable', 'var']))
+      if row_var != fluxnet_var:
+        continue
+      row_site = _clean(row.get('site', ''))
+      if row_site != '' and site != '' and row_site != site:
+        continue
+      treatment = _infer_treatment(self)
+      row_treatment = _clean(row.get('treatment', ''))
+      if row_treatment != '':
+        if treatment == '' or row_treatment != treatment:
+          continue
+      rows.append(row)
+
+  if len(rows) == 0:
+    print('Warning: no tabular observations matched '+fluxnet_var+' for '+site+
+          ' treatment '+_infer_treatment(self)+' in '+obs_file)
+
+  years = []
+  for row in rows:
+    year = _to_float(row.get('year'))
+    if year is not None:
+      years.append(int(year))
+  if ystart <= 0 and years:
+    ystart = min(years)
+  if yend >= 9000 and years:
+    yend = max(years)
+  if ystart <= 0 or yend >= 9000:
+    raise ValueError('Observation start/end years must be set for '+obs_file)
+
+  nstep = 1 if tstep == 'annual' else 12
+  nrows = (int(yend)-int(ystart)+1)*nstep
+  myobs = np.full([nrows], -9999.0, float)
+  myobs_err = np.full([nrows], -9999.0, float)
+
+  valid_count = 0
+  for row in rows:
+    year = _to_float(row.get('year'))
+    obs = _to_float(_get_first(row, ['obs', 'value']))
+    if year is None or obs is None:
+      continue
+    year = int(year)
+    if year < ystart or year > yend:
+      continue
+    if tstep == 'annual':
+      idx = year-int(ystart)
+    else:
+      month = _to_float(row.get('month'))
+      if month is None:
+        continue
+      month = int(month)
+      if month < 1 or month > 12:
+        continue
+      idx = (year-int(ystart))*12 + (month-1)
+    err = _to_float(_get_first(row, ['obs_err', 'error', 'uncertainty']))
+    if err is None or err <= 0:
+      err = max(abs(obs)*error_fraction, error_floor)
+    myobs[idx] = obs
+    myobs_err[idx] = err
+    valid_count = valid_count+1
+
+  if tstep == 'monthly':
+    if valid_months is None:
+      valid_months = list(range(1, 13))
+    valid_months = [int(m) for m in valid_months if 1 <= int(m) <= 12]
+    mymask = np.zeros([nrows], bool)
+    nyears = nrows // 12
+    for m in valid_months:
+      for y in range(0, nyears):
+        mymask[y*12+(m-1)] = True
+    myobs[~mymask] = -9999
+    myobs_err[~mymask] = -9999
+
+  self.obs[fluxnet_var] = myobs
+  self.obs_err[fluxnet_var] = myobs_err
+  print('Observation table: '+obs_file)
+  print('Loaded '+str(valid_count)+' '+fluxnet_var+' observations for '+site+
+        ' treatment '+_infer_treatment(self))
+
 def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,fluxnet_var='GPP', \
-  myobsdir='', valid_months=None, time_average=1):
+  myobsdir='', valid_months=None, time_average=1, obs_format='fluxnet',
+  error_fraction=0.15, error_floor=1.0):
+
+  obs_format = _clean(obs_format).lower()
+  if obs_format in ['table', 'csv', 'spruce_c_budget']:
+    _get_table_obs(self, site=site, tstep=tstep, ystart=ystart, yend=yend,
+      fluxnet_var=fluxnet_var, myobsdir=myobsdir, valid_months=valid_months,
+      time_average=time_average, error_fraction=error_fraction,
+      error_floor=error_floor)
+    return
   
   # Ensure valid_months is a list of integers
   if valid_months is None:
@@ -34,6 +183,8 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
   elif (tstep == 'daily'):
     nstep = 365
 
+  if fluxnet_var not in vars_elm:
+      raise ValueError('Unsupported FLUXNET observation variable: '+fluxnet_var)
   for v in range(0,len(vars_elm)):
       if fluxnet_var == vars_elm[v]:
           vnum = v
@@ -172,5 +323,4 @@ def get_fluxnet_obs(self, site='US-UMB',tstep='monthly',ystart=-1,yend=9999,flux
                 self.obs_err[vars_elm[vnum]] = averaged_obs_err
                 
                 print(f"Averaged from {len(daily_obs)} daily values to {len(averaged_obs)} {time_average}-day values")
-
 

@@ -32,6 +32,28 @@ for case_name in case_names:
     cases[case_name] = pickle.load(myfile)
     myfile.close()
 
+
+def _read_postproc_extra_vars(case_name):
+    path = os.path.join('pklfiles', case_name + '.postproc_extra_vars.txt')
+    extra_vars = []
+    if os.path.exists(path):
+        with open(path) as extra_file:
+            for line in extra_file:
+                var = line.strip().strip(',').strip('"\'')
+                if var and not var.startswith('#') and var not in extra_vars:
+                    extra_vars.append(var)
+    return extra_vars
+
+for case_name, case_obj in cases.items():
+    extra_vars = _read_postproc_extra_vars(case_name)
+    if extra_vars:
+        current_vars = list(getattr(case_obj, 'postproc_vars', []))
+        for var in extra_vars:
+            if var not in current_vars:
+                current_vars.append(var)
+        case_obj.postproc_vars = current_vars
+        print('Added '+str(len(extra_vars))+' sidecar postprocess variables for '+case_name)
+
 # Use the first case as reference for processing parameters
 reference_case = cases[case_names[0]]
 

@@ -13,6 +13,16 @@ def is_pft_var(var):
 def is_col_var(var):
     return '_col' in var
 
+def is_pft_group_var(var):
+    return '_pftgroup_' in var
+
+PFT_GROUP_TYPES = {
+    'tree': [3, 5],
+    'shrub': [14],
+    'woody': [3, 5, 14],
+    'moss': [18],
+}
+
 def do_dailytomonthly(values):
     dayspermonth=[31,28,31,30,31,30,31,31,30,31,30,31]
     npoints = len(values)
@@ -155,15 +165,29 @@ def _postprocess_requests(self):
         else:
             continue
         mypfts=[0]
-        if (is_pft_var(v)):
+        if (is_pft_group_var(v)):
+            hnum=2
+            mypfts=[0]
+        elif (is_pft_var(v)):
             hnum=2
             mypfts=self.postproc_pfts
         elif (is_col_var(v)):
             hnum=2
             mypfts=self.postproc_cols
+        aggregate_topounit = (
+            _case_is_peatlands(self) and
+            not is_pft_var(v) and
+            not is_col_var(v) and
+            get_postproc_basevar(v) in ['NPP', 'HR']
+        )
+        if aggregate_topounit:
+            # These calibration targets must exclude the unmeasured boardwalk
+            # topounit, so read their native PFT/column values from h2.
+            hnum=2
+        aggregate_pft_group = _case_is_peatlands(self) and is_pft_group_var(v)
         for p in mypfts:
             var_out = v
-            if (is_pft_var(v) or is_col_var(v)):
+            if ((is_pft_var(v) and not is_pft_group_var(v)) or is_col_var(v)):
                 var_out = var_out+str(p)
             requests.append({
                 'var': v,
@@ -173,6 +197,8 @@ def _postprocess_requests(self):
                 'hnum': hnum,
                 'dailytomonthly': dailytomonthly,
                 'annualmean': annualmean,
+                'aggregate_topounit': aggregate_topounit,
+                'aggregate_pft_group': aggregate_pft_group,
             })
     return requests
 
@@ -207,7 +233,7 @@ def _postprocess_factor(units, annualmean=False):
 
 def _case_is_peatlands(self):
     sitegroup = str(getattr(self, 'sitegroup', '')).strip().strip("'\"")
-    return sitegroup.lower() == 'peatlands'
+    return sitegroup.lower() == 'peatlands' or bool(getattr(self, 'humhol', False))
 
 def _requested_peatlands_topounit(self):
     topounit_value = str(getattr(self, 'postproc_topounit', -1)).strip().strip("'\"")
@@ -298,6 +324,97 @@ def _aggregate_history_columns(data, col_topounit, col_weight, col_active, reque
     if not np.any(mask):
         return np.ma.masked_all((data.shape[0],), dtype=float)
     return np.ma.average(data[:, mask], axis=1, weights=col_weight[mask])
+
+def _aggregate_history_topounits(ds, data, requested_topounits, varname):
+    """Area-average a native PFT or column field over selected topounits."""
+    ncvar = ds.variables[varname]
+    if 'pft' in ncvar.dimensions:
+        dimname = 'pft'
+        prefix = 'pfts1d_'
+    elif 'column' in ncvar.dimensions:
+        dimname = 'column'
+        prefix = 'cols1d_'
+    else:
+        raise ValueError(
+            'Topounit aggregation for '+varname+' requires a pft or column dimension; found '+
+            str(ncvar.dimensions)
+        )
+    if len(ncvar.dimensions) != 2 or ncvar.dimensions.index(dimname) != 1:
+        raise ValueError(
+            'Topounit aggregation for '+varname+' expected dimensions (time,'+dimname+
+            '); found '+str(ncvar.dimensions)
+        )
+
+    topounit_name = prefix+'topounit'
+    if topounit_name not in ds.variables:
+        raise KeyError('Variable '+topounit_name+' not found with '+varname)
+    topounit = np.asarray(ds.variables[topounit_name][:], dtype=int)
+
+    weight_name = prefix+'wtgcell'
+    if weight_name not in ds.variables:
+        weight_name = prefix+'wttopounit'
+    if weight_name not in ds.variables:
+        raise KeyError('No '+prefix+'wtgcell or '+prefix+'wttopounit weights found with '+varname)
+    weight = np.asarray(ds.variables[weight_name][:], dtype=float)
+
+    active_name = prefix+'active'
+    if active_name in ds.variables:
+        active = np.asarray(ds.variables[active_name][:], dtype=int)
+    else:
+        active = np.ones_like(topounit)
+    mask = (
+        np.isin(topounit, np.asarray(requested_topounits, dtype=int)) &
+        (active > 0) &
+        (weight > 0.0)
+    )
+    if not np.any(mask):
+        raise ValueError(
+            'No active '+dimname+' entries found for history topounits '+
+            str(list(requested_topounits))+' while processing '+varname
+        )
+    return np.ma.average(data[:, mask], axis=1, weights=weight[mask])
+
+def _aggregate_history_pft_group(ds, data, requested_topounits, group_name, varname):
+    """Sum selected PFT contributions per unit measured topounit area."""
+    ncvar = ds.variables[varname]
+    if len(ncvar.dimensions) != 2 or 'pft' not in ncvar.dimensions:
+        raise ValueError(
+            'PFT-group aggregation for '+varname+' expected dimensions (time,pft); found '+
+            str(ncvar.dimensions)
+        )
+    if group_name not in PFT_GROUP_TYPES:
+        raise ValueError('Unknown PFT group '+group_name+' for '+varname)
+    required = ['pfts1d_topounit', 'pfts1d_itype_veg']
+    for name in required:
+        if name not in ds.variables:
+            raise KeyError('Variable '+name+' not found with '+varname)
+    weight_name = 'pfts1d_wtgcell'
+    if weight_name not in ds.variables:
+        weight_name = 'pfts1d_wttopounit'
+    if weight_name not in ds.variables:
+        raise KeyError('No pfts1d_wtgcell or pfts1d_wttopounit weights found with '+varname)
+
+    topounit = np.asarray(ds.variables['pfts1d_topounit'][:], dtype=int)
+    vegetation_type = np.asarray(ds.variables['pfts1d_itype_veg'][:], dtype=int)
+    weight = np.asarray(ds.variables[weight_name][:], dtype=float)
+    if 'pfts1d_active' in ds.variables:
+        active = np.asarray(ds.variables['pfts1d_active'][:], dtype=int)
+    else:
+        active = np.ones_like(topounit)
+    area_mask = (
+        np.isin(topounit, np.asarray(requested_topounits, dtype=int)) &
+        (active > 0) &
+        (weight > 0.0)
+    )
+    group_mask = area_mask & np.isin(
+            vegetation_type, np.asarray(PFT_GROUP_TYPES[group_name], dtype=int))
+    if not np.any(group_mask):
+        raise ValueError(
+            'No active PFTs in group '+group_name+' found for history topounits '+
+            str(list(requested_topounits))+' while processing '+varname
+        )
+    measured_weight = np.sum(weight[area_mask])
+    return np.ma.sum(data[:, group_mask] * weight[group_mask], axis=1) / measured_weight
 
 def _finalize_postprocess_values(self, values, units, startyear, hist_nhtfrq, nperyear,
         dailytomonthly=False, annualmean=False):
@@ -511,6 +628,11 @@ def postprocess_member(self, ens_num=0, startyear=-1, endyear=9999, gindex=0, xi
     for req in requests:
         requests_by_hnum.setdefault(req['hnum'], []).append(req)
 
+    requested_topounits = None
+    if any(req['aggregate_topounit'] or req['aggregate_pft_group'] for req in requests):
+        requested_topounits = _history_topounits_for_request(
+                _requested_peatlands_topounit(self))
+
     for hnum, h_requests in requests_by_hnum.items():
         file_list, firstyear, _, hist_nhtfrq, nperyear = _postprocess_file_list(
                 self, rundir, hnum, startyear=startyear, endyear=endyear)
@@ -534,9 +656,17 @@ def postprocess_member(self, ens_num=0, startyear=-1, endyear=9999, gindex=0, xi
                         units_by_var[basevar] = getattr(ncvar, 'units', '')
                     data = np.ma.asarray(ncvar[:])
                     for req in base_requests:
-                        values_by_var[req['var_out']].append(
-                                _slice_postprocess_array(data, req['var'], index=req['index'],
-                                    gindex=gindex, xindex=xindex, yindex=yindex))
+                        if req['aggregate_pft_group']:
+                            group_name = req['var'].split('_pftgroup_', 1)[1]
+                            values = _aggregate_history_pft_group(
+                                    ds, data, requested_topounits, group_name, basevar)
+                        elif req['aggregate_topounit']:
+                            values = _aggregate_history_topounits(
+                                    ds, data, requested_topounits, basevar)
+                        else:
+                            values = _slice_postprocess_array(data, req['var'], index=req['index'],
+                                    gindex=gindex, xindex=xindex, yindex=yindex)
+                        values_by_var[req['var_out']].append(values)
 
         for req in h_requests:
             values = np.ma.concatenate(values_by_var[req['var_out']])

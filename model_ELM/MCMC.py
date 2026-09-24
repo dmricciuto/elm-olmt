@@ -15,34 +15,92 @@ import netCDF4 as nc
 import shutil
 
 
-def sample_from_prior(pmin, pmax, nsamples):
+ORDERED_PARAMETER_CONSTRAINTS = (
+    ('vpd_min_moss', 'vpd_max_moss'),
+)
+
+
+def normalize_ordered_parameter_constraints(constraints):
+    """Return ordered parameter constraints as ``(lower, upper)`` tuples."""
+    if constraints is None:
+        return ORDERED_PARAMETER_CONSTRAINTS
+    if isinstance(constraints, str):
+        constraints = [item.strip() for item in constraints.split(',') if item.strip()]
+    normalized = []
+    for constraint in constraints:
+        if isinstance(constraint, str):
+            if '<' not in constraint:
+                raise ValueError('Ordered parameter constraint must use "<": '+constraint)
+            lower_name, upper_name = [item.strip() for item in constraint.split('<', 1)]
+        else:
+            lower_name, upper_name = constraint
+            lower_name = str(lower_name).strip()
+            upper_name = str(upper_name).strip()
+        if not lower_name or not upper_name:
+            raise ValueError('Ordered parameter constraint has an empty parameter name')
+        normalized.append((lower_name, upper_name))
+    return tuple(normalized)
+
+
+def parameters_satisfy_constraints(parms, parameter_names,
+        ordered_constraints=ORDERED_PARAMETER_CONSTRAINTS):
+    """Return whether named model parameters satisfy physical ordering rules."""
+    if parameter_names is None:
+        return True
+    parameter_names = list(parameter_names)
+    for lower_name, upper_name in normalize_ordered_parameter_constraints(ordered_constraints):
+        if lower_name not in parameter_names or upper_name not in parameter_names:
+            continue
+        lower = parms[parameter_names.index(lower_name)]
+        upper = parms[parameter_names.index(upper_name)]
+        if not lower < upper:
+            return False
+    return True
+
+
+def sample_from_prior(pmin, pmax, nsamples, parameter_names=None,
+        ordered_constraints=ORDERED_PARAMETER_CONSTRAINTS):
     nparms = len(pmin)
     #Uniform priors
-    samples = np.random.uniform(low=np.array(pmin), high=np.array(pmax), \
-        size=(nsamples,nparms))
-    return samples
+    samples = []
+    while len(samples) < nsamples:
+        candidates = np.random.uniform(
+            low=np.array(pmin), high=np.array(pmax),
+            size=(max(nsamples - len(samples), 16), nparms))
+        samples.extend(candidate for candidate in candidates
+                       if parameters_satisfy_constraints(
+                           candidate, parameter_names, ordered_constraints))
+    return np.asarray(samples[:nsamples])
 
 
-def log_posterior(parms, sites, myvars, pmin, pmax, obs, obs_err, nparms_ensemble, nerr_parms, run_surrogate):
+def log_posterior(parms, targets, myvars, pmin, pmax, obs, obs_err,
+        nparms_ensemble, nerr_parms, run_surrogate, parameter_names,
+        ordered_constraints=ORDERED_PARAMETER_CONSTRAINTS):
     # Quick prior check first (fastest rejection)
     if np.any(parms < pmin) or np.any(parms > pmax):
         return -np.inf  # Use -inf instead of -9999999 (emcee standard)
+    if not parameters_satisfy_constraints(parms, parameter_names, ordered_constraints):
+        return -np.inf
     
     log_likelihood = 0.0
     parms_model = parms[:(nparms_ensemble - nerr_parms)]
     
     try:
-        for s in sites:
-            if s not in run_surrogate:
+        for target in targets:
+            if target not in run_surrogate:
                 continue
                 
-            # Get model predictions for this site
-            output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
+            # Get model predictions for this target
+            output = run_surrogate[target](parms_model.reshape(1, -1), myvars)
             
             for i, v in enumerate(myvars):
+                if v not in output or v not in obs[target] or v not in obs_err[target]:
+                    continue
                 myoutput = output[v].flatten()
-                myobs = obs[s][v]
-                myerr = obs_err[s][v]
+                myobs = obs[target][v]
+                myerr = obs_err[target][v]
+                if len(myoutput) != len(myobs) or len(myobs) != len(myerr):
+                    return -np.inf
                 
                 # Vectorized masking
                 mask = (myobs > -9000) & (myerr > 0)
@@ -91,14 +149,32 @@ def estimate_burnin(sampler, labels_model):
 
 #-------------------------------- MCMC ------------------------------------------------------
 
-def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False):
-    # Check if all_sites is defined, otherwise use single site
-    if multisite and hasattr(self, 'all_sites') and self.all_sites is not None:
-        sites = self.all_sites
-        nsites = len(sites)
+def _mcmc_treatment_items(self):
+    treatment_cases = getattr(self, 'all_treatment_cases', {})
+    if isinstance(treatment_cases, dict):
+        return list(treatment_cases.items())
+    if isinstance(treatment_cases, (list, tuple)):
+        return [(str(case_name), str(case_name)) for case_name in treatment_cases]
+    return []
+
+
+def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False,
+        multitreatment=False):
+    if multisite and multitreatment:
+        raise ValueError('MCMC can run multisite or multitreatment mode, not both at once')
+
+    target_kind = 'site'
+    if multitreatment:
+        target_kind = 'treatment'
+        target_items = _mcmc_treatment_items(self)
+        if len(target_items) == 0:
+            treatment = getattr(self, 'treatment_name', self.casename)
+            target_items = [(treatment, self.casename)]
+    elif multisite and hasattr(self, 'all_sites') and self.all_sites is not None:
+        target_items = [(s, self.casename.replace(self.site, s)) for s in self.all_sites]
     else:
-        sites = [self.site]
-        nsites = 1
+        target_items = [(self.site, self.casename)]
+    targets = [target for target, _ in target_items]
     
     pmin, pmax, nparms_ensemble = self.ensemble_pmin, self.ensemble_pmax, \
         self.nparms_ensemble
@@ -107,18 +183,18 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
     obs_err = {}
     thiscase={}
     
-    for s in sites:
-        if s == self.site:
-            obs[s] = self.obs.copy()
-            obs_err[s] = self.obs_err.copy()
-            run_surrogate[s] = self.run_surrogate
+    for target, case_name in target_items:
+        if case_name == self.casename:
+            obs[target] = self.obs.copy()
+            obs_err[target] = self.obs_err.copy()
+            run_surrogate[target] = self.run_surrogate
         else:
             from model_ELM import ELMcase
-            #Get the case objects for other sites
-            thiscase[s] = ELMcase(casename=self.casename.replace(self.site, s))
-            run_surrogate[s] = thiscase[s].run_surrogate
-            obs[s] = thiscase[s].obs.copy()
-            obs_err[s] = thiscase[s].obs_err.copy()
+            # Get the case objects for other sites/treatments.
+            thiscase[target] = ELMcase(casename=case_name)
+            run_surrogate[target] = thiscase[target].run_surrogate
+            obs[target] = thiscase[target].obs.copy()
+            obs_err[target] = thiscase[target].obs_err.copy()
 
     #Add parameters to estimate observation error stddev
     nerr_parms = 0    
@@ -126,9 +202,14 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
     if (fit_error):
         print("Fitting observation error parameters")
         for v in myvars:
-            #Using the first site to set prior bounds
-            mask = (obs[sites[0]][v] > -9000) & (obs_err[sites[0]][v] > 0)
-            max_obs = max([np.max(np.abs(obs[sites[0]][v][mask])), 0.01])
+            # Use all targets to set a shared error-prior scale for this variable.
+            max_obs = 0.01
+            for target in targets:
+                if v not in obs[target] or v not in obs_err[target]:
+                    continue
+                mask = (obs[target][v] > -9000) & (obs_err[target][v] > 0)
+                if np.any(mask):
+                    max_obs = max(max_obs, np.max(np.abs(obs[target][v][mask])))
             err_prior_min = 0.0
             err_prior_max = 0.25 * max_obs
 
@@ -140,7 +221,15 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
             nerr_parms = nerr_parms+1
 
     # Initialize walkers in the prior space
-    p0 = sample_from_prior(pmin, pmax, nwalkers)
+    ordered_constraints = normalize_ordered_parameter_constraints(
+        getattr(self, 'calibration_parameter_constraints', None))
+    active_constraints = [
+        lower+' < '+upper for lower, upper in ordered_constraints
+        if lower in ensemble_parms and upper in ensemble_parms]
+    if active_constraints:
+        print('Enforcing parameter constraints: '+', '.join(active_constraints))
+    p0 = sample_from_prior(
+        pmin, pmax, nwalkers, ensemble_parms, ordered_constraints)
 
     # Set up the sampler and run MCMC
     with multiprocessing.Pool() as pool:
@@ -148,7 +237,8 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
             nwalkers,
             nparms_ensemble,
             log_posterior,
-            args=(sites, myvars, pmin, pmax, obs, obs_err, nparms_ensemble, nerr_parms, run_surrogate),
+            args=(targets, myvars, pmin, pmax, obs, obs_err, nparms_ensemble,
+                  nerr_parms, run_surrogate, ensemble_parms, ordered_constraints),
             #pool=pool
         )
         sampler.run_mcmc(p0, nsteps, progress=True)
@@ -179,6 +269,8 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
     MCMC_out = self.UQ_output + '/MCMC_output/'
     if (multisite):
         MCMC_out = MCMC_out+'/multisite/'
+    if (multitreatment):
+        MCMC_out = MCMC_out+'/multitreatment/'
     outdir = MCMC_out+'/plots/pdfs'
     os.makedirs(outdir, exist_ok=True)
     for i in range(samples.shape[1]):
@@ -191,14 +283,16 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
         plt.close()
 
     n_samples = samples.shape[0]
-    for s in sites:
+    outputs_by_target = {}
+    default_outputs_by_target = {}
+    for target in targets:
         output_dict = {v: [] for v in myvars}
         default_output_dict = {v: [] for v in myvars}  # ADD THIS: Store default predictions
         
         # Run MCMC samples through surrogate
         for i in range(n_samples):
             parms_model = samples[i, :nparms_ensemble - nerr_parms]
-            output = run_surrogate[s](parms_model.reshape(1, -1), myvars)
+            output = run_surrogate[target](parms_model.reshape(1, -1), myvars)
             for v in myvars:
                 output_dict[v].append(output[v].flatten())
 
@@ -208,27 +302,29 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
 
         #Run default parameters through surrogate model
         if hasattr(self, 'default_parms') and self.default_parms:
-            print(f"Running default parameters through surrogate model for site {s}")
+            print(f"Running default parameters through surrogate model for {target_kind} {target}")
             try:
                 # Convert default_parms to the format expected by surrogate
                 default_parms_array = np.array(self.default_parms).reshape(1, -1)
-                default_output = run_surrogate[s](default_parms_array, myvars)
+                default_output = run_surrogate[target](default_parms_array, myvars)
                 # Store default predictions
                 for v in myvars:
                     default_output_dict[v] = default_output[v].flatten()
             except Exception as e:
-                print(f"Error running default parameters through surrogate for site {s}: {e}")
+                print(f"Error running default parameters through surrogate for {target_kind} {target}: {e}")
                 # Set to None to indicate failure
                 for v in myvars:
                     default_output_dict[v] = None
         else:
             for v in myvars:
                 default_output_dict[v] = None
+        outputs_by_target[target] = output_dict
+        default_outputs_by_target[target] = default_output_dict
 
         # Plot predictions with 95% confidence intervals AND default parameters
         outdir_pred = MCMC_out + 'plots/predictions/'
-        if (multisite):
-            outdir_pred = outdir_pred+s
+        if (multisite or multitreatment):
+            outdir_pred = os.path.join(outdir_pred, str(target).replace(os.sep, '_'))
         os.makedirs(outdir_pred, exist_ok=True)
         
         for v in myvars:
@@ -239,9 +335,9 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
             x = np.arange(len(median))
             
             # Prepare observations
-            obs_plot = np.array(obs[s][v].copy())
+            obs_plot = np.array(obs[target][v].copy())
             obs_plot[obs_plot < -9000] = np.nan
-            obs_err_plot = np.array(obs_err[s][v].copy())
+            obs_err_plot = np.array(obs_err[target][v].copy())
             obs_err_plot[obs_err_plot < -9000] = np.nan
             
             if (fit_error):
@@ -266,7 +362,7 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
 
             plt.xlabel('Time', fontsize=14)
             plt.ylabel(v, fontsize=14)
-            plt.title(f'Posterior predictive for {v} (Site: {s})', fontsize=16)
+            plt.title(f'Posterior predictive for {v} ({target_kind.title()}: {target})', fontsize=16)
             plt.legend(fontsize=12)
             plt.grid(True, alpha=0.3)
             plt.xticks(fontsize=12)
@@ -326,9 +422,11 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
         f.write(f"Number of MCMC samples: {n_samples}\n")
         f.write(f"Burn-in: {burnin} steps ({burnin/nsteps*100:.1f}%)\n")
         if multisite:
-            f.write(f"Multi-site analysis with {len(sites)} sites: {sites}\n")
+            f.write(f"Multi-site analysis with {len(targets)} sites: {targets}\n")
+        elif multitreatment:
+            f.write(f"Multi-treatment analysis with {len(targets)} treatments: {targets}\n")
         else:
-            f.write(f"Single-site analysis: {sites[0]}\n")
+            f.write(f"Single-site analysis: {targets[0]}\n")
         f.write("\n")
         
         # Track overall statistics
@@ -336,8 +434,10 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
         all_mcmc_rmse = []
         all_improvements = []
         
-        for s in sites:
-            f.write(f"\nSITE: {s}\n")
+        for target in targets:
+            output_dict = outputs_by_target[target]
+            default_output_dict = default_outputs_by_target[target]
+            f.write(f"\n{target_kind.upper()}: {target}\n")
             f.write("-" * 40 + "\n")
             
             site_default_rmse = []
@@ -347,13 +447,13 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
             for v in myvars:
                 f.write(f"\nVariable: {v}\n")
                 
-                # Get valid observations for this site/variable
-                obs_plot = np.array(obs[s][v].copy())
+                # Get valid observations for this target/variable
+                obs_plot = np.array(obs[target][v].copy())
                 obs_plot[obs_plot < -9000] = np.nan
                 obs_valid = obs_plot[~np.isnan(obs_plot)]
                 
                 if len(obs_valid) > 0 and default_output_dict[v] is not None:
-                    # Get predictions for this site/variable
+                    # Get predictions for this target/variable
                     lower = np.percentile(output_dict[v], 2.5, axis=0)
                     upper = np.percentile(output_dict[v], 97.5, axis=0)
                     median = np.percentile(output_dict[v], 50, axis=0)
@@ -409,16 +509,16 @@ def MCMC(self, myvars, nwalkers=32, nsteps=100, fit_error=True, multisite=False)
                 else:
                     f.write(f"  Cannot calculate statistics (no valid data or default predictions)\n")
             
-            # Site summary
+            # Target summary
             if site_default_rmse:
-                f.write(f"\nSITE {s} SUMMARY:\n")
+                f.write(f"\n{target_kind.upper()} {target} SUMMARY:\n")
                 f.write(f"  Average RMSE improvement: {np.mean(site_improvements):.1f}%\n")
                 f.write(f"  Variables improved: {sum(1 for imp in site_improvements if imp > 0)}/{len(site_improvements)}\n")
         
-        # Overall summary across all sites and variables
+        # Overall summary across all targets and variables
         if all_default_rmse:
             f.write(f"\n" + "="*60 + "\n")
-            f.write("OVERALL SUMMARY (All Sites & Variables)\n")
+            f.write("OVERALL SUMMARY (All Targets & Variables)\n")
             f.write("="*60 + "\n")
             f.write(f"Total variables analyzed: {len(all_default_rmse)}\n")
             f.write(f"Average default RMSE: {np.mean(all_default_rmse):.4f}\n")
@@ -511,4 +611,3 @@ def write_best_params_to_clm(self, best_parms, labels_model, out_nc_path):
             else:
                 print(f"Warning: Parameter {pname} not found in NetCDF file.")
     print(f"Best-fit parameters written to {out_nc_path}")
-

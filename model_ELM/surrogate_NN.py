@@ -9,7 +9,7 @@ import pickle
 from optparse import OptionParser
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split, GridSearchCV
-from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
 import multiprocessing as mp
 
 # Suppress sklearn warnings
@@ -55,66 +55,91 @@ def train_single_timestep(args):
     except Exception as e:
         return t, None, None, None, f"Training failed: {e}"
 
+def _available_training_processes():
+    allocated = os.environ.get('SLURM_CPUS_PER_TASK', '')
+    requested = os.environ.get('OLMT_SURROGATE_WORKERS', '')
+    try:
+        n_cores = int(allocated) if allocated else mp.cpu_count()
+    except (TypeError, ValueError):
+        n_cores = mp.cpu_count()
+    try:
+        worker_limit = int(requested) if requested else 8
+    except (TypeError, ValueError):
+        worker_limit = 8
+    return max(1, min(n_cores, worker_limit))
+
+def _train_surrogate_variable(self, vname, n_processes):
+    print(f"Training surrogate for {vname} using up to {n_processes} timestep processes")
+    nqoi = self.output[vname].shape[0]
+    y = self.output[vname].transpose()
+    p = self.samples.transpose()
+    valid_indices = np.where(y[:,0].squeeze() > -9999)[0]
+    y = y[valid_indices, :].copy()
+    p = p[valid_indices, :].copy()
+    exclude_zeros = bool(getattr(self, 'surrogate_exclude_zeros', False))
+    zero_threshold = float(getattr(self, 'surrogate_zero_threshold', 0.0))
+    if nqoi > 50 and exclude_zeros:
+        productive_samples = np.any(y > zero_threshold, axis=1)
+        y = y[productive_samples, :]
+        p = p[productive_samples, :]
+        print(
+            f"  {vname}: SVD requires a shared sample set; retained "
+            f"{len(y)} samples productive in at least one timestep"
+        )
+    print(f"  {vname}: using {len(y)} valid samples out of {self.samples.shape[1]}")
+
+    if len(y) < 5:
+        reason = f"only {len(y)} valid samples"
+        print(f"  Skipping {vname}: {reason}")
+        self.surrogate_skipped[vname] = reason
+        self.use_svd[vname] = False
+        self.surrogate[vname] = {}
+        return vname, False
+
+    if nqoi > 50:
+        print(f"  {vname}: {nqoi} timesteps > 50, using SVD approach")
+        self.use_svd[vname] = True
+        trained = self.train_svd_surrogate(vname, y, p, n_processes)
+    else:
+        print(f"  {vname}: {nqoi} timesteps <= 50, using per-timestep approach")
+        self.use_svd[vname] = False
+        n_processes_timestep = min(n_processes, nqoi)
+        trained = self.train_timestep_surrogate(vname, y, p, n_processes_timestep)
+
+    if not trained:
+        reason = 'no surrogate models trained'
+        print(f"  Skipping downstream UQ for {vname}: {reason}")
+        self.surrogate_skipped[vname] = reason
+    return vname, trained
+
 def train_surrogate(self, myvars):
-    # Determine number of processes
-    n_cores = mp.cpu_count()
-    n_processes = min(n_cores - 1, 8)
-    print(f"Using up to {n_processes} processes for training")
-    
-    # Initialize tracking variables
+    myvars = list(myvars)
+    if not myvars:
+        return []
+
+    n_processes = _available_training_processes()
+    n_variable_workers = min(len(myvars), n_processes)
+    processes_per_variable = max(1, n_processes // n_variable_workers)
+    print(
+        f"Training {len(myvars)} variables with {n_variable_workers} concurrent variable workers "
+        f"and up to {processes_per_variable} timestep processes per variable "
+        f"({n_processes} total allocated processes)"
+    )
+
     self.svd_components = {}
     self.use_svd = {}
     self.surrogate_skipped = {}
-    trained_vars = []
-    
-    for var in myvars:
-        print(f"Training surrogate for {var}")
-        vname = var
-        nqoi = self.output[vname].shape[0]  # Number of timesteps
 
-        # Extract outputs and samples 
-        y = self.output[vname].transpose()  # Shape: (nsamples, ntimesteps)
-        p = self.samples.transpose()        # Shape: (nsamples, nparams)
-
-        # Filter out invalid samples
-        valid_indices = np.where(y[:,0].squeeze() > -9999)[0]   
-
-        y = y[valid_indices, :].copy()
-        p = p[valid_indices, :].copy()
-        
-        print(f"Using {len(valid_indices)} valid samples out of {self.samples.shape[1]}")
-
-        if len(valid_indices) < 5:
-            reason = f"only {len(valid_indices)} valid samples"
-            print(f"  Skipping {vname}: {reason}")
-            self.surrogate_skipped[vname] = reason
-            self.use_svd[vname] = False
-            self.surrogate[vname] = {}
-            continue
-
-        # Decide whether to use SVD or per-timestep approach
-        if nqoi > 50:
-            print(f"  {nqoi} timesteps > 50, using SVD approach")
-            self.use_svd[vname] = True
-            # SVD will optimize process count internally
-            trained = self.train_svd_surrogate(vname, y, p, n_processes)
-        else:
-            print(f"  {nqoi} timesteps <= 50, using per-timestep approach")
-            self.use_svd[vname] = False
-            # Optimize for per-timestep too
-            n_processes_timestep = min(n_processes, nqoi)
-            if n_processes_timestep < n_processes:
-                print(f"  Reducing processes from {n_processes} to {n_processes_timestep} (limited by timesteps)")
-            trained = self.train_timestep_surrogate(vname, y, p, n_processes_timestep)
-
-        if trained:
-            trained_vars.append(vname)
-        else:
-            reason = 'no surrogate models trained'
-            print(f"  Skipping downstream UQ for {vname}: {reason}")
-            self.surrogate_skipped[vname] = reason
-
-    return trained_vars
+    if n_variable_workers == 1:
+        results = [_train_surrogate_variable(self, var, processes_per_variable)
+                   for var in myvars]
+    else:
+        with ThreadPoolExecutor(max_workers=n_variable_workers) as executor:
+            futures = [executor.submit(
+                    _train_surrogate_variable, self, var, processes_per_variable)
+                    for var in myvars]
+            results = [future.result() for future in futures]
+    return [vname for vname, trained in results if trained]
 
 def train_svd_surrogate(self, vname, y, p, n_processes):
     """Train surrogate using SVD decomposition - FIXED VERSION"""
@@ -191,8 +216,12 @@ def train_svd_surrogate(self, vname, y, p, n_processes):
     self.yscaler[vname] = {}
     
     # For SVD, track failed components differently
-    self.svd_failed_components = {vname: []}
-    self.svd_component_means = {vname: []}
+    if not hasattr(self, 'svd_failed_components'):
+        self.svd_failed_components = {}
+    if not hasattr(self, 'svd_component_means'):
+        self.svd_component_means = {}
+    self.svd_failed_components[vname] = []
+    self.svd_component_means[vname] = []
     
     # Prepare training arguments
     param_grid = {
@@ -255,10 +284,6 @@ def train_timestep_surrogate(self, vname, y, p, n_processes):
     self.qoi_bad[vname] = []
     self.qoi_bad_meanval[vname] = []
     
-    # Shared parameter scaler
-    pscaler_shared = preprocessing.StandardScaler().fit(p)
-    p_norm = pscaler_shared.transform(p)
-    
     # Initialize storage
     self.surrogate[vname] = {}
     self.pscaler[vname] = {}
@@ -274,25 +299,56 @@ def train_timestep_surrogate(self, vname, y, p, n_processes):
     }
     
     training_args = []
+    timestep_scalers = {}
+    skipped_results = []
+    exclude_zeros = bool(getattr(self, 'surrogate_exclude_zeros', False))
+    zero_threshold = float(getattr(self, 'surrogate_zero_threshold', 0.0))
     for t in range(nqoi):
         y_t = y[:, t]
+        sample_mask = np.isfinite(y_t) & (y_t > -9999)
+        if exclude_zeros:
+            sample_mask = sample_mask & (y_t > zero_threshold)
+        y_t = y_t[sample_mask]
+        p_t = p[sample_mask, :]
+        if len(y_t) < 5:
+            skipped_results.append((
+                t, None, None, None,
+                f"Skipped (only {len(y_t)} samples above zero threshold {zero_threshold})"
+            ))
+            continue
+        pscaler_t = preprocessing.StandardScaler().fit(p_t)
+        p_norm = pscaler_t.transform(p_t)
+        timestep_scalers[t] = pscaler_t
         ptrain, pval, ytrain, yval = train_test_split(
             p_norm, y_t, test_size=0.2, random_state=42
         )
         training_args.append((t, ptrain, ytrain, pval, yval, param_grid, 42))
+
+    if exclude_zeros:
+        retained = [len(args[2]) + len(args[4]) for args in training_args]
+        if retained:
+            print(
+                f"  {vname}: excluded nonpositive samples per timestep; retained "
+                f"{min(retained)}-{max(retained)} of {nsamples} samples"
+            )
     
     # Train timesteps in parallel
     print(f"  Training {nqoi} timesteps in parallel using {n_processes} processes...")
     
-    with ProcessPoolExecutor(max_workers=n_processes) as executor:
-        results = list(executor.map(train_single_timestep, training_args))
+    if training_args:
+        with ProcessPoolExecutor(max_workers=min(n_processes, len(training_args))) as executor:
+            results = list(executor.map(train_single_timestep, training_args))
+    else:
+        results = []
+    results.extend(skipped_results)
+    results.sort(key=lambda item: item[0])
     
     # Process results
     timestep_r2_scores = []
     for t, grid, yscaler_t, r2, status in results:
         if grid is not None:
             self.surrogate[vname][t] = grid
-            self.pscaler[vname][t] = pscaler_shared
+            self.pscaler[vname][t] = timestep_scalers[t]
             self.yscaler[vname][t] = yscaler_t
             timestep_r2_scores.append(r2)
             if t % 12 == 0:  # Print every 12th timestep
@@ -349,6 +405,9 @@ def plot_surrogate(self, myvars):
                 
                 # Remove invalid values
                 valid_mask = np.isfinite(y_true_t) & np.isfinite(y_pred_t) & (y_true_t > -9999)
+                if bool(getattr(self, 'surrogate_exclude_zeros', False)):
+                    valid_mask = valid_mask & (
+                        y_true_t > float(getattr(self, 'surrogate_zero_threshold', 0.0)))
                 
                 if np.sum(valid_mask) > 5 and np.std(y_true_t[valid_mask]) > 1e-10:  # Need some variation
                     r2 = np.corrcoef(y_true_t[valid_mask], y_pred_t[valid_mask])[0,1]**2
@@ -400,6 +459,9 @@ def plot_surrogate(self, myvars):
         
         # Remove bad values for plotting
         valid_mask = (y_flat > -9999) & (pred_flat > -9999) & np.isfinite(y_flat) & np.isfinite(pred_flat)
+        if bool(getattr(self, 'surrogate_exclude_zeros', False)):
+            valid_mask = valid_mask & (
+                y_flat > float(getattr(self, 'surrogate_zero_threshold', 0.0)))
         y_valid = y_flat[valid_mask]
         pred_valid = pred_flat[valid_mask]
         
