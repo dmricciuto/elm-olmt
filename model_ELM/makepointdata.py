@@ -442,6 +442,13 @@ def is_standalone_spruce_three_topounit_surface(self, ds):
     """Return true for the non-Peatlands SPRUCE HUM_HOL 3-topounit surface."""
     if self.is_peatlands_sitegroup() or not getattr(self, 'humhol', False):
         return False
+    return self.is_spruce_three_topounit_surface(ds)
+
+
+def is_spruce_three_topounit_surface(self, ds):
+    """Return true for a SPRUCE HUM_HOL surface with boardwalk, hollow, hummock."""
+    if not getattr(self, 'humhol', False):
+        return False
     if 'SPR' not in str(getattr(self, 'site', '')):
         return False
     if 'PCT_NAT_PFT' not in ds or 'topounit' not in ds['PCT_NAT_PFT'].dims:
@@ -577,6 +584,8 @@ def set_peatlands_site_pfts(self, ds, pct_pft, zerootherlandunits=True):
         for v in nonveg:
             if v in ds.variables:
                 ds[v] = ds[v] * 0 + 0.0
+    if self.is_spruce_three_topounit_surface(ds):
+        ds = self.set_first_topounit_bareground(ds)
     return ds
 
 
@@ -696,6 +705,24 @@ def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
             ds.attrs['topounit_order'] = '1=upland_high'
             ds.attrs['topounit_fraction_default'] = 'upland=1.0'
             ds.attrs['topounit_source_index'] = str(self.peatlands_upland_source_topounit())
+        elif 'SPR' in str(getattr(self, 'site', '')) and getattr(self, 'humhol', False):
+            print('Adding SPRUCE 3-topounit Peatlands surface metadata')
+            fracarea = [0.5, 0.17, 0.33]
+            elevations = [464.95, 465.0, 465.15]
+            distances = [0, 3, 1]
+            is_bog = [0, 1, 1]
+            bog_peat_interface_elev = elevations[1] - 3.0
+            peat_depth = [elev - bog_peat_interface_elev for elev in elevations]
+            till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0]
+            ds = self.add_topounit_dimension(
+                ds, latvar, lonvar, num_topounits=3,
+                fracarea=fracarea, elevations=elevations, distances=distances,
+                is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat
+            )
+            ds.attrs['topounit_order'] = (
+                '1=boardwalk_fen_bareground, 2=bog_hollow, 3=bog_hummock')
+            ds.attrs['topounit_fraction_default'] = (
+                'boardwalk_fen=0.50, bog_hollow=0.17, bog_hummock=0.33')
         else:
             print('Adding default 4-topounit Peatlands surface metadata')
             fracarea = [0.25, 0.25, 0.25, 0.25]
@@ -752,7 +779,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         lonvar = 'xc'
         latvar = 'yc'
         infile  = self.domain_global
-        outfile = self.OLMTdir+'/temp/domain.nc'
+        outfile = self.case_input_path('domain.nc')
         #Save mask for other datasets
         self.mask_grid = self.combined_external_mask(
             mydata[latvar][:], mydata[lonvar][:], native_mask=mydata['mask'][:].copy()
@@ -760,12 +787,12 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         isdomain=True
     elif ('landuse' in filename.split('/')[-1] or 'pftdyn' in filename.split('/')[-1]):
         infile = self.pftdyn_global
-        outfile = self.OLMTdir+'/temp/surfdata.pftdyn.nc'
+        outfile = self.case_input_path('surfdata.pftdyn.nc')
         print('Creating land use data from ', filename)
         ispftdyn=True
     else:
         infile = self.surfdata_global
-        outfile = self.OLMTdir+'/temp/surfdata.nc'
+        outfile = self.case_input_path('surfdata.nc')
         print('Creating surface data from ', filename)
         if hasattr(self, 'add_surfdata') and self.add_surfdata:
             modifysurfdat=True
@@ -790,7 +817,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
         elif (not ispftdyn):
             ds = self.apply_external_mask_to_surface(ds, latvar, lonvar)
 
-        if (self.is_peatlands_sitegroup() and not isdomain and not ispftdyn):
+        if (self.is_peatlands_sitegroup() and not isdomain):
             ds = self.prepare_peatlands_surface_data(ds, latvar, lonvar)
         
         # Handle HumHol topounit dimension
@@ -874,7 +901,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 for year in self.siteinfo['transitions'].keys():
                     #Set PFTS for this year and all subsequent years
                     pct_nat_pft = xr.DataArray(self.siteinfo['transitions'][year]['PCT_NAT_PFT'], dims=['natpft'])
-                    if self.is_standalone_spruce_three_topounit_surface(ds):
+                    if self.is_spruce_three_topounit_surface(ds):
                         #Set up as 3 topounits, 1 bareground and 2 with the specified PFT fractions
                         ds = self.setpfts(ds, pct_nat_pft, first_bareground=True, year=int(year))
                     else:
@@ -882,7 +909,7 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                     #Set harvest for this year
                     year_indices = np.where(years == int(year))[0]
                     ds['HARVEST_VH1'].values[year_indices] = self.siteinfo['transitions'][year]['HARVEST']
-            if self.is_standalone_spruce_three_topounit_surface(ds):
+            if self.is_spruce_three_topounit_surface(ds):
                 ds = self.set_first_topounit_bareground(ds)
 
         if (self.shift_lon):

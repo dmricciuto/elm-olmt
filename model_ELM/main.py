@@ -12,6 +12,7 @@ from .run_GSA import *
 from .MCMC import *
 from .netcdf4_functions import *
 from datetime import datetime
+from netCDF4 import Dataset, num2date
 import xarray as xr
 import code  # For development: code.interact(local=dict(globals(), **locals()))
 
@@ -187,6 +188,8 @@ class ELMcase():
         except Exception:
           self.resubmit_years=0
         self.ensemble_resubmit_years=0
+        self.surrogate_exclude_zeros=False
+        self.surrogate_zero_threshold=0.0
         # Build offline driver (elm_offline_driver) alongside e3sm.exe
         self.offline_driver = offline_driver
 
@@ -216,12 +219,11 @@ class ELMcase():
     self.obs=obs
     self.obs_err=obs_err
 
-  def temp_file_path(self, filename):
-    case_name = getattr(self, 'casename', 'case')
-    safe_case = re.sub(r'[^A-Za-z0-9_.-]+', '_', case_name)
-    self.case_temp_dir = self.OLMTdir+'/temp/'+safe_case
-    os.makedirs(self.case_temp_dir, exist_ok=True)
-    return self.case_temp_dir+'/'+filename
+  def case_input_path(self, filename):
+    if (not hasattr(self, 'rundir') or self.rundir == ''):
+      raise RuntimeError('OLMT case inputs require rundir to be set')
+    os.makedirs(self.rundir, exist_ok=True)
+    return os.path.join(self.rundir, filename)
 
   def clean_input_path(self, path):
     if (not isinstance(path, str)):
@@ -234,32 +236,6 @@ class ELMcase():
     except ValueError:
       pass
     return clean_path.strip("'\"")
-
-  def cleanup_case_temp_dir(self):
-    case_temp_dir = getattr(self, 'case_temp_dir', '')
-    if (case_temp_dir == '' or not os.path.isdir(case_temp_dir)):
-      return
-    temp_root = os.path.abspath(self.OLMTdir+'/temp')
-    target = os.path.abspath(case_temp_dir)
-    if (not target.startswith(temp_root+os.sep)):
-      print('Warning: refusing to remove unexpected temp directory '+case_temp_dir)
-      return
-    for attempt in range(3):
-      try:
-        shutil.rmtree(case_temp_dir)
-        return
-      except FileNotFoundError:
-        return
-      except OSError:
-        if (attempt < 2):
-          time.sleep(0.5*(attempt+1))
-          continue
-        try:
-          remaining = os.listdir(case_temp_dir)
-        except FileNotFoundError:
-          return
-        print('Warning: failed to remove OLMT temp directory '+case_temp_dir+
-                '; remaining entries: '+str(remaining[:10]))
 
   def get_machine(self,machine=''):
     if (machine == ''):
@@ -344,15 +320,40 @@ class ELMcase():
     flags = self.replace_slurm_submit_option(flags, ['-t', '--time'], '--time', walltime)
     flags = self.replace_slurm_submit_option(flags, ['-p', '--partition'], '-p', partition)
     flags = self.replace_slurm_submit_option(flags, ['--qos'], '--qos', qos)
+    if (self.pathfinder_multinode_job(ntasks=self.np)):
+      flags = self.replace_slurm_submit_option(flags, ['-C', '--constraint'], '--constraint', 'BL')
     return ' '.join([shlex.quote(str(f)) for f in flags])
 
-  def slurm_submit_args(self, include_time=False, ntasks=None):
+  def slurm_nodes_for_tasks(self, ntasks):
+    try:
+      tasks_per_node = int(str(self.xmlquery('MAX_TASKS_PER_NODE')).strip())
+    except Exception:
+      tasks_per_node = 128 if (self.machine == 'pathfinder' and self.slurm_partition() == 'hpcl-cli185') else 0
+    if (tasks_per_node <= 0):
+      return 1
+    return max(1, int(math.ceil(float(ntasks) / float(tasks_per_node))))
+
+  def pathfinder_multinode_job(self, ntasks=None, nodes=None):
+    if (self.machine != 'pathfinder'):
+      return False
+    if (nodes is None):
+      nodes = self.slurm_nodes_for_tasks(ntasks if ntasks is not None else self.np)
+    try:
+      return int(nodes) > 1
+    except Exception:
+      return False
+
+  def slurm_submit_args(self, include_time=False, ntasks=None, cpus_per_task=None, mem=None):
     args = []
     partition = self.slurm_partition()
     if (partition != ''):
       args += ['-p', partition]
     if (ntasks is not None):
       args += ['-n', str(ntasks)]
+    if (cpus_per_task is not None):
+      args += ['-c', str(cpus_per_task)]
+    if (mem is not None):
+      args += ['--mem='+str(mem)]
     qos = self.slurm_qos() if self.machine == 'pathfinder' else ''
     if (qos != ''):
       args += ['--qos='+qos]
@@ -372,9 +373,58 @@ class ELMcase():
 
   def cime_case_setup_flags(self):
     flags = []
-    if (self.machine == 'pathfinder'):
-      flags.append('--disable-git')
+    # Containerized OLMT cases do not need CIME's local Git bookkeeping, and
+    # bind-mounted source trees may have different host/container ownership.
+    # Keep the Pathfinder behavior and use the same default for Docker. Cases
+    # can override the default with disable_git in [case_options].
+    disable_git = (getattr(self, 'machine', '') in ['pathfinder', 'docker'])
+    if (hasattr(self, 'case_options') and 'disable_git' in self.case_options):
+      value = str(self.case_options['disable_git']).strip().lower()
+      disable_git = value in ['true', '.true.', '1', 'yes', 'on']
+    if (disable_git):
+      disable_git_flag = self.cime_supported_case_setup_flag(['--disable-git', '--disable_git'])
+      if (disable_git_flag != ''):
+        flags.append(disable_git_flag)
     return (' '+' '.join(flags)) if len(flags) > 0 else ''
+
+  def cime_supported_case_setup_flag(self, candidates):
+    help_text = self.cime_case_setup_help()
+    for flag in candidates:
+      if (flag in help_text):
+        return flag
+    return ''
+
+  def cime_case_setup_help(self):
+    if (hasattr(self, '_cime_case_setup_help')):
+      return self._cime_case_setup_help
+
+    casedir = getattr(self, 'casedir', '')
+    if (casedir == ''):
+      self._cime_case_setup_help = ''
+      return self._cime_case_setup_help
+
+    case_setup = os.path.join(casedir, 'case.setup')
+    if (not os.path.exists(case_setup)):
+      self._cime_case_setup_help = ''
+      return self._cime_case_setup_help
+
+    apptainer = getattr(self, 'apptainer', '')
+    apptainer_bind = getattr(self, 'apptainer_bind', '/')
+    if (apptainer != ''):
+      cmd = ['apptainer', 'exec', '--bind', apptainer_bind, '--pwd',
+             casedir, apptainer, './case.setup', '--help']
+      cwd = None
+    else:
+      cmd = ['./case.setup', '--help']
+      cwd = casedir
+
+    try:
+      result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+              text=True, cwd=cwd)
+      self._cime_case_setup_help = result.stdout if (result.returncode == 0) else ''
+    except Exception:
+      self._cime_case_setup_help = ''
+    return self._cime_case_setup_help
 
   def get_model_directories(self):
     if (not os.path.exists(self.modelroot)):
@@ -695,13 +745,12 @@ class ELMcase():
       self.paramfile = self.get_namelist_variable('paramfile')
     self.paramfile = self.clean_input_path(self.paramfile)
     print('Parameter file: '+self.paramfile)
-    #Copy the parameter file to a case-specific temp path. Shared temp
-    #filenames are unsafe when multiple OLMT launches set up cases at once.
-    self.paramfile_temp = self.temp_file_path('clm_params.nc')
-    shutil.copy2(self.paramfile, self.paramfile_temp)
+    #All generated inputs live directly in this case's unique run directory.
+    self.paramfile_case = self.case_input_path('clm_params.nc')
+    shutil.copy2(self.paramfile, self.paramfile_case)
 
     if hasattr(self, 'add_parameter') and self.add_parameter:
-        self.modify_ncinput_file(self.paramfile_temp, self.add_parameter, "parameter")
+        self.modify_ncinput_file(self.paramfile_case, self.add_parameter, "parameter")
 
   def set_CNP_param_file(self,filename=''):
     if (filename == ''):
@@ -709,8 +758,8 @@ class ELMcase():
     else:
         self.CNPparm_file = filename
     self.CNPparm_file = self.clean_input_path(self.CNPparm_file)
-    self.CNPparm_file_temp = self.temp_file_path('CNP_parameters.nc')
-    shutil.copy2(self.CNPparm_file, self.CNPparm_file_temp)
+    self.CNPparm_file_case = self.case_input_path('CNP_parameters.nc')
+    shutil.copy2(self.CNPparm_file, self.CNPparm_file_case)
 
   def set_fates_param_file(self):
     if (self.fates_paramfile == ''):
@@ -719,20 +768,20 @@ class ELMcase():
     print('FATES parameter file : '+self.fates_paramfile)
     self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  #determine if json or nc
 
-    fbase = self.temp_file_path('fates_paramfile.'+self.fates_param_type)
-    self.fates_paramfile_temp = fbase
+    fbase = self.case_input_path('fates_paramfile.'+self.fates_param_type)
+    self.fates_paramfile_case = fbase
     shutil.copy2(self.fates_paramfile, fbase)
     if (self.fates_pft >= 0):
         print('Extracting PFT '+str(self.fates_pft))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
             print('Duplicating '+str(self.pft_duplicates)+' times.')
-            write_fates_pft_subset_nc(self.fates_paramfile_temp,
-                    self.fates_paramfile_temp, self.fates_pft,
+            write_fates_pft_subset_nc(self.fates_paramfile_case,
+                    self.fates_paramfile_case, self.fates_pft,
                     duplicates=self.pft_duplicates)
           else:
             print('Duplicating '+str(self.pft_duplicates)+' times.')
-            fname = self.fates_paramfile_temp
+            fname = self.fates_paramfile_case
             pft_indices = ''
             for pf in range(0,self.pft_duplicates):
                 pft_indices = pft_indices+str(self.fates_pft)+','
@@ -740,19 +789,19 @@ class ELMcase():
             swapcmd=swapper_path+' --pft-indices='+pft_indices[:-1]+' --fin='+fbase+' --fout='+fname+' --silent'
             os.system(swapcmd)
         else:
-            fname = self.fates_paramfile_temp
+            fname = self.fates_paramfile_case
             if (self.fates_param_type == 'json'):
                 swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
                 swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
                 os.system(swapcmd)
             else:
-                write_fates_pft_subset_nc(self.fates_paramfile_temp,
+                write_fates_pft_subset_nc(self.fates_paramfile_case,
                         fname, self.fates_pft)
 
 
     # Apply FATES parameter modifications
     if hasattr(self, 'add_fates_parameter') and self.add_fates_parameter:
-        fates_param_path = self.fates_paramfile_temp
+        fates_param_path = self.fates_paramfile_case
         if (self.fates_param_type == 'json'):
             self.modify_jsoninput_file(fates_param_path, self.add_fates_parameter, "FATES parameter")
         else:
@@ -767,7 +816,7 @@ class ELMcase():
       elif (finidat != ''):
         self.finidat = finidat
         self.finidat_year = int(finidat[-19:-15])
-        self.finidat_yst=str(10000+finidat_year)[1:]
+        self.finidat_yst=str(10000+self.finidat_year)[1:]
       self.has_finidat=True
 
 #-----------------------------------------------------------------------------------------
@@ -869,9 +918,9 @@ class ELMcase():
     domain_check_file = domainfile
     surf_check_file = surffile
     if (domain_check_file == '' and makedomain):
-      domain_check_file = self.OLMTdir+'/temp/domain.nc'
+      domain_check_file = self.case_input_path('domain.nc')
     if (surf_check_file == '' and makesurfdat):
-      surf_check_file = self.OLMTdir+'/temp/surfdata.nc'
+      surf_check_file = self.case_input_path('surfdata.nc')
     if (domain_check_file != '' and surf_check_file != '' and
             os.path.exists(domain_check_file) and os.path.exists(surf_check_file)):
       domain_count, domain_dims = elm_spatial_cell_count(domain_check_file, 'domain')
@@ -891,7 +940,8 @@ class ELMcase():
   def get_metdata_year_range(self):
     #get site year information
     sitedatadir = os.path.abspath(self.inputdata_path+'/lnd/clm2/PTCLM')
-    os.chdir(sitedatadir)
+    if (os.path.isdir(sitedatadir)):
+      os.chdir(sitedatadir)
     if (self.forcing == 'site'):
       if (self.is_bypass()):
         #Get met data year range from all_hourly file
@@ -912,21 +962,13 @@ class ELMcase():
       #else:
       self.met_endyear_spinup = self.met_endyear
     else:
-        #Assume reanalysis
-        self.met_startyear = 1901
-        self.met_endyear   = 2014
-        if ('daymet' in self.forcing):
-            self.met_startyear = 1980
-        if ('gfdl' in self.forcing):
-            self.met_startyear = 1951
-        if ('Qian' in self.forcing):
-            self.met_startyear = 1948
-        if ('era5' in self.forcing):
-            self.met_endyear=2023
-        if ('crujra' in self.forcing):
-            self.met_endyear=2022
-        if ('isimip' in self.forcing):
-            self.met_startyear=1951
+        inferred_years = self.infer_metdata_year_range()
+        if (inferred_years is not None):
+            self.met_startyear, self.met_endyear = inferred_years
+        else:
+            print('Warning: could not infer met data years from '+self.metdir+
+                  '; using legacy defaults for '+self.forcing)
+            self.met_startyear, self.met_endyear = self.legacy_metdata_year_range()
         #Assume we want a 20-year spinup cycle
         self.met_endyear_spinup = self.met_startyear+20-1
     self.nyears_spinup=self.met_endyear_spinup-self.met_startyear+1
@@ -961,6 +1003,83 @@ class ELMcase():
     if (not self.is_bypass()):
         print('Met data align year: ', self.met_alignyear)
     print('Run length (years): '+str(self.run_n)+'\n')
+
+  def legacy_metdata_year_range(self):
+    startyear = 1901
+    endyear = 2014
+    if ('daymet' in self.forcing):
+      startyear = 1980
+    if ('gfdl' in self.forcing):
+      startyear = 1951
+    if ('Qian' in self.forcing):
+      startyear = 1948
+    if ('era5' in self.forcing):
+      endyear = 2023
+    if ('crujra' in self.forcing):
+      endyear = 2022
+    if ('isimip' in self.forcing):
+      startyear = 1951
+    return startyear, endyear
+
+  def infer_metdata_year_range(self):
+    """Infer forcing start/end years from files under self.metdir."""
+    metdir = self.clean_input_path(getattr(self, 'metdir', ''))
+    self.metdir = metdir
+    if (metdir == '' or not os.path.isdir(metdir)):
+      return None
+
+    nc_files = []
+    for root, dirs, files in os.walk(metdir):
+      dirs[:] = [d for d in dirs if not d.startswith('.')]
+      for filename in files:
+        if filename.endswith('.nc'):
+          nc_files.append(os.path.join(root, filename))
+
+    years = self.metdata_years_from_filenames(nc_files)
+    if (len(years) > 0):
+      return min(years), max(years)
+
+    years = self.metdata_years_from_metadata(nc_files)
+    if (len(years) > 0):
+      return min(years), max(years)
+    return None
+
+  def metdata_years_from_filenames(self, nc_files):
+    years = []
+    for path in nc_files:
+      name = os.path.basename(path)
+      if ('domain' in name.lower()):
+        continue
+
+      # Bypass/global aggregate files commonly use ranges like 1901-2025.
+      for match in re.finditer(r'(?<![A-Za-z0-9])([12][0-9]{3})[-_]([12][0-9]{3})(?![A-Za-z0-9])', name):
+        years.extend([int(match.group(1)), int(match.group(2))])
+
+      # DATM monthly files commonly use timestamps like 1901-01.
+      for match in re.finditer(r'(?<![A-Za-z0-9])([12][0-9]{3})[-_](0[1-9]|1[0-2])(?![A-Za-z0-9])', name):
+        years.append(int(match.group(1)))
+    return years
+
+  def metdata_years_from_metadata(self, nc_files, max_files=25):
+    years = []
+    for path in nc_files[:max_files]:
+      try:
+        with Dataset(path, 'r') as dataset:
+          if ('start_year' in dataset.variables and 'end_year' in dataset.variables):
+            years.extend([int(dataset.variables['start_year'][0]), int(dataset.variables['end_year'][0])])
+            continue
+
+          if ('time' in dataset.variables):
+            time_var = dataset.variables['time']
+            if (len(time_var) == 0 or not hasattr(time_var, 'units')):
+              continue
+            values = [time_var[0], time_var[-1]]
+            calendar = getattr(time_var, 'calendar', 'standard')
+            dates = num2date(values, time_var.units, calendar=calendar)
+            years.extend([int(dates[0].year), int(dates[-1].year)])
+      except Exception:
+        continue
+    return years
 
   def xmlchange(self, variable, value='', append=''):
       os.chdir(self.casedir)
@@ -1015,7 +1134,7 @@ class ELMcase():
       self.xmlchange('DATM_CLMNCEP_YR_ALIGN',value=str(self.met_alignyear))
     #Change simulation timestep
     if (float(self.tstep) != 0.5):
-      self.xmlchange('ATM_NCPL',value=str(int(24/float(self.tstep))))
+      self.xmlchange('ATM_NCPL',value=str(int(round(24.0/float(self.tstep)))))
 
     if (self.has_finidat):
       self.xmlchange('RUN_REFDATE',value=self.finidat_yst+'-01-01')
@@ -1160,7 +1279,7 @@ class ELMcase():
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \
-              'fsurdat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
+              'fsurdat', 'finidat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
               'peatlands_upland_only', 'peatlands_upland_topounit', \
               'peatlands_upland_pfts', 'peatlands_upland_pft_fractions', \
               'site_npfts', 'site_pft_fractions', \
@@ -1168,7 +1287,7 @@ class ELMcase():
               'external_mask_max', 'external_mask_values', 'external_mask_invert', \
               'external_mask_lat_var', 'external_mask_lon_var', \
               'external_mask_zero_surface', \
-              'srcmods', 'variable', 'name', 'nyears']
+              'srcmods', 'variable', 'name', 'nyears', 'disable_git']
     # ``humhol`` predates ELM's runtime switch and is retained only as a
     # backwards-compatible OLMT alias.  New configurations use use_humhol for
     # both ELM physics and generation of the multi-topounit surface dataset.
@@ -1350,29 +1469,8 @@ class ELMcase():
       #If using DATM, customize the stream files
       if (not self.is_bypass() and not 'default' in self.forcing):
           self.modify_datm_streamfiles()
-      #Copy customized parameter, surface and domain files to run directory
-      os.system('mkdir -p '+self.OLMTdir+'/temp')
-      #if (not 'paramfile' in self.case_options.keys()):
-      param_temp = getattr(self, 'paramfile_temp', self.OLMTdir+'/temp/clm_params.nc')
-      shutil.copy2(param_temp, self.rundir+'/clm_params.nc')
-      if (not 'fsoilordercon' in self.case_options.keys()):
-        CNP_temp = getattr(self, 'CNPparm_file_temp', self.OLMTdir+'/temp/CNP_parameters.nc')
-        shutil.copy2(CNP_temp, self.rundir+'/CNP_parameters.nc')
-      if ('FATES' in self.compset or 'ED' in self.compset): #and (not 'fates_paramfile' in self.case_options.keys()):
-        fates_temp = getattr(self, 'fates_paramfile_temp',
-                self.OLMTdir+'/temp/fates_paramfile.'+self.fates_param_type)
-        shutil.copy2(fates_temp, self.rundir+'/fates_paramfile.'+self.fates_param_type)
-      if (not 'domainfile' in self.case_options.keys() and not 'fatmlndfrc' in self.case_options.keys()):
-         os.system('cp '+self.OLMTdir+'/temp/domain.nc '+self.rundir)
-      if (not 'surffile' in self.case_options.keys() and not 'fsurdat' in self.case_options.keys()):
-         cmd = 'cp '+self.OLMTdir+'/temp/surfdata.nc '+self.rundir
-         execute = subprocess.call(cmd, shell=True)
-      if (not 'pftdynfile' in self.case_options.keys() and '20TR' in self.compset and not(self.nopftdyn) \
-        and not 'flanduse_timeseries' in self.case_options.keys()):
-         os.system('cp '+self.OLMTdir+'/temp/surfdata.pftdyn.nc '+self.rundir)
-      case_temp_dir = getattr(self, 'case_temp_dir', '')
-      if (case_temp_dir != ''):
-         self.cleanup_case_temp_dir()
+      # Parameter, domain, surface, and land-use inputs were generated
+      # directly in this case's run directory during setup.
       if (not self.dobuild):
          self.preview_namelists()
 
@@ -1541,14 +1639,18 @@ class ELMcase():
       scriptfiles = scriptfile
 
     jobnum=0
-    jobnum_depend=depend
+    if isinstance(depend, (list, tuple, numpy.ndarray)):
+      dep_ids = [int(d) for d in depend if int(d) > 0]
+    else:
+      dep_ids = [int(depend)] if int(depend) > 0 else []
     for script in scriptfiles:
       raw_sbatch_args = self.slurm_submit_args() if (ensemble or multisite_script != '') else []
-      if (jobnum_depend > 0 and not self.noslurm):
+      if (dep_ids and not self.noslurm):
+        dep_arg = '--dependency=afterok:'+':'.join([str(d) for d in dep_ids])
         if (ensemble or multisite_script != ''):
-            cmd = [mysubmit,'--dependency=afterok:'+str(jobnum_depend)] + raw_sbatch_args + [script]
+            cmd = [mysubmit, dep_arg] + raw_sbatch_args + [script]
         else:
-            cmd = [script,'--prereq',str(jobnum_depend)]
+            cmd = [script,'--prereq',str(dep_ids[-1])]
       else:
         if ((ensemble or multisite_script != '') and not self.noslurm):
             cmd = [mysubmit] + raw_sbatch_args + [script]
@@ -1569,7 +1671,7 @@ class ELMcase():
               raise RuntimeError('Failed to submit '+script+':\n'+output)
           jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(jobnum)+' from '+script)
-          jobnum_depend=jobnum
+          dep_ids=[jobnum]
     if (not ensemble and multisite_script == '' and getattr(self, 'postproc_vars', [])):
       postproc_script = self.create_postprocess_script()
       if (self.noslurm):
@@ -1577,7 +1679,8 @@ class ELMcase():
           with open(log_file_path, "a") as log_file:
               subprocess.run([postproc_script], stderr=subprocess.STDOUT, stdout=log_file)
       else:
-          cmd = [mysubmit, '--dependency=afterok:'+str(jobnum)] + self.slurm_submit_args(ntasks=1) + [postproc_script]
+          cmd = ([mysubmit, '--dependency=afterok:'+str(jobnum)] +
+              self.slurm_submit_args(ntasks=1, cpus_per_task=1, mem='32g') + [postproc_script])
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
           output = result.stdout.strip()
           if (result.returncode != 0):
@@ -1596,6 +1699,8 @@ class ELMcase():
         if (partition != ''):
             myfile.write('#SBATCH -p '+partition+'\n')
         myfile.write('#SBATCH -n 1\n')
+        myfile.write('#SBATCH -c 1\n')
+        myfile.write('#SBATCH --mem=32g\n')
         qos = self.slurm_qos() if self.machine == 'pathfinder' else ''
         if (qos != ''):
             myfile.write('#SBATCH --qos='+qos+'\n')

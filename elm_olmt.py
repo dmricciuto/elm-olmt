@@ -217,7 +217,10 @@ def main():
     metdir = cfg['simulation'].get('metdir', '')
     case_suffix = cfg['simulation'].get('case_suffix', '')
     case_prefix = cfg['simulation'].get('case_prefix', '')
+    custom_compset = cfg['simulation'].get('compset', '')
+    tstep = cfg['simulation'].get('tstep', 1)
     emulator_enabled = cfg['simulation'].get('emulator', False)
+    setup_only = cfg['simulation'].get('setup_only', False)
 
     # Site configuration
     if runtype == 'site':
@@ -271,11 +274,20 @@ def main():
         run_startyear = cfg['run_lengths'].get('startyear', run_startyear)
     resubmit_years = cfg['run_lengths'].get('resubmit_years', 0)
     force_full_spinup_cycles = cfg['run_lengths'].get('force_full_spinup_cycles', True)
+    stop_option = cfg['run_lengths'].get('stop_option', 'nyears')
+    stop_n = cfg['run_lengths'].get('stop_n', None)
+    rest_option = cfg['run_lengths'].get('rest_option', stop_option)
+    rest_n = cfg['run_lengths'].get('rest_n', stop_n)
 
     # Ensemble options
     ensemble_resubmit_years = resubmit_years
+    surrogate_exclude_zeros = False
+    surrogate_zero_threshold = 0.0
     if ('ensemble' in cfg):
         parm_list = cfg['ensemble'].get('parm_list', '')
+        ensemble_multitreatment = cfg['ensemble'].get('multi_treatment', False)
+        surrogate_exclude_zeros = cfg['ensemble'].get('exclude_zero_productivity', False)
+        surrogate_zero_threshold = cfg['ensemble'].get('zero_productivity_threshold', 0.0)
         if (parm_list != ''):
             nsamples = cfg['ensemble']['nsamples']
             np_ensemble = cfg['ensemble'].get('np_ensemble',nsamples)
@@ -285,6 +297,39 @@ def main():
     else:
         parm_list = ''
         ensemble_resubmit_years = resubmit_years
+        ensemble_multitreatment = False
+
+    # Calibration options.  ``auto`` preserves the historical single-case
+    # behavior; ``multitreatment`` trains each treatment independently and
+    # runs one joint calibration from the final treatment case.
+    calibration_mode = 'auto'
+    calibration_variables = []
+    calibration_mcmc_steps = 10000
+    calibration_nwalkers = 0
+    calibration_fit_error = True
+    calibration_run_gsa = True
+    calibration_parameter_constraints = None
+    if 'calibration' in cfg:
+        calibration_mode = str(cfg['calibration'].get('mode', 'auto')).strip().lower()
+        calibration_variables = cfg['calibration'].get('variables', [])
+        if isinstance(calibration_variables, str):
+            calibration_variables = [calibration_variables]
+        calibration_mcmc_steps = int(cfg['calibration'].get('mcmc_steps', 10000))
+        calibration_nwalkers = int(cfg['calibration'].get('nwalkers', 0))
+        calibration_fit_error = bool(cfg['calibration'].get('fit_error', True))
+        calibration_run_gsa = bool(cfg['calibration'].get('run_gsa', True))
+        calibration_parameter_constraints = cfg['calibration'].get(
+            'ordered_parameter_constraints', None)
+        valid_calibration_modes = ['auto', 'single', 'multisite', 'multitreatment',
+                                   'none', 'off']
+        if calibration_mode not in valid_calibration_modes:
+            raise ValueError(
+                'Unknown [calibration] mode '+calibration_mode+'; expected one of '+
+                ', '.join(valid_calibration_modes))
+        if calibration_mcmc_steps < 0:
+            raise ValueError('[calibration] mcmc_steps must be nonnegative')
+        if calibration_nwalkers < 0:
+            raise ValueError('[calibration] nwalkers must be nonnegative')
 
     # Load case options and treatment options from config file
     case_options = {}
@@ -314,6 +359,14 @@ def main():
         treatments, treatment_options = process_treatment_options(cfg)
     else:
         treatments = []
+    if calibration_mode == 'multitreatment':
+        if not ensemble_multitreatment:
+            raise ValueError(
+                '[calibration] mode=multitreatment requires '
+                '[ensemble] multi_treatment=True')
+        if len(treatments) < 2:
+            raise ValueError(
+                '[calibration] mode=multitreatment requires at least two treatment cases')
 
      # Post-processing
     if ('postprocessing' in cfg):
@@ -348,6 +401,9 @@ def main():
         obs_startyear = cfg['observations'].get('startyear', postproc_startyear)
         obs_endyear   = cfg['observations'].get('endyear', postproc_endyear)
         valid_months = cfg['observations'].get('months', list(range(1,13)))
+        obs_format = cfg['observations'].get('format', 'fluxnet')
+        obs_error_fraction = cfg['observations'].get('error_fraction', 0.15)
+        obs_error_floor = cfg['observations'].get('error_floor', 1.0)
         has_obs = True
 
 
@@ -437,7 +493,16 @@ def main():
     suffix=[]
     startyear=[]
     nyears=[]
-    if (not use_fates and (nutrients == 'none' or nutrients =='SP')):
+    if (custom_compset != ''):
+        compsets.append(custom_compset)
+        suffix.append('')
+        startyear.append(run_startyear)
+        custom_nyears = cfg['run_lengths'].get('nyears', nyears_final)
+        if (custom_nyears == 0):
+            custom_nyears = max(nyears_ad, nyears_final, nyears_trans, 1)
+        nyears.append(custom_nyears)
+        depends=[-1]
+    elif (not use_fates and (nutrients == 'none' or nutrients =='SP')):
         compsets.append(compset_type+'ELMBC')
         suffix.append('')
         startyear.append(run_startyear)
@@ -562,7 +627,7 @@ def main():
         cases[c] = model_ELM.ELMcase(caseid=str(case_prefix),compset=compsets[c], site=site, \
             caseroot=caseroot,runroot=runroot,inputdata=inputdata,modelroot=modelroot, \
             machine=machine, exeroot=exeroot, suffix=mysuffix, queue=queue, partition=partition, project=project,  \
-            res=res, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
+            res=res, tstep=tstep, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind, \
             offline_driver=offline_driver, resubmit_years=resubmit_years, debug=debug, sitegroup=sitegroup)
@@ -586,10 +651,17 @@ def main():
                 cases[c].case_options[key] = case_options[key]
 
         # Add the treatment options (must be list format)
+        cases[c].treatment_name = ''
         if (istreatment[c]):
             tname = suffix[c]
+            cases[c].treatment_name = tname
             for key in treatment_options[tname].keys():
                 cases[c].case_options[key] = treatment_options[tname][key]
+        if (ensemble and ensemble_multitreatment and istreatment[c] and c == ncases-1):
+            cases[c].all_treatment_cases = {}
+            for tc in range(ncases_pretreatment, ncases):
+                if istreatment[tc] and tc in cases:
+                    cases[c].all_treatment_cases[suffix[tc]] = cases[tc].casename
         if ('srcmods' in cases[c].case_options):
             cases[c].srcmods = cases[c].case_options['srcmods']
         # Other options
@@ -597,6 +669,16 @@ def main():
         cases[c].nutrient_comp = nutrient_comp
         cases[c].soil_decomp = soil_decomp
         cases[c].force_full_spinup_cycles = force_full_spinup_cycles
+        cases[c].surrogate_exclude_zeros = surrogate_exclude_zeros
+        cases[c].surrogate_zero_threshold = float(surrogate_zero_threshold)
+        cases[c].calibration_mode = calibration_mode
+        cases[c].calibration_variables = list(calibration_variables)
+        cases[c].calibration_mcmc_steps = calibration_mcmc_steps
+        cases[c].calibration_nwalkers = calibration_nwalkers
+        cases[c].calibration_fit_error = calibration_fit_error
+        cases[c].calibration_run_gsa = calibration_run_gsa
+        if calibration_parameter_constraints is not None:
+            cases[c].calibration_parameter_constraints = calibration_parameter_constraints
         if (use_fates):
             cases[c].fates_pft=fates_pft
             cases[c].pft_duplicates = pft_duplicates
@@ -634,6 +716,8 @@ def main():
             finidat_year = startyear[depends[c]]+cases[depends[c]].run_n 
             cases[c].set_finidat_file(finidat_case=cases[depends[c]].casename, \
                   finidat_year=finidat_year)
+        elif ('finidat' in cases[c].case_options and cases[c].case_options['finidat'] != ''):
+            cases[c].set_finidat_file(finidat=cases[c].case_options['finidat'])
 
         # Set postprocessing variables (final case or treatment case)
         if (c == ncases-1 or istreatment[c]) and 'postprocessing' in cfg:
@@ -658,7 +742,8 @@ def main():
                     print('Getting observations for variable: '+v)
                     cases[c].get_fluxnet_obs(site=site,tstep=postproc_freq,ystart=obs_startyear, \
                         yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months, \
-                        time_average = postproc_timeaverage)
+                        time_average = postproc_timeaverage, obs_format=obs_format, \
+                        error_fraction=obs_error_fraction, error_floor=obs_error_floor)
         else:
             cases[c].postproc_vars=[]
         print('Postproc_vars: '+str(cases[c].postproc_vars))
@@ -678,9 +763,17 @@ def main():
         # Set up the case (surface, domain and pftdata)
         print('Setting up case for site: '+site)
         cases[c].setup_case()
-        if (c == 0):
-            # Get the surface and domain data 
-            cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
+        if (stop_option != 'nyears' or stop_n is not None or rest_option != 'nyears' or rest_n is not None):
+            actual_stop_n = nyears[c] if stop_n is None else stop_n
+            cases[c].xmlchange('STOP_OPTION', value=str(stop_option))
+            cases[c].xmlchange('STOP_N', value=str(actual_stop_n))
+            if (rest_option != ''):
+                cases[c].xmlchange('REST_OPTION', value=str(rest_option))
+            if (rest_n is not None):
+                cases[c].xmlchange('REST_N', value=str(rest_n))
+        # Each logical case writes its own surface and domain data directly to
+        # its run directory. Do not rely on shared files from an earlier case.
+        cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
         if (ensemble):
             if (site == sites[0] and c == 0):
                 # Get the ensemble file from the first site and case
@@ -702,6 +795,13 @@ def main():
             if (not cases[c].nopftdyn):
                 cases[c].setup_domain_surfdata(makepftdyn=True)
 
+        if (setup_only):
+            print('setup_only=True: skipping build and submit for '+cases[c].casename)
+            cases[c].create_pkl(outdir=cases[c].casedir)
+            cases[c].create_pkl(outdir=cases[c].OLMTdir+'/pklfiles')
+            os.chdir(scriptdir)
+            continue
+
         # Build the case
         print('Building case')
         cases[c].build_case()
@@ -711,6 +811,16 @@ def main():
         jobnum_depend=-1
         if (depends[c] >= 0):
             jobnum_depend = jobnum[depends[c]]
+        if (ensemble and ensemble_multitreatment and istreatment[c] and c == ncases-1):
+            treatment_depends = []
+            for prev_c in range(ncases_pretreatment, c):
+                if istreatment[prev_c] and int(jobnum[prev_c]) > 0:
+                    treatment_depends.append(int(jobnum[prev_c]))
+            if treatment_depends:
+                if int(jobnum_depend) > 0:
+                    jobnum_depend = [int(jobnum_depend)] + treatment_depends
+                else:
+                    jobnum_depend = treatment_depends
         # Set exeroot for all subsequent cases/sites so we don't have to rebuild
         if (depends[c] < 0 and site == sites[0]):
             exeroot = cases[c].exeroot
