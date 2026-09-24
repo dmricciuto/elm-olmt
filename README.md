@@ -11,6 +11,16 @@ OLMT passes `--driver mct` to CIME by default on Pathfinder and for Docker or
 Apptainer workflows. Set `cime_driver` in the `[simulation]` section to
 override this default, for example `cime_driver = nuopc`.
 
+For a compact Docker test without the global E3SM input-data archive, clone
+[`dmricciuto/TES_SFA_ELMdata`](https://github.com/dmricciuto/TES_SFA_ELMdata)
+as a sibling directory named `inputdata`. It contains the US-SPR and US-MOz
+site inputs, all ambient and elevated-CO2 SPRUCE enclosure forcings, and a
+checksum validator. The smoke-test configurations
+`tests/config_files/SPRUCE_microbe_portable_smoke.cfg` and
+`tests/config_files/US-MOz_microbe_portable_smoke.cfg` each build and run a one-year
+cpl_bypass case. See the data repository README for the complete clone, Docker,
+and validation commands.
+
 Generated case inputs are written directly to that case's run directory. The
 run-directory path contains the configured case prefix (normally a date) and
 the complete case name. In particular, `domain.nc`, `surfdata.nc`,

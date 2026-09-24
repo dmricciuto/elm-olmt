@@ -1300,8 +1300,9 @@ class ELMcase():
         if (not 'co2_file' in self.case_options):
             self.customize_namelist(variable='co2_file', value="'"+self.inputdata_path+ \
                     "/atm/datm7/CO2/fco2_datm_rcp4.5_1765-2500_c130312.nc'")
-        self.customize_namelist(variable='aero_file', value="'"+self.inputdata_path+"/atm/cam/chem/" \
-                +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
+        if (not 'aero_file' in self.case_options):
+            self.customize_namelist(variable='aero_file', value="'"+self.inputdata_path+"/atm/cam/chem/" \
+                    +"trop_mozart_aero/aero/aerosoldep_rcp4.5_monthly_1849-2104_1.9x2.5_c100402.nc'")
     #Excluded keys in case_options that are not namelist options (handled elsewhere)
     keys_exclude = ['suffix','surffile','domainfile','pftdynfile','paramfile','fates_paramfile', \
             'humhol','metdir','surffile_global','pftdynfile_global','domainfile_global', \

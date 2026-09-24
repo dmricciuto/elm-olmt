@@ -16,6 +16,9 @@ config_files/*
 !config_files/Marcell_S2_diag50hydro.cfg
 !config_files/Marcell_S2_diag50hydro_regwt.cfg
 
+# Local short dependency-chain experiments are intentionally not versioned.
+tests/config_files/*submission_test*.cfg
+
 # files created by OLMT executions
 run.*
 *.pyc
