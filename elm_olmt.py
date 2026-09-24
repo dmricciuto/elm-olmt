@@ -772,7 +772,9 @@ def main():
         print('Setting up case for site: '+site)
         cases[c].setup_case()
         if (stop_option != 'nyears' or stop_n is not None or rest_option != 'nyears' or rest_n is not None):
-            actual_stop_n = nyears[c] if stop_n is None else stop_n
+            # get_forcing() may extend spinup to a complete forcing cycle.
+            # Preserve that effective length unless STOP_N was explicitly set.
+            actual_stop_n = cases[c].run_n if stop_n is None else stop_n
             cases[c].xmlchange('STOP_OPTION', value=str(stop_option))
             cases[c].xmlchange('STOP_N', value=str(actual_stop_n))
             if (rest_option != ''):
@@ -816,7 +818,7 @@ def main():
     
         # Submit the case
         print('')
-        print('Submitting case: '+compsets[c])
+        print('Submitting case: '+cases[c].casename)
         jobnum_depend=-1
         if (depends[c] >= 0):
             jobnum_depend = jobnum[depends[c]]

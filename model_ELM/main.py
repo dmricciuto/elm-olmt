@@ -177,6 +177,8 @@ class ELMcase():
         #Timestep in hours
         self.tstep = tstep
         self.has_finidat = False
+        self.finidat_source = ''
+        self.link_finidat = False
         self.cppdefs=''
         self.humhol=False
         self.srcmods=''
@@ -830,14 +832,36 @@ class ELMcase():
   def set_finidat_file(self, finidat_case='', finidat_year=0, finidat=''):
       if (finidat_case != ''):
         self.finidat_yst = str(10000+finidat_year)[1:]
-        self.finidat = self.runroot+'/'+finidat_case+'/run/'+ \
+        self.finidat_source = self.runroot+'/'+finidat_case+'/run/'+ \
           finidat_case+'.elm.r.'+self.finidat_yst+'-01-01-00000.nc'
+        # A restart produced by a prerequisite job does not exist while the
+        # dependent case is submitted.  Keep the namelist path relative so
+        # CIME does not treat it as downloadable input data, then link it from
+        # the dependent RUNDIR to the predecessor restart.
+        self.finidat = os.path.basename(self.finidat_source)
+        self.link_finidat = True
         self.finidat_year = finidat_year
       elif (finidat != ''):
         self.finidat = finidat
+        self.finidat_source = ''
+        self.link_finidat = False
         self.finidat_year = int(finidat[-19:-15])
         self.finidat_yst=str(10000+self.finidat_year)[1:]
       self.has_finidat=True
+
+  def create_finidat_link(self):
+      if (not self.link_finidat or self.finidat_source == ''):
+        return ''
+
+      os.makedirs(self.rundir, exist_ok=True)
+      link_path = os.path.join(self.rundir, os.path.basename(self.finidat))
+      relative_source = os.path.relpath(self.finidat_source, self.rundir)
+      if (os.path.lexists(link_path)):
+        if (os.path.islink(link_path) and os.readlink(link_path) == relative_source):
+          return link_path
+        raise RuntimeError('Refusing to replace existing dependent restart path: '+link_path)
+      os.symlink(relative_source, link_path)
+      return link_path
 
 #-----------------------------------------------------------------------------------------
   def create_case(self, machine='',casename='', remove=False):
@@ -1203,6 +1227,9 @@ class ELMcase():
         subprocess.run(['./xmlchange', '--subgroup', 'case.run',
                         'BATCH_COMMAND_FLAGS='+batch_flags], check=True)
 
+    if (self.link_finidat):
+        link_path = self.create_finidat_link()
+        print('Linked dependent restart '+link_path+' -> '+os.readlink(link_path))
     if (self.has_finidat):
         self.customize_namelist(variable='finidat',value="'"+self.finidat+"'")
     #Setup the new case
@@ -1677,7 +1704,7 @@ class ELMcase():
         if (ensemble or multisite_script != ''):
             cmd = [mysubmit, dep_arg] + raw_sbatch_args + [script]
         else:
-            cmd = [script,'--prereq',str(dep_ids[-1])]
+            cmd = [script, '--prereq', str(dep_ids[-1])]
       else:
         if ((ensemble or multisite_script != '') and not self.noslurm):
             cmd = [mysubmit] + raw_sbatch_args + [script]
@@ -1690,14 +1717,26 @@ class ELMcase():
                   stdout=log_file)
               jobnum=0
       else:
-          #code.interact(local=dict(globals(), **locals()))
-          result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
-                  stdout=subprocess.PIPE, text=True)
-          #output = result.stdout.strip()
+          result = subprocess.run(cmd, stdout=subprocess.PIPE,
+                  stderr=subprocess.PIPE, text=True)
           output = (result.stdout or "").strip()
           stderr = (result.stderr or "").strip()
           if (result.returncode != 0):
-              raise RuntimeError('Failed to submit '+script+':\n'+output+'\n'+stderr)
+              details = [
+                  'Failed to submit '+script,
+                  'Command: '+shlex.join([str(value) for value in cmd]),
+                  'Return code: '+str(result.returncode),
+              ]
+              if output:
+                  details.append('stdout:\n'+output)
+              if stderr:
+                  details.append('stderr:\n'+stderr)
+              case_status = os.path.join(self.casedir, 'CaseStatus')
+              if os.path.isfile(case_status):
+                  with open(case_status, 'r') as status_file:
+                      status_lines = status_file.readlines()
+                  details.append('CaseStatus tail:\n'+''.join(status_lines[-30:]).rstrip())
+              raise RuntimeError('\n'.join(details))
           jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(jobnum)+' from '+script)
           if output:
