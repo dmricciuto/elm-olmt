@@ -244,6 +244,8 @@ def main():
     res = cfg['simulation']['res']
     # Option to build the offline driver alongside the regular executable
     offline_driver = cfg['simulation'].get('offline_driver', False)
+    # Pathfinder and Docker default to MCT; set cime_driver explicitly to override.
+    cime_driver = cfg['simulation'].get('cime_driver', '')
     
     # Biogeochemistry options
     nutrients = cfg['biogeochemistry']['nutrients']
@@ -631,7 +633,8 @@ def main():
             res=res, tstep=tstep, nyears=nyears[c],startyear=startyear[c], region_name=region_name, \
             lat_bounds=lat_bounds, lon_bounds=lon_bounds, np=numproc, point_list=point_list, \
             olmtdir=scriptdir, walltime=walltime, apptainer=apptainer, apptainer_bind=apptainer_bind, \
-            offline_driver=offline_driver, resubmit_years=resubmit_years, debug=debug, sitegroup=sitegroup)
+            offline_driver=offline_driver, cime_driver=cime_driver,
+            resubmit_years=resubmit_years, debug=debug, sitegroup=sitegroup)
         #Save the other site names in first site's cases (for use in multi-site calibration)
         if site == sites[-1]:
             cases[c].all_sites = [s for s in sites]

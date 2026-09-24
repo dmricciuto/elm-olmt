@@ -83,7 +83,8 @@ class ELMcase():
             exeroot='', modelroot='', runroot='',caseroot='',inputdata='', \
             region_name='', lat_bounds=[-90,90],lon_bounds=[-180,180], \
             point_list=[], namelist_options=[],casename='',mpilib='', olmtdir='', walltime=24, 
-            apptainer='', apptainer_bind = '/', offline_driver=False, resubmit_years=0, debug=False):
+            apptainer='', apptainer_bind = '/', offline_driver=False, cime_driver='',
+            resubmit_years=0, debug=False):
 
       if (casename != ''):
         #get case information from pre-existing pkl file:
@@ -140,6 +141,14 @@ class ELMcase():
         # Apptainer container image (optional)
         self.apptainer = apptainer
         self.apptainer_bind = apptainer_bind
+        # Pathfinder and Docker ELM workflows use the MCT driver by default.
+        # An explicit configuration value can override this selection.
+        if cime_driver:
+            self.cime_driver = str(cime_driver).lower()
+        elif self.machine in ['pathfinder', 'docker'] or self.apptainer != '':
+            self.cime_driver = 'mct'
+        else:
+            self.cime_driver = ''
         self.compiler=''
         self.pio_version=2
         self.compset=compset
@@ -867,6 +876,11 @@ class ELMcase():
     else:
       cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
            self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u'
+    cime_driver = getattr(self, 'cime_driver', '')
+    if not cime_driver and (self.machine in ['pathfinder', 'docker'] or self.apptainer != ''):
+      cime_driver = 'mct'
+    if cime_driver:
+      cmd = cmd+' --driver '+cime_driver
     if (self.project != ''):
       cmd = cmd+' --project '+self.project
     if (self.compiler != ''):

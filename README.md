@@ -7,6 +7,10 @@ The purpose of the Offline Land Model Testbed (OLMT) is to simplify the workflow
  
 For each case, the runscript will perform the create_newcase, case setup, and submission.  The case.build will be performed on the first case only, and then the same executable will be used for following cases.  When submitting cases, the correct dependencies will be applied, such that the second case will start running after the first has finished, etc.
 
+OLMT passes `--driver mct` to CIME by default on Pathfinder and for Docker or
+Apptainer workflows. Set `cime_driver` in the `[simulation]` section to
+override this default, for example `cime_driver = nuopc`.
+
 Generated case inputs are written directly to that case's run directory. The
 run-directory path contains the configured case prefix (normally a date) and
 the complete case name. In particular, `domain.nc`, `surfdata.nc`,
