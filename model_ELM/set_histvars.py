@@ -171,8 +171,9 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                   vst_pp=vst_pp+"'"+v+"',"
                   if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
                       vst_pp_pft=vst_pp_pft+"'"+v+"',"
-          #Write daily for requested postprocessed variables
-          if (vst_pp_pft != ''):
+          # Write daily requested variables. Keep grid-average and indexed
+          # output on separate tapes only when both groups are nonempty.
+          if (vst_pp != '' and vst_pp_pft != ''):
               if (self.postproc_freq == 'hourly'):
                 self.customize_namelist(variable='hist_mfilt',value='1,8760,8760')
                 self.customize_namelist(variable='hist_nhtfrq',value='-8760,-1,-1')
@@ -180,7 +181,17 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                 self.customize_namelist(variable='hist_mfilt',value='1,365,365')
                 self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24,-24')
               self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.,.false.')
+              self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
               self.customize_namelist(variable='hist_fincl3',value=vst_pp_pft[:-1])
+          elif (vst_pp_pft != ''):
+              if (self.postproc_freq == 'hourly'):
+                self.customize_namelist(variable='hist_mfilt',value='1,8760')
+                self.customize_namelist(variable='hist_nhtfrq',value='-8760,-1')
+              else:
+                self.customize_namelist(variable='hist_mfilt',value='1,365')
+                self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
+              self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.')
+              self.customize_namelist(variable='hist_fincl2',value=vst_pp_pft[:-1])
           else:
               if (self.postproc_freq == 'hourly'):
                 self.customize_namelist(variable='hist_mfilt',value='1,8760')
@@ -188,7 +199,8 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
               else:
                 self.customize_namelist(variable='hist_mfilt',value='1,365')
                 self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
-          self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
+              self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.')
+              self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
    else:
       #Transient simulation
       if (self.postproc_vars == []):
@@ -212,12 +224,19 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                 vst_pp=vst_pp+"'"+v+"',"
                 if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
                     vst_pp_pft=vst_pp_pft+"'"+v+"',"
-        if (vst_pp_pft != ''):
+        if (vst_pp != '' and vst_pp_pft != ''):
             self.customize_namelist(variable='hist_mfilt',value='1,365,365')
             self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24,-24')
             self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.,.false.')
+            self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
             self.customize_namelist(variable='hist_fincl3',value=vst_pp_pft[:-1])
+        elif (vst_pp_pft != ''):
+            self.customize_namelist(variable='hist_mfilt',value='1,365')
+            self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
+            self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.')
+            self.customize_namelist(variable='hist_fincl2',value=vst_pp_pft[:-1])
         else:
             self.customize_namelist(variable='hist_mfilt',value='1,365')
             self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
-        self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
+            self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.')
+            self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
