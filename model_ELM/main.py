@@ -43,10 +43,14 @@ def parse_submit_jobnum(output):
 
 def write_fates_pft_subset_nc(source_path, output_path, fates_pft, duplicates=1):
     """Write a FATES NetCDF parameter file subset with xarray."""
+    if isinstance(fates_pft, (list, tuple, numpy.ndarray)):
+        pft_indices = [int(pft) for pft in fates_pft]
+    else:
+        pft_indices = [int(fates_pft)]
     with xr.open_dataset(source_path, decode_timedelta=False) as ds:
         if 'fates_pft' not in ds.sizes:
             raise KeyError('Dimension fates_pft not found in '+source_path)
-        selected = ds.isel(fates_pft=[int(fates_pft)]).load()
+        selected = ds.isel(fates_pft=pft_indices).load()
     if int(duplicates) > 1:
         selected = xr.concat([selected.copy(deep=True) for _ in range(int(duplicates))],
                 dim='fates_pft')
@@ -739,12 +743,12 @@ class ELMcase():
             nc.setncattr('history', history_entry)
 
   def set_param_file(self):
-    #set the ELM parameter file
+    # set the ELM parameter file
     if (self.paramfile == ''):
-      #Get parameter filename from case directory
+      # Get parameter filename from case directory
       self.paramfile = self.get_namelist_variable('paramfile')
     self.paramfile = self.clean_input_path(self.paramfile)
-    print('Parameter file: '+self.paramfile)
+    print('ELM parameter file: '+self.paramfile)
     #All generated inputs live directly in this case's unique run directory.
     self.paramfile_case = self.case_input_path('clm_params.nc')
     shutil.copy2(self.paramfile, self.paramfile_case)
@@ -766,37 +770,44 @@ class ELMcase():
         self.fates_paramfile = self.get_namelist_variable('fates_paramfile')
     self.fates_paramfile = self.clean_input_path(self.fates_paramfile)
     print('FATES parameter file : '+self.fates_paramfile)
-    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')  #determine if json or nc
-
+    # Determine whether this is a JSON or NetCDF parameter file and keep the
+    # generated copy with the rest of this case's inputs.
+    self.fates_param_type = self.fates_paramfile.split('.')[-1].strip("'").strip('"')
     fbase = self.case_input_path('fates_paramfile.'+self.fates_param_type)
     self.fates_paramfile_case = fbase
     shutil.copy2(self.fates_paramfile, fbase)
-    if (self.fates_pft >= 0):
-        print('Extracting PFT '+str(self.fates_pft))
+
+    if isinstance(self.fates_pft, (list, tuple, numpy.ndarray)):
+        pft_indices = [int(pft) for pft in self.fates_pft]
+    else:
+        pft_indices = [int(self.fates_pft)]
+
+    if all(pft >= 0 for pft in pft_indices):
+        print('Extracting FATES PFT(s) '+str(pft_indices))
         if (self.pft_duplicates > 1):
           if (self.fates_param_type == 'nc'):
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            print('Duplicating PFT selection '+str(self.pft_duplicates)+' times.')
             write_fates_pft_subset_nc(self.fates_paramfile_case,
-                    self.fates_paramfile_case, self.fates_pft,
+                    self.fates_paramfile_case, pft_indices,
                     duplicates=self.pft_duplicates)
           else:
-            print('Duplicating '+str(self.pft_duplicates)+' times.')
+            print('Duplicating PFT selection '+str(self.pft_duplicates)+' times.')
             fname = self.fates_paramfile_case
-            pft_indices = ''
-            for pf in range(0,self.pft_duplicates):
-                pft_indices = pft_indices+str(self.fates_pft)+','
+            repeated_indices = pft_indices * int(self.pft_duplicates)
             swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
-            swapcmd=swapper_path+' --pft-indices='+pft_indices[:-1]+' --fin='+fbase+' --fout='+fname+' --silent'
+            swapcmd = (swapper_path+' --pft-indices='+','.join(map(str, repeated_indices))+
+                    ' --fin='+fbase+' --fout='+fname+' --silent')
             os.system(swapcmd)
         else:
             fname = self.fates_paramfile_case
             if (self.fates_param_type == 'json'):
                 swapper_path = self.modelroot+'/components/elm/src/external_models/fates/tools/pft_index_swapper.py'
-                swapcmd=swapper_path+' --pft-indices=0,'+f'{self.fates_pft}'+' --fin='+fbase+' --fout='+fname+' --silent'
+                swapcmd = (swapper_path+' --pft-indices='+','.join(map(str, pft_indices))+
+                        ' --fin='+fbase+' --fout='+fname+' --silent')
                 os.system(swapcmd)
             else:
                 write_fates_pft_subset_nc(self.fates_paramfile_case,
-                        fname, self.fates_pft)
+                        fname, pft_indices)
 
 
     # Apply FATES parameter modifications
@@ -855,7 +866,7 @@ class ELMcase():
            ' --handle-preexisting-dirs u' 
     else:
       cmd = './create_newcase --case '+self.casedir+' --mach '+self.machine+' --compset '+ \
-           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u' 
+           self.compset+' --res '+self.res+' --walltime '+timestr+' --handle-preexisting-dirs u'
     if (self.project != ''):
       cmd = cmd+' --project '+self.project
     if (self.compiler != ''):
@@ -931,11 +942,12 @@ class ELMcase():
                 '; surfdata has '+str(surf_count)+' cells '+str(surf_dims)+' in '+
                 surf_check_file)
     if (domainfile != ''):
-      print('\nDomain file:             '+ domainfile)
+      print('Domain file:            '+ domainfile)
     if (surffile != ''):
-      print('surface data file:       '+ surffile)  
+      print('Surface data file:      '+ surffile)
     if (pftdynfile != ''):
-      print('20th landuse data file: '+pftdynfile+"'\n")
+      print('20th landuse data file: '+pftdynfile)
+    print('')
 
   def get_metdata_year_range(self):
     #get site year information
@@ -1289,7 +1301,7 @@ class ELMcase():
               'external_mask_zero_surface', \
               'srcmods', 'variable', 'name', 'nyears', 'disable_git']
     # ``humhol`` predates ELM's runtime switch and is retained only as a
-    # backwards-compatible OLMT alias.  New configurations use use_humhol for
+    # backwards-compatible OLMT alias. New configurations use use_humhol for
     # both ELM physics and generation of the multi-topounit surface dataset.
     use_humhol = str(self.case_options.get('use_humhol', '')).strip().lower()
     if use_humhol in ('.true.', 'true', '1', 'yes', 'on'):
@@ -1666,11 +1678,15 @@ class ELMcase():
           #code.interact(local=dict(globals(), **locals()))
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, \
                   stdout=subprocess.PIPE, text=True)
-          output = result.stdout.strip()
+          #output = result.stdout.strip()
+          output = (result.stdout or "").strip()
+          stderr = (result.stderr or "").strip()
           if (result.returncode != 0):
-              raise RuntimeError('Failed to submit '+script+':\n'+output)
+              raise RuntimeError('Failed to submit '+script+':\n'+output+'\n'+stderr)
           jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(jobnum)+' from '+script)
+          if output:
+              print(output)
           dep_ids=[jobnum]
     if (not ensemble and multisite_script == '' and getattr(self, 'postproc_vars', [])):
       postproc_script = self.create_postprocess_script()
@@ -1682,11 +1698,15 @@ class ELMcase():
           cmd = ([mysubmit, '--dependency=afterok:'+str(jobnum)] +
               self.slurm_submit_args(ntasks=1, cpus_per_task=1, mem='32g') + [postproc_script])
           result = subprocess.run(cmd, stderr=subprocess.STDOUT, stdout=subprocess.PIPE, text=True)
-          output = result.stdout.strip()
+          #output = result.stdout.strip()
+          output = (result.stdout or "").strip()
+          stderr = (result.stderr or "").strip()
           if (result.returncode != 0):
-              raise RuntimeError('Failed to submit '+postproc_script+':\n'+output)
+              raise RuntimeError('Failed to submit '+postproc_script+':\n'+output+'\n'+stderr)
           postproc_jobnum = parse_submit_jobnum(output)
           print('\nSubmitted '+str(postproc_jobnum)+' from '+postproc_script)
+          if output:
+              print(output)
     os.chdir(self.OLMTdir)
     return jobnum
 
