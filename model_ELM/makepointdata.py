@@ -688,6 +688,14 @@ def expand_natpft_dimension(self, ds, target_natpft=22):
     return self.expand_surface_pft_dimension(ds, 'natpft', target_size=target_natpft)
 
 
+def spruce_topounit_fractions():
+    """Return frustum, hollow, and hummock fractions for a SPRUCE corral."""
+    open_bog_fraction = 66.4 / 114.8
+    return [48.4 / 114.8,
+            open_bog_fraction * 0.34,
+            open_bog_fraction * 0.66]
+
+
 def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
     """Upgrade a standard surface file for the Peatlands sitegroup when needed."""
     if not self.is_peatlands_sitegroup():
@@ -707,22 +715,33 @@ def prepare_peatlands_surface_data(self, ds, latvar, lonvar):
             ds.attrs['topounit_source_index'] = str(self.peatlands_upland_source_topounit())
         elif 'SPR' in str(getattr(self, 'site', '')) and getattr(self, 'humhol', False):
             print('Adding SPRUCE 3-topounit Peatlands surface metadata')
-            fracarea = [0.5, 0.17, 0.33]
+            # Hanson et al. enclosure geometry: 48.4 m2 frustum shadow and
+            # 66.4 m2 open bog within the 114.8 m2 corral. Preserve the
+            # measured 34:66 hollow:hummock split within the open bog.
+            fracarea = spruce_topounit_fractions()
             elevations = [464.95, 465.0, 465.15]
             distances = [0, 3, 1]
             is_bog = [0, 1, 1]
             bog_peat_interface_elev = elevations[1] - 3.0
             peat_depth = [elev - bog_peat_interface_elev for elev in elevations]
             till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0]
+            drainage_outlet_depth = [0.4, 0.4, 0.4]
+            acrotelm_base_elev = elevations[1] - 0.30
+            acrotelm_depth = [elev - acrotelm_base_elev for elev in elevations]
             ds = self.add_topounit_dimension(
                 ds, latvar, lonvar, num_topounits=3,
                 fracarea=fracarea, elevations=elevations, distances=distances,
-                is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat
+                is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat,
+                drainage_outlet_depth=drainage_outlet_depth,
+                acrotelm_depth=acrotelm_depth
             )
             ds.attrs['topounit_order'] = (
                 '1=boardwalk_fen_bareground, 2=bog_hollow, 3=bog_hummock')
             ds.attrs['topounit_fraction_default'] = (
-                'boardwalk_fen=0.50, bog_hollow=0.17, bog_hummock=0.33')
+                'boardwalk_fen=0.421603, bog_hollow=0.196655, bog_hummock=0.381742')
+            ds.attrs['peatland_drainage_outlet'] = '0.40 m below bog hollow surface'
+            ds.attrs['peatland_acrotelm_boundary'] = (
+                'McFarlane-constrained common elevation 0.30 m below bog hollow surface')
         else:
             print('Adding default 4-topounit Peatlands surface metadata')
             fracarea = [0.25, 0.25, 0.25, 0.25]
@@ -828,16 +847,24 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
                 # The fen and bog units share a common peat/till interface set
                 # 3 m below the hollow surface, so topounit peat depth follows
                 # each unit's microtopographic offset.
-                fracarea = [0.5,0.17,0.33]
+                # Hanson et al. enclosure geometry: 48.4 m2 frustum shadow
+                # and 66.4 m2 open bog within the 114.8 m2 corral. Preserve
+                # the measured 34:66 hollow:hummock split in the open bog.
+                fracarea = spruce_topounit_fractions()
                 elevations = [464.95,465.0,465.15]   # boardwalk/fen, hollow, hummock
                 distances = [0, 3, 1]  # distance to next lower adjacent topounit (m)
                 is_bog = [0, 1, 1]
                 bog_peat_interface_elev = elevations[1] - 3.0
                 peat_depth = [elev - bog_peat_interface_elev for elev in elevations]
                 till_ksat = [0.0, 0.1/86400.0, 0.1/86400.0]  # mm/s
+                drainage_outlet_depth = [0.4, 0.4, 0.4]
+                acrotelm_base_elev = elevations[1] - 0.30
+                acrotelm_depth = [elev - acrotelm_base_elev for elev in elevations]
                 ds = self.add_topounit_dimension(ds, latvar, lonvar, num_topounits=3, \
                         fracarea=fracarea, elevations=elevations, distances=distances, \
-                        is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat)
+                        is_bog=is_bog, peat_depth=peat_depth, till_ksat=till_ksat, \
+                        drainage_outlet_depth=drainage_outlet_depth, \
+                        acrotelm_depth=acrotelm_depth)
             else:
                 fracarea = [0.5,0.5]
                 elevations = [self.siteinfo['elev'], self.siteinfo['elev']+0.15]
@@ -1026,7 +1053,8 @@ def makepointdata(self, filename, pft=-1, mylat=[], mylon=[]):
 
 
 def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=None, \
-        elevations=None, distances=None, is_bog=None, peat_depth=None, till_ksat=None):
+        elevations=None, distances=None, is_bog=None, peat_depth=None, till_ksat=None,
+        drainage_outlet_depth=None, acrotelm_depth=None):
     """
     Add topounit dimension and related variables for topographic simulations
     
@@ -1054,6 +1082,11 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
         Peat depth above restrictive till for each topounit (m)
     till_ksat : array-like, optional
         Restrictive till saturated conductivity for each topounit (mm/s)
+    drainage_outlet_depth : array-like, optional
+        Depth of the shared peatland drainage outlet below the hollow surface (m)
+    acrotelm_depth : array-like, optional
+        Prescribed acrotelm depth below each local topounit surface (m).
+        Zero retains the prognostic water-table-derived boundary.
         
     Returns:
     --------
@@ -1112,6 +1145,33 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
         till_ksat = np.array(till_ksat)
         if len(till_ksat) != num_topounits:
             raise ValueError(f"till_ksat length ({len(till_ksat)}) must equal num_topounits ({num_topounits})")
+
+    if drainage_outlet_depth is None:
+        drainage_outlet_depth = np.zeros(num_topounits)
+    else:
+        drainage_outlet_depth = np.array(drainage_outlet_depth)
+        if len(drainage_outlet_depth) != num_topounits:
+            raise ValueError(
+                "drainage_outlet_depth length "
+                f"({len(drainage_outlet_depth)}) must equal num_topounits ({num_topounits})"
+            )
+        if np.any(drainage_outlet_depth < 0.0):
+            raise ValueError("drainage_outlet_depth values must be nonnegative")
+
+    if acrotelm_depth is None:
+        acrotelm_depth = np.zeros(num_topounits)
+    else:
+        acrotelm_depth = np.array(acrotelm_depth)
+        if len(acrotelm_depth) != num_topounits:
+            raise ValueError(
+                "acrotelm_depth length "
+                f"({len(acrotelm_depth)}) must equal num_topounits ({num_topounits})"
+            )
+        if np.any(acrotelm_depth < 0.0):
+            raise ValueError("acrotelm_depth values must be nonnegative")
+        prescribed = acrotelm_depth > 0.0
+        if np.any(acrotelm_depth[prescribed] > peat_depth[prescribed]):
+            raise ValueError("positive acrotelm_depth values must not exceed peat_depth")
     
     # Load the dataset into memory first
     ds = ds.load()
@@ -1303,6 +1363,31 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
         }
     )
 
+    drainage_outlet_depth_data = np.broadcast_to(
+        drainage_outlet_depth.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitDrainageOutletDepth'] = xr.DataArray(
+        drainage_outlet_depth_data,
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'shared peatland drainage outlet depth below the hollow surface',
+            'units': 'm'
+        }
+    )
+
+    acrotelm_depth_data = np.broadcast_to(
+        acrotelm_depth.reshape(-1, *([1] * (len(dist_shape) - 1))), dist_shape)
+    new_ds['TopounitAcrotelmDepth'] = xr.DataArray(
+        acrotelm_depth_data,
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'prescribed acrotelm depth below the local topounit surface',
+            'units': 'm',
+            'comment': 'zero selects the prognostic water-table-derived boundary'
+        }
+    )
+
     # Optional surface-structure shading defaults. These variables are always
     # present on OLMT-generated topounit surfaces so the [surface_data] config
     # section can set individual topounits without special-case site code.
@@ -1324,6 +1409,16 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
             'units': '1'
         }
     )
+    new_ds['TopounitStructureSnowRetention'] = xr.DataArray(
+        np.ones(dist_shape, dtype=float),
+        dims=dist_dims,
+        attrs={
+            '_FillValue': -999.0,
+            'long_name': 'fraction of incident snowfall retained on the topounit',
+            'units': '1',
+            'comment': 'rainfall is unaffected; removed snow is shed outside the represented area'
+        }
+    )
     
     # Copy attributes
     new_ds.attrs = dict(ds.attrs)
@@ -1336,6 +1431,11 @@ def add_topounit_dimension(self, ds, latvar, lonvar, num_topounits=2, fracarea=N
             f'bog_hummock={float(peat_depth[2]):.2f}'
         )
         new_ds.attrs['topounit_till_ksat_mm_per_day'] = 'boardwalk_fen=0.0, bog_hollow=0.1, bog_hummock=0.1'
+        new_ds.attrs['topounit_acrotelm_depth_m'] = (
+            f'boardwalk_fen={float(acrotelm_depth[0]):.2f}, '
+            f'bog_hollow={float(acrotelm_depth[1]):.2f}, '
+            f'bog_hummock={float(acrotelm_depth[2]):.2f}'
+        )
     # Close old dataset and replace with new one
     ds.close()
     return new_ds
