@@ -27,11 +27,12 @@ def do_dailytomonthly(values):
     dayspermonth=[31,28,31,30,31,30,31,31,30,31,30,31]
     npoints = len(values)
     nmonths = int(npoints/365*12)
-    values_out = np.zeros([nmonths],float)
+    values = np.ma.asarray(values)
+    values_out = np.ma.zeros((nmonths,) + values.shape[1:], dtype=float)
     index=0
     for m in range(0,nmonths):
         mind = m % 12
-        values_out[m] = np.mean(values[index:index+dayspermonth[mind]])
+        values_out[m] = np.ma.mean(values[index:index+dayspermonth[mind]], axis=0)
         index = index+dayspermonth[mind]
     return values_out
 
@@ -39,16 +40,20 @@ def do_monthlytoannual(values):
     dayspermonth=[31,28,31,30,31,30,31,31,30,31,30,31]
     npoints = len(values)
     nyears = int(npoints/12)
-    values_out = np.zeros([nyears],float)
+    values = np.ma.asarray(values)
+    values_out = np.ma.zeros((nyears,) + values.shape[1:], dtype=float)
+    weights = np.asarray(dayspermonth, dtype=float).reshape(
+            (12,) + (1,) * (values.ndim - 1))
     for y in range(0,nyears):
-        values_out[y] = np.sum(values[y*12:(y+1)*12]*dayspermonth)/365
+        values_out[y] = np.ma.sum(values[y*12:(y+1)*12]*weights, axis=0)/365
     return values_out
 
 def do_timeaverage(values, nav):
+   values = np.ma.asarray(values)
    npoints = len(values)
-   values_out = np.zeros([int(npoints/nav)],float)
+   values_out = np.ma.zeros((int(npoints/nav),) + values.shape[1:], dtype=float)
    for t in range(0,int(npoints/nav)):
-       values_out[t] = np.mean(values[t*nav:(t+1)*nav])
+       values_out[t] = np.ma.mean(values[t*nav:(t+1)*nav], axis=0)
    return values_out
 
 def read_postprocess_values(file_list, basevar, var, index=0, gindex=0, xindex=0, yindex=0):
@@ -62,18 +67,9 @@ def read_postprocess_values(file_list, basevar, var, index=0, gindex=0, xindex=0
             ncvar = ds.variables[basevar]
             if units == '':
                 units = getattr(ncvar, 'units', '')
-            ndim = len(ncvar.dimensions)
-            if (ndim == 4):
-                # 2D output with vertical structure
-                data = ncvar[:, index, yindex, xindex]
-            elif (ndim == 3):
-                # 2D output or 1D output with vertical structure (currently assumes 1D)
-                data = ncvar[:, index, gindex]
-            else:
-                # 1D output (unstructured grid)
-                data = ncvar[:, gindex]
-                if (is_pft_var(var) or is_col_var(var)):
-                    data = ncvar[:, index]
+            data = _slice_postprocess_array(
+                    np.ma.asarray(ncvar[:]), var, index=index, gindex=gindex,
+                    xindex=xindex, yindex=yindex, dimensions=ncvar.dimensions)
             values.append(np.ma.asarray(data))
     if len(values) == 0:
         return np.ma.array([]), units
@@ -149,6 +145,62 @@ def _postprocess_file_list(self, rundir, hnum, startyear=-1, endyear=9999):
             file_list = file_list[:-1]
     return file_list, firstyear, endyear, hist_nhtfrq, nperyear
 
+def _indexed_dimension(var):
+    if is_pft_var(var):
+        return 'pft'
+    if is_col_var(var):
+        return 'column'
+    return None
+
+def _available_history_streams(self, rundir):
+    pattern = os.path.join(rundir, self.casename+'.elm.h*.nc')
+    streams = set()
+    for fname in glob.glob(pattern):
+        match = re.search(r'\.elm\.h(\d+)\.', os.path.basename(fname))
+        if match:
+            streams.add(int(match.group(1)))
+    return sorted(streams)
+
+def _postprocess_file_list_for_variable(self, rundir, basevar, var, preferred_hnum,
+        startyear=-1, endyear=9999):
+    """Choose the highest-resolution stream with the requested indexed dimension."""
+    expected_dimension = _indexed_dimension(var)
+    candidates = []
+    stream_numbers = [preferred_hnum] + [
+        value for value in _available_history_streams(self, rundir)
+        if value != preferred_hnum
+    ]
+    for hnum in stream_numbers:
+        file_list, firstyear, selected_endyear, hist_nhtfrq, nperyear = \
+                _postprocess_file_list(
+                        self, rundir, hnum, startyear=startyear, endyear=endyear)
+        if len(file_list) == 0:
+            continue
+        with Dataset(file_list[0], 'r') as ds:
+            if basevar not in ds.variables:
+                continue
+            dimensions = ds.variables[basevar].dimensions
+            if expected_dimension is not None and expected_dimension not in dimensions:
+                continue
+        record_count = 0
+        for fname in file_list:
+            with Dataset(fname, 'r') as ds:
+                if basevar not in ds.variables:
+                    record_count = -1
+                    break
+                record_count += len(ds.dimensions.get('time', []))
+        if record_count < 0:
+            continue
+        candidates.append((
+            record_count, hnum == preferred_hnum, hnum, file_list, firstyear,
+            selected_endyear, hist_nhtfrq, nperyear,
+        ))
+    if len(candidates) == 0:
+        return [], startyear, endyear, 0, 12, preferred_hnum
+    _, _, hnum, file_list, firstyear, selected_endyear, hist_nhtfrq, nperyear = \
+            max(candidates, key=lambda item: (item[0], item[1]))
+    return file_list, firstyear, selected_endyear, hist_nhtfrq, nperyear, hnum
+
 def _postprocess_requests(self):
     requests = []
     for v in self.postproc_vars:
@@ -202,7 +254,17 @@ def _postprocess_requests(self):
             })
     return requests
 
-def _slice_postprocess_array(data, var, index=0, gindex=0, xindex=0, yindex=0):
+def _slice_postprocess_array(data, var, index=0, gindex=0, xindex=0, yindex=0,
+        dimensions=None):
+    if dimensions is not None:
+        dimensions = tuple(dimensions)
+        indexed_dimension = _indexed_dimension(var)
+        if indexed_dimension is not None:
+            if indexed_dimension not in dimensions:
+                raise ValueError(
+                    'Requested '+indexed_dimension+' index for '+var+
+                    ', but history dimensions are '+str(dimensions))
+            return np.ma.take(data, index, axis=dimensions.index(indexed_dimension))
     if (data.ndim == 4):
         return data[:, index, yindex, xindex]
     if (data.ndim == 3):
@@ -446,17 +508,25 @@ def _finalize_postprocess_values(self, values, units, startyear, hist_nhtfrq, np
 
 def write_peatlands_pft_postprocessed_netcdf(self, filename='', startyear=-1, endyear=9999,
         gindex=0, xindex=0, yindex=0):
-    """Write Peatlands postprocessed h2 output as time x 22-PFT arrays."""
+    """Write Peatlands indexed output as time x 22-PFT arrays."""
     if not _case_is_peatlands(self):
         return ''
     if len(getattr(self, 'postproc_vars', [])) == 0:
         return ''
 
     rundir = _postprocess_rundir(self, ens_num=0)
-    file_list, firstyear, _, hist_nhtfrq, nperyear = _postprocess_file_list(
-            self, rundir, 2, startyear=startyear, endyear=endyear)
+    indexed_request = next((
+        value for value in self.postproc_vars
+        if is_pft_var(value) or is_col_var(value)
+    ), None)
+    if indexed_request is None:
+        return ''
+    file_list, firstyear, _, hist_nhtfrq, nperyear, hnum = \
+            _postprocess_file_list_for_variable(
+                    self, rundir, get_postproc_basevar(indexed_request),
+                    indexed_request, 2, startyear=startyear, endyear=endyear)
     if len(file_list) == 0:
-        print('No h2 PFT output files found for Peatlands postprocessed NetCDF in '+rundir)
+        print('No indexed PFT/column output files found for Peatlands postprocessed NetCDF in '+rundir)
         return ''
 
     topounit = _requested_peatlands_topounit(self)
@@ -626,6 +696,11 @@ def postprocess_member(self, ens_num=0, startyear=-1, endyear=9999, gindex=0, xi
     rundir = _postprocess_rundir(self, ens_num=ens_num)
     requests_by_hnum = {}
     for req in requests:
+        if _indexed_dimension(req['var']) is not None:
+            _, _, _, _, _, selected_hnum = _postprocess_file_list_for_variable(
+                    self, rundir, req['basevar'], req['var'], req['hnum'],
+                    startyear=startyear, endyear=endyear)
+            req['hnum'] = selected_hnum
         requests_by_hnum.setdefault(req['hnum'], []).append(req)
 
     requested_topounits = None
@@ -664,8 +739,10 @@ def postprocess_member(self, ens_num=0, startyear=-1, endyear=9999, gindex=0, xi
                             values = _aggregate_history_topounits(
                                     ds, data, requested_topounits, basevar)
                         else:
-                            values = _slice_postprocess_array(data, req['var'], index=req['index'],
-                                    gindex=gindex, xindex=xindex, yindex=yindex)
+                            values = _slice_postprocess_array(
+                                    data, req['var'], index=req['index'],
+                                    gindex=gindex, xindex=xindex, yindex=yindex,
+                                    dimensions=ncvar.dimensions)
                         values_by_var[req['var_out']].append(values)
 
         for req in h_requests:
@@ -756,8 +833,14 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
     requested_endyear = endyear
     basevar = get_postproc_basevar(var)
     indexed_var = is_pft_var(var) or is_col_var(var)
-    file_list, firstyear, endyear, hist_nhtfrq, nperyear = _postprocess_file_list(
-            self, rundir, hnum, startyear=startyear, endyear=endyear)
+    if indexed_var:
+        file_list, firstyear, endyear, hist_nhtfrq, nperyear, hnum = \
+                _postprocess_file_list_for_variable(
+                        self, rundir, basevar, var, hnum,
+                        startyear=startyear, endyear=endyear)
+    else:
+        file_list, firstyear, endyear, hist_nhtfrq, nperyear = _postprocess_file_list(
+                self, rundir, hnum, startyear=startyear, endyear=endyear)
     if len(file_list) == 0 and hnum == 1 and not indexed_var:
         file_list, firstyear, endyear, hist_nhtfrq, nperyear = _postprocess_file_list(
                 self, rundir, 0, startyear=requested_startyear, endyear=requested_endyear)
@@ -770,14 +853,16 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         values, units = read_postprocess_values(file_list, basevar, var, index=index, \
                 gindex=gindex, xindex=xindex, yindex=yindex)
     except KeyError as err:
-        if hnum != 1 or indexed_var:
-            raise
+        # A variable can be placed on a different daily tape from the
+        # preferred subgrid stream (for example, RAIN is grid-level on h2
+        # while PFT/column diagnostics are on h3). Search every available
+        # tape for the highest-resolution compatible copy before failing.
         fallback_file_list, fallback_firstyear, fallback_endyear, fallback_hist_nhtfrq, \
-                fallback_nperyear = _postprocess_file_list(
-                        self, rundir, 0, startyear=requested_startyear,
-                        endyear=requested_endyear)
-        if len(fallback_file_list) == 0:
-            raise
+                fallback_nperyear, fallback_hnum = _postprocess_file_list_for_variable(
+                        self, rundir, basevar, var, hnum,
+                        startyear=requested_startyear, endyear=requested_endyear)
+        if len(fallback_file_list) == 0 or fallback_hnum == hnum:
+            raise err
         try:
             values, units = read_postprocess_values(fallback_file_list, basevar, var,
                     index=index, gindex=gindex, xindex=xindex, yindex=yindex)
@@ -788,7 +873,7 @@ def postprocess(self, var, index=0, gindex=0, startyear=-1, endyear=9999, hnum=0
         endyear = fallback_endyear
         hist_nhtfrq = fallback_hist_nhtfrq
         nperyear = fallback_nperyear
-        hnum = 0
+        hnum = fallback_hnum
     #change flux units
     factor = 1.0
     if (units == 'gC/m^2/s' or units == 'gN/m^2/s' or units == 'gP/m^2/s'):
