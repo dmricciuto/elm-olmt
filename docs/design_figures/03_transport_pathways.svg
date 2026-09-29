@@ -1,0 +1,40 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="760" viewBox="0 0 1200 760">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#3b4a5a"/></marker>
+    <marker id="green" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#2f7d57"/></marker>
+    <style>
+      .title{font:700 30px Arial,sans-serif;fill:#17212b}.h{font:700 19px Arial,sans-serif;fill:#17212b}.t{font:400 16px Arial,sans-serif;fill:#17212b}.s{font:400 14px Arial,sans-serif;fill:#344454}.box{stroke:#657789;stroke-width:2;rx:12}.line{stroke:#657789;stroke-width:2}.flow{stroke:#3b4a5a;stroke-width:3;fill:none;marker-end:url(#arrow)}.root{stroke:#2f7d57;stroke-width:3;fill:none;marker-end:url(#green)}.lab{font:700 14px Arial,sans-serif;fill:#344454}
+    </style>
+  </defs>
+  <rect width="1200" height="760" fill="#fbfcfd"/>
+  <text x="600" y="42" text-anchor="middle" class="title">Vertical and lateral transport pathways</text>
+  <text x="600" y="68" text-anchor="middle" class="s">Aqueous, gas, plant, and solid pathways operate on the peatland topounit columns</text>
+
+  <rect x="455" y="100" width="300" height="85" fill="#e8f1f7" class="box"/><text x="605" y="137" text-anchor="middle" class="h">Surface and litter interface</text><text x="605" y="164" text-anchor="middle" class="s">rainfall, litter inputs, ponded head</text>
+  <line x1="455" y1="205" x2="755" y2="205" class="line"/>
+  <text x="780" y="210" class="lab">soil surface</text>
+
+  <rect x="455" y="225" width="300" height="150" fill="#f5ead8" class="box"/><text x="605" y="260" text-anchor="middle" class="h">Unsaturated peat</text><text x="605" y="291" text-anchor="middle" class="t">DOM production and processing</text><text x="605" y="318" text-anchor="middle" class="t">root and moss nutrient access</text><text x="605" y="345" text-anchor="middle" class="t">ice impedance and capillarity</text>
+  <rect x="455" y="405" width="300" height="190" fill="#dceef4" class="box"/><text x="605" y="440" text-anchor="middle" class="h">Saturated peat</text><text x="605" y="471" text-anchor="middle" class="t">DOM, acetate, CH4, NH4, NO3</text><text x="605" y="498" text-anchor="middle" class="t">aqueous reaction and transport</text><text x="605" y="525" text-anchor="middle" class="t">macrodispersion and diffusion</text><text x="605" y="552" text-anchor="middle" class="t">sorption / retardation for NH4</text>
+  <line x1="425" y1="392" x2="785" y2="392" stroke="#a24b3c" stroke-width="3" stroke-dasharray="10 7"/>
+  <text x="800" y="397" class="lab">ZWT</text>
+
+  <path d="M605 185 V225" class="flow"/><text x="630" y="211" class="lab">infiltration</text>
+  <path d="M605 375 V405" class="flow"/><text x="630" y="394" class="lab">water-table entry</text>
+  <path d="M500 225 V595" class="flow"/><text x="465" y="388" transform="rotate(-90 465 388)" class="lab">DOM advection + dispersion</text>
+  <path d="M700 595 V225" class="flow"/><text x="735" y="388" transform="rotate(90 735 388)" class="lab">diffusive back transport</text>
+
+  <path d="M850 280 C785 280 755 300 755 330" class="root"/><text x="850" y="265" class="lab">vascular roots follow root profile</text>
+  <path d="M850 515 C785 515 755 520 755 520" class="root"/><text x="850" y="500" class="lab">moss access when hydraulically connected</text>
+
+  <rect x="40" y="250" width="300" height="165" fill="#eaf5ec" class="box"/><text x="190" y="285" text-anchor="middle" class="h">Topounit lateral exchange</text><text x="70" y="320" class="t">surface routing: upland → fen</text><text x="70" y="350" class="t">subsurface: configured connected units</text><text x="70" y="380" class="t">frozen-layer conductivity guards</text><text x="70" y="410" class="t">connected surface head</text>
+  <path d="M340 335 H455" class="flow"/><text x="397" y="320" text-anchor="middle" class="lab">QFLX_LAT_AQU</text>
+
+  <rect x="850" y="100" width="300" height="165" fill="#f7e5e2" class="box"/><text x="1000" y="135" text-anchor="middle" class="h">Gas transport and loss</text><text x="880" y="170" class="t">CH4 diffusion</text><text x="880" y="200" class="t">plant-mediated transport</text><text x="880" y="230" class="t">ebullition threshold</text><text x="880" y="260" class="t">surface flux accounting</text>
+  <path d="M755 270 H850" class="flow"/><text x="802" y="255" text-anchor="middle" class="lab">CH4</text>
+
+  <rect x="40" y="505" width="300" height="115" fill="#f1eef9" class="box"/><text x="190" y="540" text-anchor="middle" class="h">Solid peat transport</text><text x="70" y="575" class="t">compaction profile and burial</text><text x="70" y="602" class="t">density target / carbon accumulation</text>
+  <path d="M340 560 H455" class="flow"/><text x="397" y="545" text-anchor="middle" class="lab">peat burial</text>
+
+  <text x="600" y="690" text-anchor="middle" class="s">Transport modes are independently diagnosable so DOM, nutrient, and methane budgets can be audited by layer.</text>
+</svg>

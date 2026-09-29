@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#3b4a5a"/></marker>
+    <style>
+      .title{font:700 30px Arial,sans-serif;fill:#17212b}.h{font:700 20px Arial,sans-serif;fill:#17212b}.t{font:400 17px Arial,sans-serif;fill:#17212b}.s{font:400 15px Arial,sans-serif;fill:#344454}.box{stroke:#657789;stroke-width:2;rx:14}.arrow{stroke:#3b4a5a;stroke-width:3;fill:none;marker-end:url(#arrow)}.dash{stroke-dasharray:10 8}.label{font:700 15px Arial,sans-serif;fill:#344454}
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#fbfcfd"/>
+  <text x="600" y="42" text-anchor="middle" class="title">ELM-Peatlands-Microbe capability architecture</text>
+  <text x="600" y="68" text-anchor="middle" class="s">Runtime-gated peatland processes remain compatible with the legacy ELM cascade and CH4Mod path</text>
+
+  <rect x="40" y="105" width="300" height="245" fill="#e8f1f7" class="box"/>
+  <text x="190" y="140" text-anchor="middle" class="h">ELM host processes</text>
+  <text x="70" y="180" class="t">• vegetation, litterfall, roots</text>
+  <text x="70" y="211" class="t">• C–N–P allocation and uptake</text>
+  <text x="70" y="242" class="t">• standard SOM decomposition</text>
+  <text x="70" y="273" class="t">• soil water, ice, and energy</text>
+  <text x="70" y="304" class="t">• history and restart infrastructure</text>
+
+  <rect x="390" y="105" width="360" height="245" fill="#eaf5ec" class="box"/>
+  <text x="570" y="140" text-anchor="middle" class="h">Peatland subgrid and hydrology</text>
+  <text x="420" y="180" class="t">• bog, hummock, hollow, fen, upland</text>
+  <text x="420" y="211" class="t">• surface and subsurface routing</text>
+  <text x="420" y="242" class="t">• connected surface head and ZWT</text>
+  <text x="420" y="273" class="t">• peat compaction and burial</text>
+  <text x="420" y="304" class="t">• frozen-layer safeguards</text>
+
+  <rect x="800" y="105" width="360" height="245" fill="#fff3df" class="box"/>
+  <text x="980" y="140" text-anchor="middle" class="h">Microbe and methane extensions</text>
+  <text x="830" y="180" class="t">• DOM, bacteria, and fungi pools</text>
+  <text x="830" y="211" class="t">• acetate and hydrogen substrates</text>
+  <text x="830" y="242" class="t">• acetoclastic and H2 methanogenesis</text>
+  <text x="830" y="273" class="t">• aerobic and anaerobic oxidation</text>
+  <text x="830" y="304" class="t">• diffusion, plant transport, ebullition</text>
+
+  <path d="M340 225 H390" class="arrow"/><text x="365" y="213" text-anchor="middle" class="label">state</text>
+  <path d="M750 225 H800" class="arrow"/><text x="775" y="213" text-anchor="middle" class="label">water table / O2</text>
+
+  <rect x="150" y="425" width="900" height="190" fill="#f1eef9" class="box"/>
+  <text x="600" y="462" text-anchor="middle" class="h">Runtime configuration envelope</text>
+  <rect x="190" y="490" width="360" height="82" fill="#ffffff" class="box"/>
+  <text x="370" y="522" text-anchor="middle" class="h">Microbe off</text>
+  <text x="370" y="549" text-anchor="middle" class="s">standard decomp cascade + legacy CH4Mod</text>
+  <rect x="650" y="490" width="360" height="82" fill="#ffffff" class="box"/>
+  <text x="830" y="522" text-anchor="middle" class="h">Microbe on</text>
+  <text x="830" y="549" text-anchor="middle" class="s">DOM–microbe pools + revised methane</text>
+  <path d="M600 350 V425" class="arrow"/><text x="620" y="392" class="label">namelist / parameter options</text>
+  <path d="M550 531 H650" class="arrow"/>
+
+  <text x="600" y="665" text-anchor="middle" class="s">The host model remains the accounting framework; peatland and microbial capabilities are additive and switchable.</text>
+</svg>

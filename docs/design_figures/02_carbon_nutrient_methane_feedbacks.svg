@@ -1,0 +1,41 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="720" viewBox="0 0 1200 720">
+  <defs>
+    <marker id="arrow" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#3b4a5a"/></marker>
+    <marker id="neg" markerWidth="10" markerHeight="8" refX="9" refY="4" orient="auto"><path d="M0,0 L10,4 L0,8 Z" fill="#a24b3c"/></marker>
+    <style>
+      .title{font:700 30px Arial,sans-serif;fill:#17212b}.h{font:700 19px Arial,sans-serif;fill:#17212b}.t{font:400 16px Arial,sans-serif;fill:#17212b}.s{font:400 14px Arial,sans-serif;fill:#344454}.box{stroke:#657789;stroke-width:2;rx:14}.pos{stroke:#3b4a5a;stroke-width:3;fill:none;marker-end:url(#arrow)}.neg{stroke:#a24b3c;stroke-width:3;fill:none;marker-end:url(#neg)}.lab{font:700 14px Arial,sans-serif;fill:#344454}.red{fill:#a24b3c}
+    </style>
+  </defs>
+  <rect width="1200" height="720" fill="#fbfcfd"/>
+  <text x="600" y="42" text-anchor="middle" class="title">Carbon, nutrient, and methane feedbacks</text>
+  <text x="600" y="68" text-anchor="middle" class="s">Pools, reactions, and environmental gates are coupled through explicit state and flux pathways</text>
+
+  <rect x="55" y="125" width="210" height="92" fill="#e8f1f7" class="box"/><text x="160" y="161" text-anchor="middle" class="h">Litter and SOM</text><text x="160" y="188" text-anchor="middle" class="s">substrate supply</text>
+  <rect x="330" y="125" width="210" height="92" fill="#eaf5ec" class="box"/><text x="435" y="161" text-anchor="middle" class="h">DOM</text><text x="435" y="188" text-anchor="middle" class="s">mobile dissolved C</text>
+  <rect x="605" y="125" width="210" height="92" fill="#fff3df" class="box"/><text x="710" y="161" text-anchor="middle" class="h">Bacteria and fungi</text><text x="710" y="188" text-anchor="middle" class="s">uptake and mortality</text>
+  <rect x="880" y="125" width="265" height="92" fill="#f1eef9" class="box"/><text x="1012" y="161" text-anchor="middle" class="h">Acetate and H2</text><text x="1012" y="188" text-anchor="middle" class="s">fermentation products</text>
+
+  <path d="M265 171 H330" class="pos"/><text x="297" y="157" text-anchor="middle" class="lab">solubilization</text>
+  <path d="M540 171 H605" class="pos"/><text x="572" y="157" text-anchor="middle" class="lab">microbial uptake</text>
+  <path d="M815 171 H880" class="pos"/><text x="847" y="157" text-anchor="middle" class="lab">fermentation</text>
+
+  <rect x="330" y="315" width="210" height="92" fill="#eaf5ec" class="box"/><text x="435" y="351" text-anchor="middle" class="h">Mineral N and P</text><text x="435" y="378" text-anchor="middle" class="s">availability and transport</text>
+  <rect x="605" y="315" width="210" height="92" fill="#fff3df" class="box"/><text x="710" y="351" text-anchor="middle" class="h">Plant demand</text><text x="710" y="378" text-anchor="middle" class="s">roots and moss access</text>
+  <rect x="880" y="315" width="265" height="92" fill="#f7e5e2" class="box"/><text x="1012" y="351" text-anchor="middle" class="h">Methane production</text><text x="1012" y="378" text-anchor="middle" class="s">CH4 from acetate and H2</text>
+
+  <path d="M710 217 V315" class="pos"/><text x="730" y="270" class="lab">mineralization</text>
+  <path d="M540 361 H605" class="pos"/><text x="572" y="347" text-anchor="middle" class="lab">uptake</text>
+  <path d="M815 361 H880" class="pos"/><text x="847" y="347" text-anchor="middle" class="lab">substrate</text>
+  <path d="M435 315 V217" class="neg"/><text x="410" y="270" text-anchor="end" class="lab red">immobilization</text>
+
+  <rect x="330" y="505" width="210" height="92" fill="#e8f1f7" class="box"/><text x="435" y="541" text-anchor="middle" class="h">Water table and O2</text><text x="435" y="568" text-anchor="middle" class="s">redox and saturation gate</text>
+  <rect x="605" y="505" width="210" height="92" fill="#f7e5e2" class="box"/><text x="710" y="541" text-anchor="middle" class="h">CH4 oxidation</text><text x="710" y="568" text-anchor="middle" class="s">aerobic and anaerobic</text>
+  <rect x="880" y="505" width="265" height="92" fill="#f1eef9" class="box"/><text x="1012" y="541" text-anchor="middle" class="h">Atmospheric CH4 flux</text><text x="1012" y="568" text-anchor="middle" class="s">diffusion, plants, ebullition</text>
+
+  <path d="M1012 407 V505" class="pos"/><text x="1036" y="463" class="lab">oxidation / storage</text>
+  <path d="M540 551 H605" class="pos"/><text x="572" y="537" text-anchor="middle" class="lab">O2 gate</text>
+  <path d="M815 551 H880" class="pos"/><text x="847" y="537" text-anchor="middle" class="lab">transport</text>
+  <path d="M435 505 C435 440 435 420 435 407" class="pos"/><text x="405" y="458" text-anchor="end" class="lab">water controls</text>
+
+  <text x="600" y="660" text-anchor="middle" class="s">Blue arrows indicate supply or transport; red arrows indicate consumption or limitation feedbacks.</text>
+</svg>
