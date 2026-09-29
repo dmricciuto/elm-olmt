@@ -221,6 +221,8 @@ def main():
     tstep = cfg['simulation'].get('tstep', 1)
     emulator_enabled = cfg['simulation'].get('emulator', False)
     setup_only = cfg['simulation'].get('setup_only', False)
+    treatment_only = cfg['simulation'].get('treatment_only', False)
+    treatment_startyear = cfg['simulation'].get('treatment_startyear', None)
 
     # Site configuration
     if runtype == 'site':
@@ -534,6 +536,19 @@ def main():
             suffix.append('phase2')
             depends = np.append(depends, depends[-1]+1)
             startyear.append(run_startyear)
+    if treatment_only:
+        if not treatments:
+            raise ValueError('treatment_only=True requires at least one treatment')
+        if not compsets:
+            raise ValueError('treatment_only=True still requires a compset template; '
+                             'set nyears_trans=1 or provide a custom compset')
+        treatment_compset = compsets[-1]
+        compsets = []
+        suffix = []
+        startyear = []
+        nyears = []
+        depends = np.array([], dtype=int)
+
     istreatment=np.zeros([len(compsets)],int)
     ncases_pretreatment = len(compsets)
 
@@ -545,10 +560,37 @@ def main():
     for t in treatments:
         nyears.append(treatment_options[t]['nyears'])
         istreatment = np.append(istreatment, 1)
-        depends = np.append(depends, ncases_pretreatment-1)
-        compsets.append(compsets[-1])
+        depends = np.append(depends, -1 if treatment_only else ncases_pretreatment-1)
+        compsets.append(treatment_compset if treatment_only else compsets[-1])
         suffix.append(treatment_options[t]['name'])
-        startyear.append(startyear[ncases_pretreatment-1]+ nyears[ncases_pretreatment-1])
+        if treatment_only:
+            if treatment_startyear is None:
+                raise ValueError('treatment_only=True requires treatment_startyear')
+            startyear.append(int(treatment_startyear))
+        else:
+            startyear.append(startyear[ncases_pretreatment-1]+ nyears[ncases_pretreatment-1])
+
+    # Warmed treatments can use an untreated treatment as a runtime-generated
+    # soil-temperature reference without changing the restart predecessor.
+    # ``depends`` remains the scientific restart chain; ``job_depends`` adds
+    # the scheduling edge that ensures the T0.00 post-run stream exists.
+    job_depends = np.array(depends, copy=True)
+    soil_heating_reference_name = cfg.get('treatment_options', {}).get(
+        'soil_heating_reference_treatment', '')
+    soil_heating_reference_index = -1
+    if soil_heating_reference_name:
+        for c in range(ncases_pretreatment, len(suffix)):
+            if suffix[c] == soil_heating_reference_name:
+                soil_heating_reference_index = c
+                break
+        if soil_heating_reference_index < 0:
+            raise ValueError('soil_heating_reference_treatment not found: '+
+                             str(soil_heating_reference_name))
+        for c in range(ncases_pretreatment, len(suffix)):
+            treatment = treatment_options[suffix[c]]
+            enabled = str(treatment.get('use_deep_soil_heating', '')).lower()
+            if enabled in ('.true.', 'true', '1', 'yes', 'on'):
+                job_depends[c] = soil_heating_reference_index
 
     print('\nELM simulation info:')
     multisite_scripts=[]
@@ -661,6 +703,42 @@ def main():
             cases[c].treatment_name = tname
             for key in treatment_options[tname].keys():
                 cases[c].case_options[key] = treatment_options[tname][key]
+        if soil_heating_reference_index >= 0:
+            reference_columns = cfg.get('treatment_options', {}).get(
+                'soil_heating_reference_columns', '1,2')
+            if isinstance(reference_columns, list):
+                reference_columns = ','.join(str(value) for value in reference_columns)
+            reference_tape = int(cfg.get('treatment_options', {}).get(
+                'soil_heating_reference_history_tape', 3))
+            if c == soil_heating_reference_index:
+                cases[c].make_soil_heating_reference = True
+                cases[c].soil_heating_reference_columns = reference_columns
+                cases[c].soil_heating_reference_history_tape = reference_tape
+                # Preserve the ordinary daily tape and add a compact hourly
+                # column tape containing only the controller-depth diagnostic.
+                # History filenames are zero based (h0, h1, ...), while the
+                # ELM namelist arrays are one based. Put the controller on a
+                # dedicated tape after the ordinary annual/daily diagnostic
+                # streams rather than overwriting their hist_fincl entry.
+                tape_index = reference_tape + 1
+                cases[c].case_options[f'hist_nhtfrq({tape_index})'] = -1
+                cases[c].case_options[f'hist_mfilt({tape_index})'] = 8760
+                cases[c].case_options[f'hist_dov2xy({tape_index})'] = '.false.'
+                cases[c].case_options[f'hist_type1d_pertape({tape_index})'] = "'COLS'"
+                cases[c].case_options[f'hist_fincl{tape_index}'] = \
+                    "'TSOI_HEATING_CONTROL'"
+            enabled = str(cases[c].case_options.get(
+                'use_deep_soil_heating', '')).lower()
+            if enabled in ('.true.', 'true', '1', 'yes', 'on'):
+                reference_case = cases[soil_heating_reference_index]
+                cases[c].case_options['soil_heating_reference_file'] = os.path.join(
+                    reference_case.rundir, 'soil_temperature_reference.nc')
+                cases[c].case_options['soil_heating_stream_year_first'] = \
+                    startyear[soil_heating_reference_index]
+                cases[c].case_options['soil_heating_stream_year_last'] = \
+                    startyear[soil_heating_reference_index] + \
+                    nyears[soil_heating_reference_index] - 1
+                cases[c].case_options['soil_heating_model_year_align'] = startyear[c]
         if (ensemble and ensemble_multitreatment and istreatment[c] and c == ncases-1):
             cases[c].all_treatment_cases = {}
             for tc in range(ncases_pretreatment, ncases):
@@ -771,6 +849,15 @@ def main():
         # Set up the case (surface, domain and pftdata)
         print('Setting up case for site: '+site)
         cases[c].setup_case()
+        if getattr(cases[c], 'make_soil_heating_reference', False):
+            reference_output = os.path.join(
+                cases[c].rundir, 'soil_temperature_reference.nc')
+            cases[c].create_soil_temperature_reference_script(
+                reference_output,
+                history_tape=cases[c].soil_heating_reference_history_tape,
+                columns=cases[c].soil_heating_reference_columns,
+                domain_file=cases[c].case_options.get(
+                    'domainfile', os.path.join(cases[c].rundir, 'domain.nc')))
         if (stop_option != 'nyears' or stop_n is not None or rest_option != 'nyears' or rest_n is not None):
             # get_forcing() may extend spinup to a complete forcing cycle.
             # Preserve that effective length unless STOP_N was explicitly set.
@@ -820,8 +907,8 @@ def main():
         print('')
         print('Submitting case: '+cases[c].casename)
         jobnum_depend=-1
-        if (depends[c] >= 0):
-            jobnum_depend = jobnum[depends[c]]
+        if (job_depends[c] >= 0):
+            jobnum_depend = jobnum[job_depends[c]]
         if (ensemble and ensemble_multitreatment and istreatment[c] and c == ncases-1):
             treatment_depends = []
             for prev_c in range(ncases_pretreatment, c):
@@ -869,6 +956,15 @@ def main():
             if (site == sites[nsites-1]):
                 jobnum[c] = cases[c].submit_case(depend=jobnum_depend, \
                     ensemble=ensemble,multisite_script=multisite_scripts[c])
+                if (getattr(cases[c], 'make_soil_heating_reference', False) and
+                        cases[c].noslurm):
+                    # Docker/local submission is synchronous. CIME's external
+                    # POSTRUN_SCRIPT redirection uses csh syntax that /bin/sh
+                    # on Debian-based images rejects, so run the already
+                    # generated reference script explicitly after T0 returns.
+                    reference_script = os.path.join(
+                        cases[c].casedir, 'create_soil_temperature_reference.sh')
+                    subprocess.run([reference_script], check=True)
             else:
                 #Create .pkl file for case (normally done with submission)
                 cases[c].create_pkl(outdir=cases[c].casedir)

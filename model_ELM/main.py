@@ -1142,6 +1142,35 @@ class ELMcase():
       result = subprocess.run(['./xmlquery','--value',variable], stdout=subprocess.PIPE)
       return result.stdout.decode('utf-8')
 
+  def create_soil_temperature_reference_script(self, output_file, history_tape=1,
+                                                columns='1,2', domain_file=None):
+      """Create the T0.00 post-run hook used by warmed SPRUCE cases."""
+      script = os.path.join(self.casedir, 'create_soil_temperature_reference.sh')
+      utility = os.path.join(
+          self.OLMTdir, 'olmt_diagnostics', 'create_soil_temperature_reference.py')
+      history_glob = os.path.join(
+          self.rundir, self.casename+'.elm.h'+str(history_tape)+'.*.nc')
+      if domain_file is None:
+          domain_file = os.path.join(self.rundir, 'domain.nc')
+      with open(script, 'w') as handle:
+          handle.write('#!/bin/bash\n')
+          handle.write('set -euo pipefail\n')
+          command = [
+              sys.executable, utility,
+              '--input', history_glob,
+              '--output', output_file,
+              '--domain', domain_file,
+              '--columns', str(columns),
+          ]
+          handle.write(shlex.join(command)+'\n')
+      os.chmod(script, 0o755)
+      # Docker/local cases are synchronous and elm_olmt.py executes this hook
+      # directly after the T0 case. Avoid CIME's external-script wrapper there:
+      # it emits csh-style ``>&`` redirection through /bin/sh on Debian images.
+      if not self.noslurm:
+          self.xmlchange('POSTRUN_SCRIPT', value=script)
+      return script
+
   def setup_case(self):
     os.chdir(self.casedir)
     #env_build
@@ -1342,6 +1371,10 @@ class ELMcase():
               'external_mask_lat_var', 'external_mask_lon_var', \
               'external_mask_zero_surface', \
               'srcmods', 'variable', 'name', 'nyears', 'disable_git']
+    keys_exclude.extend([
+              'soil_heating_reference_treatment',
+              'soil_heating_reference_columns',
+              'soil_heating_reference_history_tape'])
     # ``humhol`` predates ELM's runtime switch and is retained only as a
     # backwards-compatible OLMT alias. New configurations use use_humhol for
     # both ELM physics and generation of the multi-topounit surface dataset.
@@ -1351,7 +1384,11 @@ class ELMcase():
     #Custom namelist options
     for key in self.case_options.keys():
         if (not key in keys_exclude and not 'restart_' in key):
-            if (isinstance(self.case_options[key], str) and not ('hist_' in key) \
+            if (key.startswith('hist_type1d_pertape') or \
+                    key.startswith('hist_avgflag_pertape')):
+                value = str(self.case_options[key]).strip().strip("'\"")
+                self.customize_namelist(variable=key,value="'"+value+"'")
+            elif (isinstance(self.case_options[key], str) and not ('hist_' in key) \
                     and not '.true.' in self.case_options[key] and \
                     not '.false.' in self.case_options[key] and (key != 'add_co2')):
                 #Make these strings
