@@ -780,11 +780,18 @@ def ensemble_copy(self, ens_num, clean=True):
                           print('No valid restart file found in '+finidat_file_path+'. Exiting.')
                           sys.exit(1)
                    finidat_file_name = os.path.basename(latest_restart)
+                   finidat_file_new = os.path.join(finidat_file_path, finidat_file_name)
+                elif os.path.isabs(self.finidat) and os.path.isfile(self.finidat):
+                    # A user-supplied absolute restart is common for short
+                    # sensitivity ensembles. It is shared read-only by every
+                    # member and must not be reinterpreted as a predecessor
+                    # ensemble directory.
+                    finidat_file_new = self.finidat
                 else:
                     finidat_file_path = os.path.abspath(os.path.join(self.rundir_UQ, '..', self.dependcase, 'g'+gst[1:]))
                     finidat_file_name = os.path.basename(self.finidat)
+                    finidat_file_new = os.path.join(finidat_file_path, finidat_file_name)
                 #finidat_file_orig = self.finidat
-                finidat_file_new  = os.path.join(finidat_file_path, finidat_file_name)
                 print(finidat_file_new)
                 #if ('ad_spinup' in self.dependcase): 
                 #        os.system('python adjust_restart.py --rundir '+finidat_file_path+' --casename '+ \
