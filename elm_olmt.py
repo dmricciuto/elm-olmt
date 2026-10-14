@@ -898,6 +898,10 @@ def main():
         # Each logical case writes its own surface and domain data directly to
         # its run directory. Do not rely on shared files from an earlier case.
         cases[c].setup_domain_surfdata(makesurfdat=True,makedomain=True)
+        # An explicit regional/global finidat is reduced only after domain.nc
+        # exists, making the generated domain the authoritative cell set and
+        # ordering. Restarts from dependent OLMT cases already match.
+        cases[c].setup_finidat_from_domain()
         if (ensemble):
             if (site == sites[0] and c == 0):
                 # Get the ensemble file from the first site and case

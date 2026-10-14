@@ -863,6 +863,41 @@ class ELMcase():
       os.symlink(relative_source, link_path)
       return link_path
 
+  def setup_finidat_from_domain(self):
+      """Subset an explicit restart to the generated domain and use it as finidat."""
+      if (not self.has_finidat or self.link_finidat):
+        return ''
+
+      from subset_restart import restart_matches_domain, subset_restart_from_domain
+
+      source = os.path.abspath(self.clean_input_path(self.finidat))
+      domain = self.case_options.get(
+          'domainfile', self.case_options.get('fatmlndfrc', ''))
+      domain = self.clean_input_path(domain)
+      if (domain == ''):
+        domain = self.case_input_path('domain.nc')
+      else:
+        domain = os.path.abspath(domain)
+      if (not os.path.isfile(source)):
+        raise FileNotFoundError('Initial restart file does not exist: '+source)
+      if (not os.path.isfile(domain)):
+        raise FileNotFoundError('Generated domain file does not exist: '+domain)
+
+      if restart_matches_domain(source, domain):
+        print('Initial restart already matches generated domain: '+source)
+        selected = source
+      else:
+        selected = self.case_input_path('subset_'+os.path.basename(source))
+        print('Subsetting initial restart to generated domain: '+domain)
+        matches = subset_restart_from_domain(
+            source, domain, selected, overwrite=True)
+        print('Wrote '+str(len(matches))+' restart gridcells to '+selected)
+
+      self.finidat = selected
+      os.chdir(self.casedir)
+      self.customize_namelist(variable='finidat', value="'"+self.finidat+"'")
+      return selected
+
 #-----------------------------------------------------------------------------------------
   def create_case(self, machine='',casename='', remove=False):
     if (casename == ''):
@@ -1259,7 +1294,7 @@ class ELMcase():
     if (self.link_finidat):
         link_path = self.create_finidat_link()
         print('Linked dependent restart '+link_path+' -> '+os.readlink(link_path))
-    if (self.has_finidat):
+    if (self.has_finidat and self.link_finidat):
         self.customize_namelist(variable='finidat',value="'"+self.finidat+"'")
     #Setup the new case
     setup_flags = self.cime_case_setup_flags()

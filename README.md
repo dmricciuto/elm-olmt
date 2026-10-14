@@ -31,6 +31,26 @@ keeps every run's exact inputs beside its output. The executable may still be
 shared by build-compatible cases.
  
 Users can customize the simulations to run single points, a list of lat/lon coordinates, rectangular regions or global simulations. OLMT assumes surface, land use and domain data already exist (using the defaults for specified compsets and resolution) and will extract points or regions from these data.  The user can also set custom files, for example ultra high-resolution files created from kilocraft.  For single point runs, the PFT and soil information can be set to match observations, for example at AmeriFlux sites.
+
+When an explicit regional or global `finidat` is supplied, OLMT waits until its
+case `domain.nc` has been generated and then automatically reduces the restart
+to the active domain cells in domain order. It subsets and remaps the associated
+topounit, landunit, column, and PFT hierarchy, rather than making a gridcell-only
+NetCDF slice. Restarts produced by a preceding OLMT case are already aligned and
+are left unchanged.
+
+The same operation is available directly with `subset_restart.py`:
+
+```bash
+python subset_restart.py global.elm.r.0201-01-01-00000.nc site_restart.nc \
+  --domain /path/to/case/run/domain.nc
+```
+
+Only cells with a positive domain `mask` are used. Domain order is retained,
+including duplicate nearest cells. The default 250 km maximum nearest-cell
+distance guards against coordinate or grid mismatches; change it with
+`--max-distance-km`, or pass a value of zero to disable the check. Existing
+outputs are protected unless `--overwrite` is given.
  
 Finally, OLMT also has the capability to perform ensemble simulations.  Users can specify a list of parameters, with allowable ranges for each. Random samples can then be created.  Alternatively, the user can provide their own files with different parameter combinations.  When this ensemble option is enabled, the cases will be set up in the same way as above, but then multiple copies of run directories will be created. We then use another MPI-enabled python script to manage the multiple simulations in parallel. Long multi-site cases can be split into dependent scheduler jobs with `resubmit_years` in the `[run_lengths]` config section; ensemble runs can use the same value or override it with `resubmit_years` in `[ensemble]`. For example, 200 years of ad spinup and 600 years of final spinup with `resubmit_years = 100` submits 8 dependent jobs for each segmented workflow. Users can also specify a list of output variables and time frequency for which to postprocess.  Indexed postprocessing variables can use suffixes like `_pft` or `_col`, with matching `pfts` or `cols` lists in the `postprocessing` config.  A matrix of output values for all ensemble members is then created at the end of the simulation, which can then be used in Uncertainty quantification applications discussed in the other epics.
 
