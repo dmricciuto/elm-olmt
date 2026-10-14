@@ -9,7 +9,7 @@ from netCDF4 import Dataset, date2num
 import numpy as np
 import pandas as pd
 
-from elm_olmt import _create_spruce_diagnostics_script
+from elm_olmt import _create_spruce_diagnostics_script, load_config
 from olmt_diagnostics.plot_spruce_soil_temperature_model_vs_obs import (
     plot_comparison, summarize_model,
 )
@@ -17,6 +17,20 @@ from olmt_diagnostics.spruce_soil_temperature_benchmark import TREATMENT_PLOTS
 
 
 class SoilTemperatureModelTests(unittest.TestCase):
+    def test_production_config_enables_pdf_temperature_comparison(self):
+        repo = Path(__file__).resolve().parents[1]
+        config = load_config(repo / "config_files" / "SPRUCE_microbe_20260924.cfg")
+        diagnostics = config["spruce_diagnostics"]
+        self.assertTrue(diagnostics["enabled"])
+        self.assertEqual(diagnostics["start_year"], 2016)
+        self.assertEqual(diagnostics["end_year"], 2023)
+        self.assertEqual(diagnostics["soil_temperature_model_start_year"], 2016)
+        self.assertEqual(diagnostics["soil_temperature_model_end_year"], 2023)
+        self.assertEqual(diagnostics["soil_temperature_observation_years"],
+                         "2016 to 2023")
+        self.assertTrue(diagnostics["soil_temperature_observations"].endswith(
+            "seasonal_mean_2016_2023.csv"))
+
     def test_seasons_use_active_hollow_not_fen_or_hummock(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
