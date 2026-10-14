@@ -12,6 +12,27 @@ import subprocess
 import sys
 from pathlib import Path
 
+from netCDF4 import Dataset
+
+
+def _case_microbe_parameters(run_root: Path, case_prefix: str) -> dict[str, float]:
+    """Read report settings from the actual T0/TAMB case parameter copy."""
+    names = (
+        "decomp_depth_efolding",
+        "dom_solubilization_anoxic_fraction",
+    )
+    for treatment in ("T0.00", "TAMB"):
+        path = run_root / f"{case_prefix}_{treatment}" / "run" / "clm_params.nc"
+        if not path.is_file():
+            continue
+        with Dataset(path) as parameters:
+            return {
+                name: float(parameters.variables[name][...].item())
+                for name in names
+                if name in parameters.variables
+            }
+    return {}
+
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
@@ -42,12 +63,15 @@ def main() -> None:
     subprocess.run(command, cwd=repo, check=True)
 
     report_path = args.diagnostics_dir / "standard_spruce_diagnostics.pdf"
-    subprocess.run([
+    report_command = [
         args.python, str(report),
         "--diagnostics-dir", str(args.diagnostics_dir),
         "--output", str(report_path),
         "--case-prefix", args.case_prefix,
-    ], cwd=repo, check=True)
+    ]
+    for name, value in _case_microbe_parameters(args.run_root, args.case_prefix).items():
+        report_command += ["--" + name.replace("_", "-"), str(value)]
+    subprocess.run(report_command, cwd=repo, check=True)
     print(f"Wrote standard SPRUCE diagnostics: {report_path}")
 
 

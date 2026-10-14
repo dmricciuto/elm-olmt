@@ -90,14 +90,11 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--c14-note",
-        default=(
-            "C14 is prognostic from cold start with a constant pre-bomb atmospheric signature; "
-            "the available post-2015 fossil-CO2 tracer stream was not used."
-        ),
+        default="Check case settings and atmospheric forcing before interpreting C14.",
     )
-    parser.add_argument("--decomp-depth-efolding", type=float, default=0.8)
+    parser.add_argument("--decomp-depth-efolding", type=float)
     parser.add_argument(
-        "--dom-solubilization-anoxic-fraction", type=float, default=0.5
+        "--dom-solubilization-anoxic-fraction", type=float
     )
     return parser.parse_args()
 
@@ -168,20 +165,26 @@ def build_report(arguments: argparse.Namespace) -> None:
         ),
         Spacer(1, 0.15 * inch),
     ]
+    microbial_settings = []
+    if arguments.decomp_depth_efolding is not None:
+        microbial_settings.append(
+            f"{arguments.decomp_depth_efolding:.3g} m decomposition e-folding"
+        )
+    if arguments.dom_solubilization_anoxic_fraction is not None:
+        microbial_settings.append(
+            f"{arguments.dom_solubilization_anoxic_fraction:.3g} anoxic "
+            "DOM-solubilization fraction"
+        )
     metadata = [
         ["Run prefix", arguments.case_prefix],
         ["Report generated", date.today().isoformat()],
-        ["Spinup design", "153-year accelerated decomposition + 153-year final spinup"],
-        ["Historical simulation", "1850-2015"],
         ["Treatments", "TAMB, T0, T+2.25, T+4.5, T+6.75, T+9 C; no elevated CO2"],
-        ["Soil heating", "T0-referenced control at 2 m; enabled from 2015-08-15 in warmed cases"],
         [
             "Microbial settings",
-            f"{arguments.decomp_depth_efolding:.3g} m decomposition e-folding; "
-            f"{arguments.dom_solubilization_anoxic_fraction:.3g} anoxic "
-            "DOM-solubilization fraction",
+            "; ".join(microbial_settings)
+            if microbial_settings else "Not found in the case parameter file",
         ],
-        ["Radiocarbon", arguments.c14_note],
+        ["Radiocarbon interpretation", arguments.c14_note],
     ]
     table = Table(metadata, colWidths=[1.65 * inch, 7.9 * inch], hAlign="LEFT")
     table.setStyle(
