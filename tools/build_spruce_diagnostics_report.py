@@ -95,6 +95,10 @@ def parse_args() -> argparse.Namespace:
             "the available post-2015 fossil-CO2 tracer stream was not used."
         ),
     )
+    parser.add_argument("--decomp-depth-efolding", type=float, default=0.8)
+    parser.add_argument(
+        "--dom-solubilization-anoxic-fraction", type=float, default=0.5
+    )
     return parser.parse_args()
 
 
@@ -171,7 +175,12 @@ def build_report(arguments: argparse.Namespace) -> None:
         ["Historical simulation", "1850-2015"],
         ["Treatments", "TAMB, T0, T+2.25, T+4.5, T+6.75, T+9 C; no elevated CO2"],
         ["Soil heating", "T0-referenced control at 2 m; enabled from 2015-08-15 in warmed cases"],
-        ["Microbial settings", "0.8 m decomposition e-folding; 0.5 anoxic DOM-solubilization fraction"],
+        [
+            "Microbial settings",
+            f"{arguments.decomp_depth_efolding:.3g} m decomposition e-folding; "
+            f"{arguments.dom_solubilization_anoxic_fraction:.3g} anoxic "
+            "DOM-solubilization fraction",
+        ],
         ["Radiocarbon", arguments.c14_note],
     ]
     table = Table(metadata, colWidths=[1.65 * inch, 7.9 * inch], hAlign="LEFT")
