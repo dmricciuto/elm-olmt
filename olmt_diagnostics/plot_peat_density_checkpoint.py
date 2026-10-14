@@ -282,6 +282,39 @@ def _write_c14_diagnostic(
     plt.close(fig)
 
 
+def _hydrologic_target_density(
+    depth: np.ndarray,
+    thickness: np.ndarray,
+    acrotelm_depth: float,
+    transition_width: float,
+    surface_density: float,
+    deep_density: float,
+) -> np.ndarray:
+    """Return layer-mean density targets for the prognostic acrotelm scheme."""
+    transition_top = max(0.0, acrotelm_depth)
+    transition_bottom = transition_top + transition_width
+
+    def primitive(position: np.ndarray) -> np.ndarray:
+        return np.where(
+            position <= transition_top,
+            0.0,
+            np.where(
+                position < transition_bottom,
+                (position - transition_top) ** 2 / (2.0 * transition_width),
+                position - transition_top - 0.5 * transition_width,
+            ),
+        )
+
+    layer_top = np.maximum(0.0, depth - 0.5 * thickness)
+    layer_bottom = layer_top + thickness
+    catotelm_fraction = np.clip(
+        (primitive(layer_bottom) - primitive(layer_top)) / thickness,
+        0.0,
+        1.0,
+    )
+    return surface_density + (deep_density - surface_density) * catotelm_fraction
+
+
 def main() -> None:
     arguments = parse_args()
     model, restart_file = read_model_profiles(arguments.restart)
@@ -305,6 +338,8 @@ def main() -> None:
         )
         for label in TOPOUNITS
     )
+    with netCDF4.Dataset(restart_file) as restart_state:
+        has_prognostic_acrotelm = "peat_acrotelm_depth" in restart_state.variables
     if arguments.target_history is not None:
         with netCDF4.Dataset(arguments.target_history) as target_state:
             variable = target_state.variables["PEAT_C_TARGET_DENSITY"]
@@ -326,6 +361,46 @@ def main() -> None:
                 for label in TOPOUNITS
             )
         target_label = "ELM hydrologic density target"
+    elif has_prognostic_acrotelm:
+        parameter_file = arguments.parameter_file or restart_file.parent / "clm_params.nc"
+        with netCDF4.Dataset(restart_file) as state, netCDF4.Dataset(
+            parameter_file
+        ) as parameters:
+            acrotelm = np.asarray(
+                state.variables["peat_acrotelm_depth"][:], dtype=float
+            ).squeeze()
+            transition_width = float(
+                np.asarray(
+                    parameters.variables["peat_compaction_transition_width"][:]
+                ).squeeze()
+            )
+            surface_density = float(
+                np.asarray(
+                    parameters.variables["peat_compaction_surface_density"][:]
+                ).squeeze()
+            )
+            deep_density = float(
+                np.asarray(
+                    parameters.variables["peat_compaction_deep_density"][:]
+                ).squeeze()
+            )
+            target = sum(
+                model["weights"][label]
+                * np.interp(
+                    reference_depth,
+                    np.asarray(model[label]["depth_below_hollow_m"]),
+                    _hydrologic_target_density(
+                        np.asarray(model[label]["depth_m"]),
+                        np.asarray(model[label]["thickness_m"]),
+                        float(acrotelm[int(model[label]["column"])]),
+                        transition_width,
+                        surface_density,
+                        deep_density,
+                    ),
+                )
+                for label in TOPOUNITS
+            )
+        target_label = "ELM hydrologic density target (restart acrotelm)"
     else:
         target = arguments.target_deep_density - (
             arguments.target_deep_density - arguments.target_surface_density
