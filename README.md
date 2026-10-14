@@ -64,4 +64,20 @@ treatment job depends on all other treatments and runs one joint calibration.
 Portable `postprocessed_output.nc` files include the exact member-by-parameter
 design, parameter names, PFT indices, bounds, and a design checksum.
 
+For a complete SPRUCE treatment configuration, aggregate diagnostics and the
+shareable PDF can be generated automatically after all treatment jobs finish:
+
+```ini
+[spruce_diagnostics]
+enabled = true
+start_year = 2016
+end_year = 2023
+```
+
+OLMT submits one dependent diagnostics job on Slurm (or runs the same command
+synchronously in Docker). Products are written under
+`<runroot>/spruce_diagnostics/<case-prefix>/`, including
+`standard_spruce_diagnostics.pdf`. The six standard treatment directories
+(`TAMB`, `T0.00`, `T2.25`, `T4.50`, `T6.75`, and `T9.00`) must be present.
+
 Please see the wiki page for instructions and examples.

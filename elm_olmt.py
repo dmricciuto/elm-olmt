@@ -12,6 +12,8 @@ import numpy as np
 import configparser
 import argparse
 import importlib.util
+import subprocess
+import shlex
 
 
 def next_soil_heating_history_tape(postproc_vars, sitegroup):
@@ -32,6 +34,29 @@ def next_soil_heating_history_tape(postproc_vars, sitegroup):
         has_indexed = True
     return 1 + int(has_gridded) + int(has_indexed)
 
+
+def _create_spruce_diagnostics_script(olmt_dir, run_root, case_prefix,
+                                      diagnostics_dir, start_year, end_year):
+    """Create the post-treatment standard diagnostics command script."""
+    os.makedirs(diagnostics_dir, exist_ok=True)
+    script = os.path.join(diagnostics_dir, 'run_spruce_full_diagnostics.sh')
+    command = [
+        sys.executable,
+        os.path.join(olmt_dir, 'tools', 'run_spruce_full_diagnostics.py'),
+        '--run-root', run_root,
+        '--case-prefix', case_prefix,
+        '--diagnostics-dir', diagnostics_dir,
+    ]
+    if start_year is not None:
+        command += ['--start-year', str(start_year)]
+    if end_year is not None:
+        command += ['--end-year', str(end_year)]
+    with open(script, 'w') as output:
+        output.write('#!/bin/bash\nset -euo pipefail\n')
+        output.write('cd '+shlex.quote(olmt_dir)+'\n')
+        output.write(shlex.join(command)+'\n')
+    os.chmod(script, 0o755)
+    return script
 
 def machine_path_defaults(machine, rootdir, inputdata, modelroot_name='E3SM'):
     """Return portable path defaults for the detected OLMT machine."""
@@ -192,7 +217,6 @@ def main():
     print('\n')
     print(f"    *** OLMT ***")
     if args.gui:
-        import subprocess
         subprocess.run([sys.executable, 'GUI_experimental.py'])
         print('GUI launched. Exiting.')
         return
@@ -383,6 +407,8 @@ def main():
         treatments, treatment_options = process_treatment_options(cfg)
     else:
         treatments = []
+    spruce_diagnostics = cfg.get('spruce_diagnostics', {})
+    auto_spruce_diagnostics = bool(spruce_diagnostics.get('enabled', False))
     if calibration_mode == 'multitreatment':
         if not ensemble_multitreatment:
             raise ValueError(
@@ -1003,7 +1029,57 @@ def main():
         # Return to script directory
         os.chdir(scriptdir)
 
-    #Todo:  Multi-site/treatment postprocessing/analysis
+    # Generate the aggregate SPRUCE products only after every treatment case
+    # has completed.  Per-case CIME postprocessing remains unchanged; this
+    # optional hook assembles the cross-treatment figures and PDF.
+    if auto_spruce_diagnostics and treatments and site == sites[nsites-1]:
+        treatment_indices = [i for i in range(ncases) if istreatment[i]]
+        treatment_jobs = [int(jobnum[i]) for i in treatment_indices
+                          if int(jobnum[i]) > 0]
+        base_case = cases[treatment_indices[0]].casename
+        case_prefix_default = base_case.rsplit('_', 1)[0]
+        diagnostics_prefix = str(spruce_diagnostics.get(
+            'case_prefix', case_prefix_default))
+        diagnostics_dir = str(spruce_diagnostics.get(
+            'output_dir', os.path.join(runroot, 'spruce_diagnostics',
+                                       diagnostics_prefix)))
+        if not os.path.isabs(diagnostics_dir):
+            diagnostics_dir = os.path.join(runroot, diagnostics_dir)
+        diag_start = spruce_diagnostics.get('start_year', postproc_startyear)
+        diag_end = spruce_diagnostics.get('end_year', postproc_endyear)
+        diag_script = _create_spruce_diagnostics_script(
+            scriptdir, runroot, diagnostics_prefix, diagnostics_dir,
+            diag_start, diag_end)
+
+        if cases[treatment_indices[-1]].noslurm:
+            print('Running aggregate SPRUCE diagnostics locally')
+            subprocess.run([diag_script], check=True)
+        elif treatment_jobs:
+            diag_case = cases[treatment_indices[-1]]
+            dep_arg = '--dependency=afterok:' + ':'.join(
+                str(job) for job in treatment_jobs)
+            cmd = ['sbatch', dep_arg, '--ntasks=1', '--cpus-per-task=1',
+                   '--mem=32g']
+            partition = diag_case.slurm_partition()
+            qos = diag_case.slurm_qos()
+            if partition:
+                cmd += ['--partition='+partition]
+            if qos:
+                cmd += ['--qos='+qos]
+            if diag_case.project:
+                cmd += ['--account='+diag_case.project]
+            cmd += ['--time='+diag_case.cime_walltime_string(), diag_script]
+            result = subprocess.run(cmd, stdout=subprocess.PIPE,
+                                    stderr=subprocess.PIPE, text=True)
+            if result.returncode != 0:
+                raise RuntimeError('Failed to submit aggregate SPRUCE diagnostics:\n'+
+                                   result.stdout+'\n'+result.stderr)
+            match = re.search(r'(?:Submitted batch job\s+)?(\d+)',
+                              result.stdout.strip())
+            print('Submitted aggregate SPRUCE diagnostics job '+
+                  (match.group(1) if match else result.stdout.strip()))
+
+    # Todo: multi-site/treatment postprocessing/analysis
 
 if __name__ == "__main__":
     main()
