@@ -166,10 +166,11 @@ def _postprocess_file_list_for_variable(self, rundir, basevar, var, preferred_hn
     """Choose the highest-resolution stream with the requested indexed dimension."""
     expected_dimension = _indexed_dimension(var)
     candidates = []
-    stream_numbers = [preferred_hnum] + [
-        value for value in _available_history_streams(self, rundir)
-        if value != preferred_hnum
-    ]
+    available_streams = _available_history_streams(self, rundir)
+    stream_numbers = (
+        ([preferred_hnum] if preferred_hnum in available_streams else []) +
+        [value for value in available_streams if value != preferred_hnum]
+    )
     for hnum in stream_numbers:
         file_list, firstyear, selected_endyear, hist_nhtfrq, nperyear = \
                 _postprocess_file_list(

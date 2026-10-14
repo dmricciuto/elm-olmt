@@ -86,6 +86,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output", required=True, type=Path)
     parser.add_argument("--case-prefix", required=True)
     parser.add_argument(
+        "--smoke-test", action="store_true",
+        help="Mark synthetic-year output as a workflow check, not scientific validation.",
+    )
+    parser.add_argument(
         "--title", default="ELM-Peatlands-Microbe: SPRUCE treatment diagnostics"
     )
     parser.add_argument(
@@ -159,8 +163,11 @@ def build_report(arguments: argparse.Namespace) -> None:
         Spacer(1, 0.55 * inch),
         Paragraph(arguments.title, title_style),
         Paragraph(
-            "A reproducible evaluation package for peat hydrology, vegetation productivity, "
-            "heterotrophic respiration, peat carbon and radiocarbon, and microbial porewater chemistry.",
+            ("Workflow smoke test using synthetic model years. This PDF verifies that "
+             "all treatment diagnostics can be generated; it is not an observation comparison."
+             if arguments.smoke_test else
+             "A reproducible evaluation package for peat hydrology, vegetation productivity, "
+             "heterotrophic respiration, peat carbon and radiocarbon, and microbial porewater chemistry."),
             subtitle_style,
         ),
         Spacer(1, 0.15 * inch),
@@ -178,13 +185,15 @@ def build_report(arguments: argparse.Namespace) -> None:
     metadata = [
         ["Run prefix", arguments.case_prefix],
         ["Report generated", date.today().isoformat()],
+        ["Mode", "Synthetic-year workflow smoke test" if arguments.smoke_test
+         else "Scientific diagnostic report"],
         ["Treatments", "TAMB, T0, T+2.25, T+4.5, T+6.75, T+9 C; no elevated CO2"],
         [
             "Microbial settings",
             "; ".join(microbial_settings)
             if microbial_settings else "Not found in the case parameter file",
         ],
-        ["Radiocarbon interpretation", arguments.c14_note],
+        ["Radiocarbon", arguments.c14_note],
     ]
     table = Table(metadata, colWidths=[1.65 * inch, 7.9 * inch], hAlign="LEFT")
     table.setStyle(
@@ -220,6 +229,18 @@ def build_report(arguments: argparse.Namespace) -> None:
     )
 
     for index, (heading, relative, caption) in enumerate(FIGURES):
+        if arguments.smoke_test:
+            if index == 0:
+                heading = "Peat profile workflow check"
+                caption = (
+                    "Synthetic-year T0 restart peat stocks; observed core points are contextual "
+                    "only. C14 is not enabled, and no scientific skill is inferred."
+                )
+            else:
+                caption = (
+                    "Synthetic-year workflow check; model output only. Observation-based "
+                    "skill metrics and scientific interpretation are not valid."
+                )
         path = arguments.diagnostics_dir / relative
         # Leave explicit room for the heading, caption, and footer.  A 6.55-inch
         # image can force a short caption onto its own page in landscape letter.

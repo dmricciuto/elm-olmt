@@ -88,6 +88,24 @@ class PostprocessStreamSelectionTest(unittest.TestCase):
             self.assertEqual(stream, 2)
             self.assertEqual(files, [str(daily)])
 
+    def test_missing_preferred_stream_does_not_index_absent_history_tape(self):
+        with tempfile.TemporaryDirectory() as root:
+            daily = self.make_history(root, 1, "column", 3, records=365)
+            Path(root, "lnd_in").write_text(
+                " hist_mfilt = 1,365\n"
+                " hist_nhtfrq = -8760,-24\n"
+            )
+
+            class Case:
+                casename = "case"
+
+            files, _, _, _, _, stream = _postprocess_file_list_for_variable(
+                Case(), root, "ZWT", "ZWT_col", 2, startyear=1, endyear=1
+            )
+
+            self.assertEqual(stream, 1)
+            self.assertEqual(files, [str(daily)])
+
 
 if __name__ == "__main__":
     unittest.main()

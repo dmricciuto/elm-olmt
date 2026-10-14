@@ -316,6 +316,7 @@ def plot_hollow_water_tables(comparison: pd.DataFrame, output: Path) -> None:
     """Create a standard six-panel model/observation water-table figure."""
     output.parent.mkdir(parents=True, exist_ok=True)
     metrics = water_table_metrics(comparison).set_index("case")
+    has_observations = bool(comparison["observed_wt_height_m"].notna().any())
     fig, axes = plt.subplots(3, 2, figsize=(14, 10), sharex=True, sharey=True)
     for ax, case in zip(axes.ravel(), CASE_ORDER):
         subset = comparison[comparison["case"] == case].sort_values("date")
@@ -326,10 +327,11 @@ def plot_hollow_water_tables(comparison: pd.DataFrame, output: Path) -> None:
             color="0.75", alpha=0.45, linewidth=0, step="mid",
             label="Ice in hollow column",
         )
-        ax.plot(
-            subset["date"], subset["observed_wt_height_m"],
-            color="black", linewidth=1.0, label="Observed",
-        )
+        if has_observations:
+            ax.plot(
+                subset["date"], subset["observed_wt_height_m"],
+                color="black", linewidth=1.0, label="Observed",
+            )
         ax.plot(
             subset["date"], subset["model_wt_height_m"],
             color="#2166ac", linewidth=0.9, label="ELM",
@@ -337,13 +339,16 @@ def plot_hollow_water_tables(comparison: pd.DataFrame, output: Path) -> None:
         ax.axhline(0.0, color="0.45", linewidth=0.7)
         ax.set_title(CASE_LABELS[case], loc="left", fontsize=11)
         metric = metrics.loc[case]
-        annotation = (
-            f"Thawed n={int(metric['n'])}\n"
-            f"R²={metric['r_squared']:.2f}   RMSE={100.0 * metric['rmse_m']:.1f} cm\n"
-            f"Mean ELM/obs={100.0 * metric['model_mean_m']:.1f}/"
-            f"{100.0 * metric['observed_mean_m']:.1f} cm\n"
-            f"Bias={100.0 * metric['bias_m']:+.1f} cm"
-        )
+        if has_observations:
+            annotation = (
+                f"Thawed n={int(metric['n'])}\n"
+                f"R²={metric['r_squared']:.2f}   RMSE={100.0 * metric['rmse_m']:.1f} cm\n"
+                f"Mean ELM/obs={100.0 * metric['model_mean_m']:.1f}/"
+                f"{100.0 * metric['observed_mean_m']:.1f} cm\n"
+                f"Bias={100.0 * metric['bias_m']:+.1f} cm"
+            )
+        else:
+            annotation = "Synthetic model years; no matched observations"
         ax.text(
             0.015, 0.035, annotation,
             transform=ax.transAxes, ha="left", va="bottom", fontsize=8,
@@ -357,7 +362,8 @@ def plot_hollow_water_tables(comparison: pd.DataFrame, output: Path) -> None:
     for ax in axes[:, 0]:
         ax.set_ylabel("water-table height above hollow (m)")
     exact = bool(comparison["h2osfc_available"].all())
-    title = "SPRUCE hollow water table: ELM versus observations"
+    title = ("SPRUCE hollow water table: ELM versus observations"
+             if has_observations else "SPRUCE hollow water table: model years only")
     subtitle = "ELM = -ZWT + H2OSFC/1000"
     if not exact:
         subtitle += "; H2OSFC was not archived, so H2OSFC=0 in this legacy-output plot"

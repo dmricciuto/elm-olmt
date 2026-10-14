@@ -36,7 +36,10 @@ def next_soil_heating_history_tape(postproc_vars, sitegroup):
 
 
 def _create_spruce_diagnostics_script(olmt_dir, run_root, case_prefix,
-                                      diagnostics_dir, start_year, end_year):
+                                      diagnostics_dir, start_year, end_year,
+                                      profile_start_year=None,
+                                      profile_end_year=None,
+                                      smoke_test=False):
     """Create the post-treatment standard diagnostics command script."""
     os.makedirs(diagnostics_dir, exist_ok=True)
     script = os.path.join(diagnostics_dir, 'run_spruce_full_diagnostics.sh')
@@ -51,6 +54,12 @@ def _create_spruce_diagnostics_script(olmt_dir, run_root, case_prefix,
         command += ['--start-year', str(start_year)]
     if end_year is not None:
         command += ['--end-year', str(end_year)]
+    if profile_start_year is not None:
+        command += ['--profile-start-year', str(profile_start_year)]
+    if profile_end_year is not None:
+        command += ['--profile-end-year', str(profile_end_year)]
+    if smoke_test:
+        command.append('--smoke-test')
     with open(script, 'w') as output:
         output.write('#!/bin/bash\nset -euo pipefail\n')
         output.write('cd '+shlex.quote(olmt_dir)+'\n')
@@ -1047,9 +1056,12 @@ def main():
             diagnostics_dir = os.path.join(runroot, diagnostics_dir)
         diag_start = spruce_diagnostics.get('start_year', postproc_startyear)
         diag_end = spruce_diagnostics.get('end_year', postproc_endyear)
+        profile_start = spruce_diagnostics.get('profile_start_year')
+        profile_end = spruce_diagnostics.get('profile_end_year')
+        smoke_test = bool(spruce_diagnostics.get('smoke_test', False))
         diag_script = _create_spruce_diagnostics_script(
             scriptdir, runroot, diagnostics_prefix, diagnostics_dir,
-            diag_start, diag_end)
+            diag_start, diag_end, profile_start, profile_end, smoke_test)
 
         if cases[treatment_indices[-1]].noslurm:
             print('Running aggregate SPRUCE diagnostics locally')

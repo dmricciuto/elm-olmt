@@ -46,6 +46,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--start-year", type=int)
     parser.add_argument("--end-year", type=int)
     parser.add_argument(
+        "--smoke-test", action="store_true",
+        help="Use synthetic model years without treating them as observed SPRUCE years.",
+    )
+    parser.add_argument(
         "--missing-h2osfc", choices=["error", "zero"], default="error",
         help="Use 'zero' only for legacy output that did not archive H2OSFC_col.",
     )
@@ -116,6 +120,18 @@ def _latest_mcfarlane_state(run_root: Path, case_prefix: str) -> Path:
     )
 
 
+def _latest_mcfarlane_restart(run_root: Path, case_prefix: str) -> Path:
+    """Use complete peat pools in a synthetic-year workflow check."""
+    for treatment in ("T0.00", "TAMB"):
+        run_dir = run_root / f"{case_prefix}_{treatment}" / "run"
+        restarts = sorted(run_dir.glob(f"{case_prefix}_{treatment}.elm.r.*.nc"))
+        if restarts:
+            return restarts[-1]
+    raise FileNotFoundError(
+        f"No T0/TAMB ELM restart found under {run_root} for {case_prefix}"
+    )
+
+
 def main() -> None:
     args = parse_args()
     written: dict[str, str] = {}
@@ -157,6 +173,7 @@ def main() -> None:
         carbon_paths = write_carbon_budget_products(
             carbon,
             args.output_dir,
+            model_only=args.smoke_test,
             source={
                 "run_root": str(args.run_root),
                 "case_prefix": args.case_prefix,
@@ -165,7 +182,7 @@ def main() -> None:
                 "end_year": args.end_year or 2023,
             },
         )
-        print(temperature_response(carbon).to_string(index=False))
+        print(temperature_response(carbon, model_only=args.smoke_test).to_string(index=False))
         for name, path in carbon_paths.items():
             print(f"Wrote carbon {name}: {path}")
             written[f"carbon_{name}"] = str(path)
@@ -182,6 +199,8 @@ def main() -> None:
         profile_observations = read_profile_observations(
             args.profile_obs_dir, args.profile_observation_year
         )
+        if args.smoke_test:
+            profile_observations = profile_observations.iloc[0:0].copy()
         profile_paths = write_profile_products(
             profiles,
             profile_observations,
@@ -202,8 +221,10 @@ def main() -> None:
             written[f"profile_{name}"] = str(path)
 
     if args.include_mcfarlane or args.full:
-        state = args.mcfarlane_state or _latest_mcfarlane_state(
-            args.run_root, args.case_prefix
+        state = args.mcfarlane_state or (
+            _latest_mcfarlane_restart(args.run_root, args.case_prefix)
+            if args.smoke_test else
+            _latest_mcfarlane_state(args.run_root, args.case_prefix)
         )
         model, state_file = read_mcfarlane_model_profiles(str(state))
         observations = read_mcfarlane_observations(args.mcfarlane_obs_file)
@@ -215,8 +236,12 @@ def main() -> None:
             model,
             observations,
             figure,
-            "SPRUCE peat profiles: ELM versus McFarlane et al. (2018)",
-            args.mcfarlane_radiocarbon_note,
+            ("SPRUCE peat profile workflow check (synthetic years)"
+             if args.smoke_test else
+             "SPRUCE peat profiles: ELM versus McFarlane et al. (2018)"),
+            ("C14 not enabled in this workflow smoke test"
+             if args.smoke_test and not model["radiocarbon_profiles_available"] else
+             args.mcfarlane_radiocarbon_note),
         )
         write_mcfarlane_summary(model, summary, state_file)
         print(f"Wrote McFarlane figure: {figure}")

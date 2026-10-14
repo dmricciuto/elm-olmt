@@ -54,20 +54,39 @@ class HistoryVariableTest(unittest.TestCase):
     def test_hourly_heating_tape_follows_indexed_daily_output(self):
         variables = ["ZWT_col", "NPP_pft"]
         case = self.make_case(variables)
+        case.make_soil_heating_reference = True
+        case.soil_heating_reference_history_tape = 2
         set_histvars(case)
 
         reference_tape = next_soil_heating_history_tape(
             variables, case.sitegroup)
         self.assertEqual(reference_tape, 2)  # h2; Fortran tape index 3
+        self.assertEqual(case.calls["hist_mfilt"], "1,365,8760")
+        self.assertEqual(case.calls["hist_nhtfrq"], "-8760,-24,-1")
         self.assertIn("hist_fincl2", case.calls)
         self.assertNotIn("hist_fincl3", case.calls)
 
     def test_hourly_heating_tape_follows_mixed_daily_output(self):
+        variables = ["GPP", "ZWT_col"]
+        case = self.make_case(variables)
+        case.make_soil_heating_reference = True
+        case.soil_heating_reference_history_tape = 3
+        set_histvars(case)
+
         self.assertEqual(next_soil_heating_history_tape(
-            ["GPP", "ZWT_col"], "AmeriFlux"), 3)
+            variables, "AmeriFlux"), 3)
+        self.assertEqual(case.calls["hist_mfilt"], "1,365,365,8760")
+        self.assertEqual(case.calls["hist_nhtfrq"], "-8760,-24,-24,-1")
 
     def test_hourly_heating_tape_follows_default_output(self):
+        case = self.make_case([])
+        case.make_soil_heating_reference = True
+        case.soil_heating_reference_history_tape = 1
+        set_histvars(case)
+
         self.assertEqual(next_soil_heating_history_tape([], "Peatlands"), 1)
+        self.assertEqual(case.calls["hist_mfilt"], "1,8760")
+        self.assertEqual(case.calls["hist_nhtfrq"], "-8760,-1")
 
     def test_spruce_configuration_uses_next_available_tape(self):
         config_path = Path(__file__).resolve().parents[1] / "config_files" / "SPRUCE_microbe_20260924.cfg"
@@ -77,6 +96,47 @@ class HistoryVariableTest(unittest.TestCase):
         configured_tape = int(config["treatment_options"]["soil_heating_reference_history_tape"])
         self.assertEqual(configured_tape, next_soil_heating_history_tape(
             variables, config["simulation"]["sitegroup"]))
+
+    def test_shortchain_configuration_exercises_t0_and_pdf_workflow(self):
+        config_path = (Path(__file__).resolve().parents[1] / "tests" / "config_files" /
+                       "SPRUCE_microbe_shortchain_50ad_10final_10trans_1860_20261014.cfg")
+        config = configparser.ConfigParser(interpolation=None)
+        self.assertTrue(config.read(config_path))
+        self.assertEqual(
+            [config["run_lengths"][key] for key in
+             ("nyears_ad", "nyears_final", "nyears_trans", "trans_startyear")],
+            ["50", "10", "10", "1850"],
+        )
+        self.assertEqual(config["treatment_options"]["nyears"], "2")
+        self.assertEqual(config["treatment_options"]["soil_heating_start_ymd"], "18600815")
+        self.assertEqual(config["spruce_diagnostics"]["enabled"], "true")
+        self.assertEqual(config["spruce_diagnostics"]["smoke_test"], "true")
+        self.assertEqual(config["spruce_diagnostics"]["profile_start_year"], "1860")
+        self.assertEqual(config["spruce_diagnostics"]["profile_end_year"], "1861")
+
+        variables = re.findall(r"'([^']+)'", config["postprocessing"]["variables"])
+        case = self.make_case(variables)
+        case.sitegroup = config["simulation"]["sitegroup"]
+        case.make_soil_heating_reference = True
+        case.soil_heating_reference_history_tape = int(
+            config["treatment_options"]["soil_heating_reference_history_tape"])
+        set_histvars(case)
+        self.assertEqual(case.calls["hist_mfilt"], "1,365,8760")
+        self.assertEqual(case.calls["hist_nhtfrq"], "-8760,-24,-1")
+
+    def test_short_ad_configuration_retains_full_workflow(self):
+        config_path = (Path(__file__).resolve().parents[1] / "tests" / "config_files" /
+                       "SPRUCE_microbe_shortchain_10ad_10final_10trans_1860_20261014.cfg")
+        config = configparser.ConfigParser(interpolation=None)
+        self.assertTrue(config.read(config_path))
+        self.assertEqual(config["run_lengths"]["nyears_ad"], "10")
+        self.assertEqual(config["run_lengths"]["nyears_final"], "10")
+        self.assertEqual(config["run_lengths"]["nyears_trans"], "10")
+        self.assertEqual(config["run_lengths"]["trans_startyear"], "1850")
+        self.assertEqual(config["spruce_diagnostics"]["enabled"], "true")
+        self.assertEqual(config["spruce_diagnostics"]["smoke_test"], "true")
+        self.assertEqual(config["treatment_options"]["soil_heating_reference_treatment"], "T0.00")
+        self.assertNotIn("rest_n", config["run_lengths"])
 
 
 if __name__ == "__main__":

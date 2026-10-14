@@ -211,6 +211,9 @@ def compare_carbon_budget(
             obs_case = obs_metric[obs_metric["treatment"] == case][
                 ["year", "obs", "obs_err", "temperature_offset_C"]
             ]
+            obs_case = obs_case[
+                obs_case["year"].between(start_year, end_year)
+            ]
             joined = model.merge(obs_case, on="year", how="outer")
             joined["metric"] = metric
             joined["metric_label"] = definition["label"]
@@ -227,7 +230,9 @@ def compare_carbon_budget(
     )
 
 
-def temperature_response(comparison: pd.DataFrame) -> pd.DataFrame:
+def temperature_response(
+    comparison: pd.DataFrame, *, model_only: bool = False
+) -> pd.DataFrame:
     """Fit treatment-mean intercepts and slopes across T0 through T9."""
     rows = []
     for metric, definition in METRICS.items():
@@ -235,7 +240,8 @@ def temperature_response(comparison: pd.DataFrame) -> pd.DataFrame:
             (comparison["metric"] == metric) & comparison["case"].isin(FIT_CASES)
         ]
         for source, column in [("ELM", "model_gC_m2_yr"), ("Observed", "obs")]:
-            matched = metric_data.dropna(subset=[column, "obs"]).copy()
+            required = [column] if model_only and source == "ELM" else [column, "obs"]
+            matched = metric_data.dropna(subset=required).copy()
             treatment_means = matched.groupby(
                 ["case", "warming_C"], as_index=False
             )[column].mean()
@@ -266,6 +272,7 @@ def temperature_response(comparison: pd.DataFrame) -> pd.DataFrame:
 
 def carbon_timeseries_figure(comparison: pd.DataFrame, metric: str):
     definition = METRICS[metric]
+    has_observations = bool(comparison["obs"].notna().any())
     fig, axes = plt.subplots(3, 2, figsize=(13.5, 9.5), sharex=True, sharey=True)
     for ax, case in zip(axes.ravel(), CASE_ORDER):
         data = comparison[
@@ -275,10 +282,11 @@ def carbon_timeseries_figure(comparison: pd.DataFrame, metric: str):
             data["year"], data["model_gC_m2_yr"], color="#2166ac",
             marker="o", markersize=3.5, linewidth=1.5, label="ELM",
         )
-        ax.plot(
-            data["year"], data["obs"], color="black",
-            marker="s", markersize=3.5, linewidth=1.1, label="Observed",
-        )
+        if has_observations:
+            ax.plot(
+                data["year"], data["obs"], color="black",
+                marker="s", markersize=3.5, linewidth=1.1, label="Observed",
+            )
         ax.set_title(CASE_LABELS[case], loc="left", fontsize=11)
         ax.grid(True, color="0.88", linewidth=0.7)
     axes[0, 0].legend(frameon=False)
@@ -286,7 +294,8 @@ def carbon_timeseries_figure(comparison: pd.DataFrame, metric: str):
         ax.set_ylabel("gC m$^{-2}$ yr$^{-1}$")
     for ax in axes[-1, :]:
         ax.set_xlabel("Year")
-    fig.suptitle(f"SPRUCE {definition['label']}: ELM versus observations", y=0.985)
+    comparison_label = "ELM versus observations" if has_observations else "ELM model years only"
+    fig.suptitle(f"SPRUCE {definition['label']}: {comparison_label}", y=0.985)
     fig.subplots_adjust(
         left=0.075, right=0.99, bottom=0.075, top=0.915,
         hspace=0.26, wspace=0.03,
@@ -299,11 +308,18 @@ def temperature_response_figure(response: pd.DataFrame):
     labels = [METRICS[metric]["label"] for metric in METRICS]
     x = np.arange(len(labels), dtype=float)
     width = 0.36
+    has_observed_response = bool(np.isfinite(
+        response.loc[response["source"] == "Observed", "slope_gC_m2_yr_C"]
+    ).any())
+    sources = (
+        [(-width / 2, "Observed", "#4d4d4d"), (width / 2, "ELM", "#2166ac")]
+        if has_observed_response else [(0.0, "ELM", "#2166ac")]
+    )
     for ax, column, ylabel, title in [
         (axes[0], "intercept_gC_m2_yr", "gC m$^{-2}$ yr$^{-1}$", "Intercept at 0 °C warming"),
         (axes[1], "slope_gC_m2_yr_C", "gC m$^{-2}$ yr$^{-1}$ °C$^{-1}$", "Slope across T0-T9"),
     ]:
-        for offset, source, color in [(-width / 2, "Observed", "#4d4d4d"), (width / 2, "ELM", "#2166ac")]:
+        for offset, source, color in sources:
             values = []
             for metric in METRICS:
                 row = response[(response["metric"] == metric) & (response["source"] == source)]
@@ -316,7 +332,10 @@ def temperature_response_figure(response: pd.DataFrame):
         ax.set_title(title, loc="left")
         ax.grid(axis="y", color="0.88", linewidth=0.7)
     axes[0].legend(frameon=False)
-    fig.suptitle("SPRUCE carbon-budget temperature responses (T0-T9)", y=0.995)
+    title = "SPRUCE carbon-budget temperature responses (T0-T9)"
+    if not has_observed_response:
+        title += " — model years only"
+    fig.suptitle(title, y=0.995)
     fig.tight_layout(rect=(0, 0, 1, 0.96))
     return fig
 
@@ -325,6 +344,7 @@ def write_carbon_budget_products(
     comparison: pd.DataFrame,
     output_dir: Path,
     source: dict[str, object] | None = None,
+    model_only: bool = False,
 ) -> dict[str, Path]:
     output_dir.mkdir(parents=True, exist_ok=True)
     paths: dict[str, Path] = {
@@ -335,7 +355,7 @@ def write_carbon_budget_products(
         "manifest": output_dir / "carbon_budget_manifest.json",
     }
     comparison.to_csv(paths["annual"], index=False)
-    response = temperature_response(comparison)
+    response = temperature_response(comparison, model_only=model_only)
     response.to_csv(paths["response"], index=False)
     with PdfPages(paths["pdf"]) as pdf:
         for metric in METRICS:

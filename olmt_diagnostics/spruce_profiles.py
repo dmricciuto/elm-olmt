@@ -257,15 +257,17 @@ def plot_profiles(
     observation_year: int,
 ) -> None:
     fig, axes = plt.subplots(1, 3, figsize=(14.5, 6.2), sharey=True)
+    has_observations = not observations.empty
     for axis, (name, definition) in zip(axes, PROFILE_DEFINITIONS.items()):
         observed = observations[observations["variable"] == name]
-        axis.errorbar(
-            observed["observed"], observed["depth_m"],
-            xerr=observed["uncertainty"], fmt="o", ms=4.5,
-            markerfacecolor="white", markeredgecolor="0.2", color="0.45",
-            ecolor="0.65", alpha=0.8, capsize=2, label=f"Observed ({observation_year})",
-            zorder=5,
-        )
+        if has_observations:
+            axis.errorbar(
+                observed["observed"], observed["depth_m"],
+                xerr=observed["uncertainty"], fmt="o", ms=4.5,
+                markerfacecolor="white", markeredgecolor="0.2", color="0.45",
+                ecolor="0.65", alpha=0.8, capsize=2, label=f"Observed ({observation_year})",
+                zorder=5,
+            )
         for case in CASE_ORDER:
             selected = profiles[
                 (profiles["variable"] == name) & (profiles["case"] == case)
@@ -282,7 +284,9 @@ def plot_profiles(
     axes[0].set_ylabel("Depth below local peat surface (m)")
     handles, labels = axes[0].get_legend_handles_labels()
     fig.legend(handles, labels, loc="lower center", ncol=7, frameon=False, fontsize=8.5)
-    fig.suptitle("SPRUCE porewater profiles: ELM treatments versus observations")
+    title = ("SPRUCE porewater profiles: ELM treatments versus observations"
+             if has_observations else "SPRUCE porewater profiles: model years only")
+    fig.suptitle(title)
     fig.text(
         0.5, 0.055,
         f"ELM means: {start_year}-{end_year}, DOY {doy_start}-{doy_end}; "

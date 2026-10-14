@@ -208,8 +208,8 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
         #if ('US-SPR' in self.site):
         #    #For default SPRUCE run, set history variables
         #else:
-        self.customize_namelist(variable='hist_mfilt',value='1')
-        self.customize_namelist(variable='hist_nhtfrq',value='-8760')
+        transient_mfilt = '1'
+        transient_nhtfrq = '-8760'
       else:
         #Write annual for all vars, requested postproc vars daily
         vst_pp=''
@@ -225,18 +225,28 @@ def set_histvars(self,spinup=-1,hist_mfilt=-9999,hist_nhtfrq=-9999):
                 if (is_peatlands_sitegroup(self) and "'"+v+"'," not in vst_pp_pft):
                     vst_pp_pft=vst_pp_pft+"'"+v+"',"
         if (vst_pp != '' and vst_pp_pft != ''):
-            self.customize_namelist(variable='hist_mfilt',value='1,365,365')
-            self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24,-24')
+            transient_mfilt = '1,365,365'
+            transient_nhtfrq = '-8760,-24,-24'
             self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.,.false.')
             self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
             self.customize_namelist(variable='hist_fincl3',value=vst_pp_pft[:-1])
         elif (vst_pp_pft != ''):
-            self.customize_namelist(variable='hist_mfilt',value='1,365')
-            self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
+            transient_mfilt = '1,365'
+            transient_nhtfrq = '-8760,-24'
             self.customize_namelist(variable='hist_dov2xy',value='.true.,.false.')
             self.customize_namelist(variable='hist_fincl2',value=vst_pp_pft[:-1])
         else:
-            self.customize_namelist(variable='hist_mfilt',value='1,365')
-            self.customize_namelist(variable='hist_nhtfrq',value='-8760,-24')
+            transient_mfilt = '1,365'
+            transient_nhtfrq = '-8760,-24'
             self.customize_namelist(variable='hist_dov2xy',value='.true.,.true.')
             self.customize_namelist(variable='hist_fincl2',value=vst_pp[:-1])
+      if getattr(self, 'make_soil_heating_reference', False):
+        # Keep the aggregate arrays in sync with the indexed T0 heating tape.
+        # OLMT's postprocessor reads these arrays, not hist_mfilt(N) overrides.
+        reference_tape = getattr(self, 'soil_heating_reference_history_tape', None)
+        if reference_tape != len(transient_mfilt.split(',')):
+          raise ValueError('Soil-heating reference tape must follow the ordinary history tapes')
+        transient_mfilt += ',8760'
+        transient_nhtfrq += ',-1'
+      self.customize_namelist(variable='hist_mfilt',value=transient_mfilt)
+      self.customize_namelist(variable='hist_nhtfrq',value=transient_nhtfrq)
