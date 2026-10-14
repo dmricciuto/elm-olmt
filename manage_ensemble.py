@@ -94,6 +94,29 @@ def check_run_success(n):
         success=True
     return success
 
+
+def wait_for_run_success(n):
+    """Allow shared filesystems time to publish a completed restart.
+
+    A member can exit successfully immediately after writing its restart while
+    the metadata is still becoming visible on Pathfinder's shared filesystem.
+    Only call this after the member process has exited; the live-process monitor
+    must remain nonblocking.
+    """
+    retries = max(0, int(os.environ.get('OLMT_RUN_SUCCESS_RETRIES', '3')))
+    delay = max(0.0, float(os.environ.get('OLMT_RUN_SUCCESS_RETRY_DELAY', '30.0')))
+    for attempt in range(retries + 1):
+        if check_run_success(n):
+            return True
+        if attempt < retries:
+            print(
+                'Restart for ensemble member '+str(n)+' is not visible; '
+                +'retrying in '+str(delay)+' s ('+str(attempt + 1)+'/'+str(retries)+')',
+                flush=True,
+            )
+            time.sleep(delay)
+    return False
+
 def command_to_argv(command):
     """Split a launch command for shell-free subprocess execution."""
     return shlex.split(command)
@@ -145,8 +168,11 @@ def active_processes(processes,process_jobnum,process_hang):
                 n=n+1
                 continue
             if (mycase.postprocessed[member_idx] == 0):
-                print(member, check_run_success(member))
-                if (check_run_success(member)):
+                # Do not wait after a known process failure.  For a successful
+                # process, tolerate delayed restart visibility on shared filesystems.
+                run_success = (process.returncode == 0 and wait_for_run_success(member))
+                print(member, run_success)
+                if (run_success):
                     if defer_postprocess:
                         run_completed[member_idx] = 1
                         n=n+1
