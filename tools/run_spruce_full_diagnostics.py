@@ -43,6 +43,10 @@ def main() -> None:
     parser.add_argument("--end-year", type=int)
     parser.add_argument("--profile-start-year", type=int)
     parser.add_argument("--profile-end-year", type=int)
+    parser.add_argument("--soil-temperature-observations", type=Path)
+    parser.add_argument("--soil-temperature-model-start-year", type=int)
+    parser.add_argument("--soil-temperature-model-end-year", type=int)
+    parser.add_argument("--soil-temperature-observation-years")
     parser.add_argument(
         "--smoke-test", action="store_true",
         help="Label synthetic-year diagnostics as workflow checks, not validation.",
@@ -74,6 +78,29 @@ def main() -> None:
         command.append("--smoke-test")
     subprocess.run(command, cwd=repo, check=True)
 
+    if args.soil_temperature_observations is not None:
+        if (args.soil_temperature_model_start_year is None or
+                args.soil_temperature_model_end_year is None or
+                not args.soil_temperature_observation_years):
+            parser.error("Soil-temperature observations require model start/end years "
+                         "and an observation-year label")
+        temperature_command = [
+            args.python,
+            str(repo / "olmt_diagnostics" /
+                "plot_spruce_soil_temperature_model_vs_obs.py"),
+            "--run-root", str(args.run_root),
+            "--case-prefix", args.case_prefix,
+            "--observations", str(args.soil_temperature_observations),
+            "--model-start-year", str(args.soil_temperature_model_start_year),
+            "--model-end-year", str(args.soil_temperature_model_end_year),
+            "--observation-years", args.soil_temperature_observation_years,
+            "--output", str(args.diagnostics_dir /
+                            "soil_temperature_model_vs_observations.png"),
+        ]
+        if args.smoke_test:
+            temperature_command.append("--smoke-test")
+        subprocess.run(temperature_command, cwd=repo, check=True)
+
     report_path = args.diagnostics_dir / "standard_spruce_diagnostics.pdf"
     report_command = [
         args.python, str(report),
@@ -81,6 +108,19 @@ def main() -> None:
         "--output", str(report_path),
         "--case-prefix", args.case_prefix,
     ]
+    if args.soil_temperature_observations is not None:
+        report_command.append("--soil-temperature")
+        model_years = (
+            str(args.soil_temperature_model_start_year)
+            if args.soil_temperature_model_start_year == args.soil_temperature_model_end_year
+            else f"{args.soil_temperature_model_start_year}-"
+                 f"{args.soil_temperature_model_end_year}"
+        )
+        report_command += [
+            "--soil-temperature-model-years", model_years,
+            "--soil-temperature-observation-years",
+            args.soil_temperature_observation_years,
+        ]
     if args.smoke_test:
         report_command += [
             "--smoke-test", "--c14-note",

@@ -6,6 +6,10 @@ experimental plots for the 2016–2023 treatment years. The source is
 the `WEW_PLOT_XX_Complete_Environ_20260702.csv` files staged on Pathfinder at
 `/projects/hpcl-cli185/world-shared/e3sm/inputdata/SPRUCE_data/2026_version`.
 Raw half-hourly files are not copied into this repository.
+`seasonal_mean_2023.csv` applies the same rules to 2023 alone for the
+short-chain model year 1861, which uses 2023 meteorology under the current
+2015–2023 CPL-bypass forcing cycle. It is a workflow comparison, not a
+scientifically equilibrated spinup evaluation.
 
 | Treatment | Plot | Warming target |
 | --- | ---: | ---: |

@@ -39,7 +39,11 @@ def _create_spruce_diagnostics_script(olmt_dir, run_root, case_prefix,
                                       diagnostics_dir, start_year, end_year,
                                       profile_start_year=None,
                                       profile_end_year=None,
-                                      smoke_test=False):
+                                      smoke_test=False,
+                                      soil_temperature_observations=None,
+                                      soil_temperature_model_start_year=None,
+                                      soil_temperature_model_end_year=None,
+                                      soil_temperature_observation_years=None):
     """Create the post-treatment standard diagnostics command script."""
     os.makedirs(diagnostics_dir, exist_ok=True)
     script = os.path.join(diagnostics_dir, 'run_spruce_full_diagnostics.sh')
@@ -60,6 +64,16 @@ def _create_spruce_diagnostics_script(olmt_dir, run_root, case_prefix,
         command += ['--profile-end-year', str(profile_end_year)]
     if smoke_test:
         command.append('--smoke-test')
+    if soil_temperature_observations:
+        command += [
+            '--soil-temperature-observations', str(soil_temperature_observations),
+            '--soil-temperature-model-start-year',
+            str(soil_temperature_model_start_year),
+            '--soil-temperature-model-end-year',
+            str(soil_temperature_model_end_year),
+            '--soil-temperature-observation-years',
+            str(soil_temperature_observation_years),
+        ]
     with open(script, 'w') as output:
         output.write('#!/bin/bash\nset -euo pipefail\n')
         output.write('cd '+shlex.quote(olmt_dir)+'\n')
@@ -1061,7 +1075,11 @@ def main():
         smoke_test = bool(spruce_diagnostics.get('smoke_test', False))
         diag_script = _create_spruce_diagnostics_script(
             scriptdir, runroot, diagnostics_prefix, diagnostics_dir,
-            diag_start, diag_end, profile_start, profile_end, smoke_test)
+            diag_start, diag_end, profile_start, profile_end, smoke_test,
+            spruce_diagnostics.get('soil_temperature_observations'),
+            spruce_diagnostics.get('soil_temperature_model_start_year'),
+            spruce_diagnostics.get('soil_temperature_model_end_year'),
+            spruce_diagnostics.get('soil_temperature_observation_years'))
 
         if cases[treatment_indices[-1]].noslurm:
             print('Running aggregate SPRUCE diagnostics locally')

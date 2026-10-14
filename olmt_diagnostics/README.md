@@ -156,6 +156,11 @@ history tape; the previous treatment run archived only annual grid-mean
 `TSOI`. The production SPRUCE microbe configuration now requests the daily
 field. Compare the model hollow column at corresponding depths, excluding
 the auxiliary fen; do not use the hummock/hollow bog mean for these profiles.
+The short-chain test configuration also requests daily `TSOI_col` and adds a
+model-versus-observation temperature page to its aggregate PDF. For its
+2015--2023 CPL-bypass cycle, synthetic model years 1860 and 1861 use 2022 and
+2023 meteorology respectively; the page compares model 1861 with the
+single-year `seasonal_mean_2023.csv` and is labeled a workflow check.
 
 ## Shareable PDF report
 
@@ -174,3 +179,5 @@ comparison, water-table validation, five NPP/HR pages, treatment intercept and
 slope diagnostics, and the porewater profile comparison. The PDF builder
 fails if any required figure is absent rather than silently producing an
 incomplete report.
+When a soil-temperature observation summary is configured, it also requires
+and includes the four-season hollow temperature comparison page.

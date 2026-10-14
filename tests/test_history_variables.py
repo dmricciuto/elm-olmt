@@ -137,6 +137,9 @@ class HistoryVariableTest(unittest.TestCase):
         self.assertEqual(config["spruce_diagnostics"]["smoke_test"], "true")
         self.assertEqual(config["treatment_options"]["soil_heating_reference_treatment"], "T0.00")
         self.assertNotIn("rest_n", config["run_lengths"])
+        self.assertIn("'TSOI_col'", config["postprocessing"]["variables"])
+        self.assertEqual(config["spruce_diagnostics"]["soil_temperature_model_start_year"], "1861")
+        self.assertEqual(config["spruce_diagnostics"]["soil_temperature_observation_years"], "2023")
 
 
 if __name__ == "__main__":

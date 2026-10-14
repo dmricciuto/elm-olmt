@@ -78,6 +78,13 @@ FIGURES = (
         "profiles are hummock+hollow weighted means; the fen is excluded.",
     ),
 )
+SOIL_TEMPERATURE_FIGURE = (
+    "Seasonal soil temperature: model and observations",
+    "soil_temperature_model_vs_observations.png",
+    "Seasonal hollow-column temperatures compared with SPRUCE.032 v2 plot probes "
+    "(DOI 10.3334/CDIAC/spruce.032). Solid lines are observations; dashed "
+    "lines are ELM. The auxiliary fen is excluded.",
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -89,6 +96,10 @@ def parse_args() -> argparse.Namespace:
         "--smoke-test", action="store_true",
         help="Mark synthetic-year output as a workflow check, not scientific validation.",
     )
+    parser.add_argument("--soil-temperature", action="store_true",
+                        help="Include the generated seasonal TSOI model/observation page.")
+    parser.add_argument("--soil-temperature-model-years")
+    parser.add_argument("--soil-temperature-observation-years")
     parser.add_argument(
         "--title", default="ELM-Peatlands-Microbe: SPRUCE treatment diagnostics"
     )
@@ -122,7 +133,11 @@ def _header_footer(canvas, document) -> None:
 
 
 def build_report(arguments: argparse.Namespace) -> None:
-    missing = [relative for _, relative, _ in FIGURES if not (arguments.diagnostics_dir / relative).is_file()]
+    figures = list(FIGURES)
+    if arguments.soil_temperature:
+        figures.insert(2, SOIL_TEMPERATURE_FIGURE)
+    missing = [relative for _, relative, _ in figures
+               if not (arguments.diagnostics_dir / relative).is_file()]
     if missing:
         raise FileNotFoundError("Missing diagnostic figures: " + ", ".join(missing))
 
@@ -163,7 +178,11 @@ def build_report(arguments: argparse.Namespace) -> None:
         Spacer(1, 0.55 * inch),
         Paragraph(arguments.title, title_style),
         Paragraph(
-            ("Workflow smoke test using synthetic model years. This PDF verifies that "
+            ("Workflow smoke test using synthetic model years. Most pages are model-only; "
+             "the soil-temperature page aligns a synthetic model year with its observational "
+             "forcing analog solely to check the comparison workflow. No scientific skill is inferred."
+             if arguments.smoke_test and arguments.soil_temperature else
+             "Workflow smoke test using synthetic model years. This PDF verifies that "
              "all treatment diagnostics can be generated; it is not an observation comparison."
              if arguments.smoke_test else
              "A reproducible evaluation package for peat hydrology, vegetation productivity, "
@@ -228,13 +247,21 @@ def build_report(arguments: argparse.Namespace) -> None:
         ]
     )
 
-    for index, (heading, relative, caption) in enumerate(FIGURES):
+    for index, (heading, relative, caption) in enumerate(figures):
         if arguments.smoke_test:
             if index == 0:
                 heading = "Peat profile workflow check"
                 caption = (
                     "Synthetic-year T0 restart peat stocks; observed core points are contextual "
                     "only. C14 is not enabled, and no scientific skill is inferred."
+                )
+            elif relative == SOIL_TEMPERATURE_FIGURE[1]:
+                caption = (
+                    "Workflow comparison only: synthetic model year(s) "
+                    f"{arguments.soil_temperature_model_years} are aligned to observed "
+                    f"{arguments.soil_temperature_observation_years} plot temperatures "
+                    "(SPRUCE.032 v2) through the CPL-bypass forcing cycle. The short "
+                    "spinup is not scientifically equilibrated; this is not a skill assessment."
                 )
             else:
                 caption = (
@@ -255,7 +282,7 @@ def build_report(arguments: argparse.Namespace) -> None:
                 ]
             )
         )
-        if index != len(FIGURES) - 1:
+        if index != len(figures) - 1:
             story.append(PageBreak())
 
     document.build(story, onFirstPage=_header_footer, onLaterPages=_header_footer)
