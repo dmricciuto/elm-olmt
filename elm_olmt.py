@@ -13,6 +13,26 @@ import configparser
 import argparse
 import importlib.util
 
+
+def next_soil_heating_history_tape(postproc_vars, sitegroup):
+    """Return the first unused zero-based history-tape number.
+
+    ELM always writes the default h0 tape.  OLMT then adds one tape for each
+    nonempty postprocessing group (gridded and indexed).  Peatland gridded
+    diagnostics are also copied to the indexed tape so that topounit output is
+    retained.  The hourly heating-control stream must immediately follow those
+    tapes: ELM aborts if a configured tape between them is empty.
+    """
+    variables = list(postproc_vars or [])
+    has_gridded = any('_pft' not in value and '_col' not in value
+                      for value in variables)
+    has_indexed = any('_pft' in value or '_col' in value
+                      for value in variables)
+    if str(sitegroup).strip().lower() == 'peatlands' and has_gridded:
+        has_indexed = True
+    return 1 + int(has_gridded) + int(has_indexed)
+
+
 def machine_path_defaults(machine, rootdir, inputdata, modelroot_name='E3SM'):
     """Return portable path defaults for the detected OLMT machine."""
     user = os.environ.get('USER', '')
@@ -373,6 +393,7 @@ def main():
                 '[calibration] mode=multitreatment requires at least two treatment cases')
 
      # Post-processing
+    postproc_vars = []
     if ('postprocessing' in cfg):
         # Set default postproc years based on whether treatments exist
         # Default to transition period or run period
@@ -708,8 +729,14 @@ def main():
                 'soil_heating_reference_columns', '1,2')
             if isinstance(reference_columns, list):
                 reference_columns = ','.join(str(value) for value in reference_columns)
-            reference_tape = int(cfg.get('treatment_options', {}).get(
+            requested_reference_tape = int(cfg.get('treatment_options', {}).get(
                 'soil_heating_reference_history_tape', 3))
+            reference_tape = next_soil_heating_history_tape(
+                postproc_vars, sitegroup)
+            if reference_tape != requested_reference_tape:
+                print('Adjusting soil-heating reference history tape from h'+
+                      str(requested_reference_tape)+' to h'+str(reference_tape)+
+                      ' to avoid an empty intermediate ELM history tape')
             if c == soil_heating_reference_index:
                 cases[c].make_soil_heating_reference = True
                 cases[c].soil_heating_reference_columns = reference_columns
