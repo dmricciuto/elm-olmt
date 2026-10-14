@@ -137,6 +137,26 @@ fraction and by the mass of the two carbon atoms in acetate. The resulting
 mol m-3 is numerically equal to mmol L-1. The plot shows treatment means; the
 model CSV also retains daily 5th--95th percentile envelopes and sample counts.
 
+## Seasonal soil-temperature benchmark
+
+The 2026 SPRUCE.032 half-hourly temperature observations are summarized for
+2016--2023 in `data/spruce/soil_temperature_2026/`. The CSV contains seasonal
+means for all six non-elevated-CO2 treatments at nine hollow-referenced depths;
+its README documents probe coverage and treatment/plot mapping. Replot from
+the checked-in summary without downloading the large raw CSVs:
+
+```bash
+python3 olmt_diagnostics/spruce_soil_temperature_benchmark.py \
+  --summary data/spruce/soil_temperature_2026/seasonal_mean_2016_2023.csv \
+  --figure output/soil_temperature/seasonal_profiles_2016_2023.png
+```
+
+Future modeled comparisons require daily `TSOI_col` on a column-resolved
+history tape; the previous treatment run archived only annual grid-mean
+`TSOI`. The production SPRUCE microbe configuration now requests the daily
+field. Compare the model hollow column at corresponding depths, excluding
+the auxiliary fen; do not use the hummock/hollow bog mean for these profiles.
+
 ## Shareable PDF report
 
 After the full diagnostic package has been generated, assemble its figures
