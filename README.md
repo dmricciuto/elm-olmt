@@ -11,6 +11,21 @@ OLMT passes `--driver mct` to CIME by default on Pathfinder and for Docker or
 Apptainer workflows. Set `cime_driver` in the `[simulation]` section to
 override this default, for example `cime_driver = nuopc`.
 
+Older ELM tags with compile-time `HUM_HOL` do not recognize the modern
+`use_humhol` namelist variable. To run one of those tags with current OLMT,
+set both options below in that tag's `[case_options]` section:
+
+```ini
+use_humhol = .true.
+legacy_humhol_cppdef = True
+```
+
+OLMT will still generate the multi-topounit surface, omit `use_humhol` from
+`user_nl_elm`, and add `-DHUM_HOL` to the ELM build. Leave the legacy switch
+unset for current ELM, which uses the runtime namelist option. This switch
+only covers HUMHOL compatibility; other model-version-specific namelist and
+parameter differences must still be checked separately.
+
 For a compact Docker test without the global E3SM input-data archive, clone
 [`dmricciuto/TES_SFA_ELMdata`](https://github.com/dmricciuto/TES_SFA_ELMdata)
 as a sibling directory named `inputdata`. It contains the US-SPR and US-MOz

@@ -1206,7 +1206,33 @@ class ELMcase():
           self.xmlchange('POSTRUN_SCRIPT', value=script)
       return script
 
+  def configure_humhol_options(self):
+    """Select modern runtime HUMHOL or explicit compile-time legacy mode."""
+    true_values = ('.true.', 'true', '1', 'yes', 'on')
+    use_humhol = str(self.case_options.get('use_humhol', '')).strip().lower()
+    legacy = str(self.case_options.get(
+        'legacy_humhol_cppdef', '')).strip().lower() in true_values
+    if legacy and 'use_humhol' in self.case_options and use_humhol not in true_values:
+        raise ValueError('legacy_humhol_cppdef requires use_humhol = .true. '
+                         'when use_humhol is specified')
+    if legacy:
+        # Older ELM tags reject use_humhol and require the HUM_HOL CPPDEF.
+        self.humhol = True
+        cppdefs = [item for item in self.cppdefs.split(',') if item]
+        if 'HUM_HOL' not in cppdefs:
+            cppdefs.append('HUM_HOL')
+        self.cppdefs = ','.join(cppdefs)
+    elif use_humhol in true_values:
+        self.humhol = True
+    return legacy
+
+  @staticmethod
+  def case_option_is_namelist(key, keys_exclude, legacy_humhol_cppdef):
+    return (key not in keys_exclude and 'restart_' not in key and
+            not (legacy_humhol_cppdef and key == 'use_humhol'))
+
   def setup_case(self):
+    legacy_humhol_cppdef = self.configure_humhol_options()
     os.chdir(self.casedir)
     #env_build
     self.xmlchange('SAVE_TIMING',value='FALSE')
@@ -1409,16 +1435,14 @@ class ELMcase():
     keys_exclude.extend([
               'soil_heating_reference_treatment',
               'soil_heating_reference_columns',
-              'soil_heating_reference_history_tape'])
+              'soil_heating_reference_history_tape',
+              'legacy_humhol_cppdef'])
     # ``humhol`` predates ELM's runtime switch and is retained only as a
     # backwards-compatible OLMT alias. New configurations use use_humhol for
     # both ELM physics and generation of the multi-topounit surface dataset.
-    use_humhol = str(self.case_options.get('use_humhol', '')).strip().lower()
-    if use_humhol in ('.true.', 'true', '1', 'yes', 'on'):
-        self.humhol = True
     #Custom namelist options
     for key in self.case_options.keys():
-        if (not key in keys_exclude and not 'restart_' in key):
+        if self.case_option_is_namelist(key, keys_exclude, legacy_humhol_cppdef):
             if (key.startswith('hist_type1d_pertape') or \
                     key.startswith('hist_avgflag_pertape')):
                 value = str(self.case_options[key]).strip().strip("'\"")
@@ -1430,7 +1454,7 @@ class ELMcase():
                 self.customize_namelist(variable=key,value="'"+self.case_options[key]+"'")
             else:
                 self.customize_namelist(variable=key,value=str(self.case_options[key]))
-        elif ('humhol' in key):
+        elif (key == 'humhol'):
             self.humhol=True
     if ('ad_spinup' in self.casename):    #Turn on supplemental P for ad spinup
         self.customize_namelist(variable='suplphos',value="'ALL'")
@@ -1449,8 +1473,8 @@ class ELMcase():
       self.xmlchange('ATM_DOMAIN_FILE',value=domainfilename)
       self.xmlchange('LND_DOMAIN_FILE',value=domainfilename)
 
-    # HUMHOL physics is runtime-controlled. self.humhol is retained only for
-    # constructing the multi-topounit surface and must not change CPPDEFS.
+    # Modern HUMHOL physics is runtime-controlled. Only the explicit legacy
+    # compatibility switch above adds the compile-time HUM_HOL definition.
     if (self.is_bypass()):
       macrofiles=['./Macros.make','./Macros.cmake']
       for f in macrofiles:
