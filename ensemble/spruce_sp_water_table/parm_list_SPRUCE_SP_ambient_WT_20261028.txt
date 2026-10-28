@@ -1,0 +1,10 @@
+# parameter PFT_index lower upper; index 0 denotes a scalar or first element
+peat_jules_sucsat_scale 0 0.4 2.5
+peat_jules_b_scale 0 0.55 1.6
+peat_hydraulic_hksat_scale 0 0.2 5
+rsub_top_globalmax_peat 0 8e-07 6e-05
+peat_drainage_decay_depth 0 0.2 1.5
+soil_ice_impedance_exponent 0 4 12
+moss_water_hydraulic_conductivity_sat 0 0.3 5
+moss_water_layer_thickness 0 0.03 0.1
+moss_water_substrate_rewetting_timescale_days 0 0.3 4

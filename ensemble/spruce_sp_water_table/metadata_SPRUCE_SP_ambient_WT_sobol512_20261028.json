@@ -1,0 +1,36 @@
+{
+  "purpose": "SPRUCE ambient hollow water-table calibration, SP mode",
+  "seed": 20261028,
+  "members": 512,
+  "anchors": {
+    "1": "current SP baseline",
+    "2": "32-member screen member 7"
+  },
+  "parameter_order": [
+    "peat_jules_sucsat_scale",
+    "peat_jules_b_scale",
+    "peat_hydraulic_hksat_scale",
+    "rsub_top_globalmax_peat",
+    "peat_drainage_decay_depth",
+    "soil_ice_impedance_exponent",
+    "moss_water_hydraulic_conductivity_sat",
+    "moss_water_layer_thickness",
+    "moss_water_substrate_rewetting_timescale_days"
+  ],
+  "transforms": {
+    "peat_jules_sucsat_scale": "log",
+    "peat_jules_b_scale": "linear",
+    "peat_hydraulic_hksat_scale": "log",
+    "rsub_top_globalmax_peat": "log",
+    "peat_drainage_decay_depth": "linear",
+    "soil_ice_impedance_exponent": "linear",
+    "moss_water_hydraulic_conductivity_sat": "log",
+    "moss_water_layer_thickness": "linear",
+    "moss_water_substrate_rewetting_timescale_days": "log"
+  },
+  "notes": [
+    "Peat density targets are fixed.",
+    "The experimental partial-ice liquid pathway remains disabled.",
+    "Run 2006-2014 lead-in, followed by 2015-2023 ambient evaluation."
+  ]
+}
