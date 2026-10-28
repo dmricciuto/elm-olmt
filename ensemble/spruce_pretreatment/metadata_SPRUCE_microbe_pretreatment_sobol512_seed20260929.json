@@ -1,0 +1,176 @@
+{
+  "design": "scrambled Sobol with reference parameter set in member 1",
+  "seed": 20260929,
+  "members": 512,
+  "latent_dimensions": 18,
+  "physical_columns": [
+    "microbe_methane_denitrification_rate_multiplier",
+    "froot_leaf_pft18",
+    "moss_water_hydraulic_conductivity_sat",
+    "microbe_methane_aqueous_nh4_partition_coefficient",
+    "decomp_depth_efolding",
+    "dom_solubilization_anoxic_fraction",
+    "l1dom_f",
+    "s1dom_f",
+    "s2dom_f",
+    "s3dom_f",
+    "s4dom_f",
+    "k_dom_all_pfts",
+    "microbe_methane_aqueous_dom_saturated_macrodispersion",
+    "microbe_methane_acetate_prod_max",
+    "microbe_methane_k_acetate",
+    "microbe_methane_acetate_methanogen_growth_rate",
+    "microbe_methane_acetate_methanogen_death_rate",
+    "microbe_methane_h2_methanogen_death_rate",
+    "microbe_methane_k_aerobic_oxidation_ch4",
+    "microbe_methane_k_aerobic_oxidation_o2",
+    "microbe_methane_ch4_transport_threshold",
+    "microbe_methane_plant_transport_coefficient"
+  ],
+  "priors": [
+    {
+      "name": "denitrification_multiplier",
+      "lower": 0.03,
+      "upper": 0.3,
+      "transform": "log10",
+      "reference": 0.1
+    },
+    {
+      "name": "moss_froot_leaf",
+      "lower": 1.0,
+      "upper": 3.5,
+      "transform": "linear",
+      "reference": 2.94680347971377
+    },
+    {
+      "name": "moss_hydraulic_conductivity_sat",
+      "lower": 0.15,
+      "upper": 15.0,
+      "transform": "log10",
+      "reference": 1.5
+    },
+    {
+      "name": "nh4_partition_coefficient",
+      "lower": 0.001,
+      "upper": 0.02,
+      "transform": "log10",
+      "reference": 0.005
+    },
+    {
+      "name": "decomp_depth_efolding",
+      "lower": 0.25,
+      "upper": 0.8,
+      "transform": "linear",
+      "reference": 0.395718086816327
+    },
+    {
+      "name": "dom_solubilization_anoxic_fraction",
+      "lower": 0.0,
+      "upper": 0.8,
+      "transform": "linear",
+      "reference": 0.5
+    },
+    {
+      "name": "l1dom_f",
+      "lower": 0.08,
+      "upper": 0.4,
+      "transform": "linear",
+      "reference": 0.2
+    },
+    {
+      "name": "som_dom_multiplier",
+      "lower": 0.5,
+      "upper": 2.0,
+      "transform": "log10",
+      "reference": 1.0
+    },
+    {
+      "name": "k_dom",
+      "lower": 0.002,
+      "upper": 0.02,
+      "transform": "log10",
+      "reference": 0.007004
+    },
+    {
+      "name": "saturated_macrodispersion",
+      "lower": 2e-09,
+      "upper": 1e-07,
+      "transform": "log10",
+      "reference": 5e-08
+    },
+    {
+      "name": "acetate_prod_max",
+      "lower": 13.44,
+      "upper": 215.04,
+      "transform": "log10",
+      "reference": 53.76
+    },
+    {
+      "name": "k_acetate",
+      "lower": 4.0,
+      "upper": 64.0,
+      "transform": "log10",
+      "reference": 16.0
+    },
+    {
+      "name": "acetate_methanogen_growth_rate",
+      "lower": 0.084408,
+      "upper": 0.337632,
+      "transform": "log10",
+      "reference": 0.168816
+    },
+    {
+      "name": "methanogen_mortality_multiplier",
+      "lower": 0.4,
+      "upper": 2.5,
+      "transform": "log10",
+      "reference": 1.0
+    },
+    {
+      "name": "k_aerobic_oxidation_ch4",
+      "lower": 1.0,
+      "upper": 100.0,
+      "transform": "log10",
+      "reference": 50.0
+    },
+    {
+      "name": "k_aerobic_oxidation_o2",
+      "lower": 1.0,
+      "upper": 80.0,
+      "transform": "log10",
+      "reference": 20.0
+    },
+    {
+      "name": "ch4_transport_threshold",
+      "lower": 100.0,
+      "upper": 1500.0,
+      "transform": "log10",
+      "reference": 750.0
+    },
+    {
+      "name": "plant_transport_coefficient",
+      "lower": 0.002,
+      "upper": 0.02,
+      "transform": "log10",
+      "reference": 0.007
+    }
+  ],
+  "links": {
+    "som_dom_multiplier": {
+      "s1dom_f": 0.18,
+      "s2dom_f": 0.14,
+      "s3dom_f": 0.1,
+      "s4dom_f": 0.06
+    },
+    "methanogen_mortality_multiplier": {
+      "microbe_methane_acetate_methanogen_death_rate": 0.048,
+      "microbe_methane_h2_methanogen_death_rate": 0.024
+    }
+  },
+  "notes": [
+    "OLMT reads the physical sample file directly; no surrogate or MCMC is required.",
+    "Use the unit-cube file, not raw physical columns, for a future log-aware surrogate.",
+    "Moss capillary nutrient access is disabled in the companion configuration.",
+    "Peat bulk-density targets remain fixed at their parameter-file values."
+  ]
+}
