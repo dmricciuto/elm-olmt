@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-import sys,os, time, math
+import sys,os, time, math, glob
 import numpy as np
 import subprocess
 import random
@@ -295,6 +295,31 @@ def postprocess_members(member_numbers):
       else:
           mycase.postprocessed[n-1] = 1
 
+def create_member_soil_temperature_references():
+    """Write a distinct T0 control-temperature stream for every successful member."""
+    if not getattr(mycase, 'make_soil_heating_reference', False):
+        return
+    from olmt_diagnostics.create_soil_temperature_reference import create_reference
+    tape = int(mycase.soil_heating_reference_history_tape)
+    columns = mycase.soil_heating_reference_columns
+    if isinstance(columns, str):
+        columns = [int(value) for value in columns.split(',') if value.strip()]
+    for member in range(1, mycase.nsamples+1):
+        if run_completed[member-1] != 1:
+            continue
+        member_dir = os.path.join(mycase.rundir_UQ, 'g'+str(100000+member)[1:])
+        history = sorted(glob.glob(os.path.join(
+            member_dir, mycase.casename+'.elm.h'+str(tape)+'.*.nc')))
+        output = os.path.join(member_dir, 'soil_temperature_reference.nc')
+        domain = os.path.join(member_dir, 'domain.nc')
+        try:
+            create_reference(history, output, domain,
+                             'TSOI_HEATING_CONTROL', columns)
+        except Exception as error:
+            raise RuntimeError('Failed T0 temperature reference for ensemble '
+                               'member '+str(member)+': '+str(error)) from error
+        print('Wrote ensemble soil-temperature reference: '+output, flush=True)
+
 def postprocessed_output_vars(requested_vars):
     expanded = []
     def split_outputs(var_out):
@@ -487,6 +512,9 @@ if (not options.UQ_only):
     while (sum(pactive) > 0):
       pactive = active_processes(processes,process_jobnum,process_hang)
       time.sleep(1)
+
+    if is_final_segment:
+      create_member_soil_temperature_references()
 
     if defer_postprocess:
       completed_members = [i+1 for i in range(mycase.nsamples) if run_completed[i] == 1]

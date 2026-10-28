@@ -746,6 +746,15 @@ def ensemble_copy(self, ens_num, clean=True):
                 copy_file_verified(paramfile_orig, paramfile_new)
                 myoutput.write(" fates_paramfile = '"+paramfile_new+"'\n")
                 fates_paramfile = ens_dir+'/fates_params_'+gst[1:]+suffix
+            elif ('soil_heating_reference_file' in s and
+                  getattr(self, 'soil_heating_reference_case', None)):
+                reference_dir = os.path.join(
+                    os.path.dirname(self.rundir_UQ),
+                    self.soil_heating_reference_case, 'g'+gst[1:])
+                reference_file = os.path.join(
+                    reference_dir, 'soil_temperature_reference.nc')
+                myoutput.write(" soil_heating_reference_file = '"+
+                               reference_file+"'\n")
             elif ('paramfile' in s):
                 paramfile_orig = ((s.split()[2]).strip("'"))
                 if (paramfile_orig[0:2] == './'):

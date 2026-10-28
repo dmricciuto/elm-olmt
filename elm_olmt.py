@@ -829,6 +829,7 @@ def main():
                 'use_deep_soil_heating', '')).lower()
             if enabled in ('.true.', 'true', '1', 'yes', 'on'):
                 reference_case = cases[soil_heating_reference_index]
+                cases[c].soil_heating_reference_case = reference_case.casename
                 cases[c].case_options['soil_heating_reference_file'] = os.path.join(
                     reference_case.rundir, 'soil_temperature_reference.nc')
                 cases[c].case_options['soil_heating_stream_year_first'] = \
