@@ -1,0 +1,10 @@
+FROM elmv3:latest
+
+USER root
+RUN apt-get update && apt-get install -y ca-certificates && update-ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN python -m pip install pandas requests aiohttp aiofiles 'pydantic>=2' PyYAML
+COPY vendor/fluxnet_shuttle/src /opt/fluxnet_shuttle/src
+COPY vendor/fluxnet_shuttle/LICENSE /opt/fluxnet_shuttle/LICENSE
+ENV PYTHONPATH=/opt/fluxnet_shuttle/src
+USER modeluser

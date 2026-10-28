@@ -15,6 +15,7 @@ config_files/*
 !config_files/BGC_site.cfg
 !config_files/Marcell_S2_diag50hydro.cfg
 !config_files/Marcell_S2_diag50hydro_regwt.cfg
+!config_files/US-MMS_SP_shuttle_flnr_mbbopt_30.cfg
 
 # Local short dependency-chain experiments are intentionally not versioned.
 tests/config_files/*submission_test*.cfg

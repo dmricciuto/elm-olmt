@@ -92,5 +92,32 @@ else
   cmd=("$@")
 fi
 
+if [[ -n "${config:-}" && -f "${config}" ]]; then
+  if python3 - "${config}" <<'PY'
+import configparser
+import sys
+
+cfg = configparser.ConfigParser(interpolation=None)
+cfg.read(sys.argv[1])
+sitegroup = cfg.get("simulation", "sitegroup", fallback="").strip().lower()
+enabled = (cfg.getboolean("fluxnet_shuttle", "enabled")
+           if cfg.has_option("fluxnet_shuttle", "enabled")
+           else sitegroup == "fluxnet_shuttle")
+sys.exit(0 if enabled else 1)
+PY
+  then
+    if [[ -z "${OLMT_DOCKER_IMAGE:-}" ]]; then
+      image="elmv3-shuttle:latest"
+    fi
+    shuttle_python="${OLMT_SHUTTLE_PYTHON:-${models_dir}/.venv-fluxnet-shuttle/bin/python}"
+    if [[ ! -x "${shuttle_python}" ]]; then
+      shuttle_python="python3"
+    fi
+    "${shuttle_python}" "${repo_dir}/tools/prepare_shuttle_config.py" \
+      --config "${config}" --inputdata-host "${inputdata_dir}"
+    docker_args+=(-e OLMT_SHUTTLE_PREPARED=1)
+  fi
+fi
+
 echo "Running in Docker image ${image}: ${cmd[*]}"
 exec docker "${docker_args[@]}" "${image}" "${cmd[@]}"

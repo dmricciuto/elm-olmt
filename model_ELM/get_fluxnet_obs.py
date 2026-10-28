@@ -3,6 +3,9 @@ import os
 import csv
 from netCDF4 import Dataset
 
+# AmeriFlux monthly GPP is in g C m-2 d-1; ELM FPSN is in umol CO2 m-2 s-1.
+GPP_GC_DAY_TO_FPSN_UMOL_S = 1.0e6 / (12.0107 * 86400.0)
+
 def _clean(value):
   if value is None:
     return ''
@@ -60,12 +63,14 @@ def _get_table_obs(self, site='US-UMB', tstep='annual', ystart=-1, yend=9999,
   except Exception:
     error_floor = 1.0
 
-  rows = []
+  rows_by_var = {fluxnet_var: []}
+  if fluxnet_var == 'FPSN':
+    rows_by_var['GPP'] = []
   with open(obs_file, newline='') as handle:
     reader = csv.DictReader(handle)
     for row in reader:
       row_var = _clean(_get_first(row, ['model_var', 'variable', 'var']))
-      if row_var != fluxnet_var:
+      if row_var not in rows_by_var:
         continue
       row_site = _clean(row.get('site', ''))
       if row_site != '' and site != '' and row_site != site:
@@ -75,7 +80,23 @@ def _get_table_obs(self, site='US-UMB', tstep='annual', ystart=-1, yend=9999,
       if row_treatment != '':
         if treatment == '' or row_treatment != treatment:
           continue
-      rows.append(row)
+      rows_by_var[row_var].append(row)
+
+  source_var = fluxnet_var
+  rows = rows_by_var[fluxnet_var]
+  if fluxnet_var == 'FPSN' and not rows:
+    source_var = 'GPP'
+    rows = rows_by_var['GPP']
+  if fluxnet_var == 'FPSN' and not rows:
+    raise ValueError('No FPSN or GPP observations matched '+site+' in '+obs_file)
+  if source_var == 'GPP' and fluxnet_var == 'FPSN':
+    supported_units = {'g C m-2 d-1', 'gC/m^2/day'}
+    observed_units = {_clean(row.get('units', '')) for row in rows}
+    if not observed_units.issubset(supported_units):
+      raise ValueError('FPSN requires GPP observations in g C m-2 d-1; found '+
+        ', '.join(sorted(observed_units))+' in '+obs_file)
+    print('Mapping FPSN to '+_clean(rows[0].get('source_variable', 'GPP'))+
+          ' (GPP), converting g C m-2 d-1 to umol CO2 m-2 s-1')
 
   if len(rows) == 0:
     print('Warning: no tabular observations matched '+fluxnet_var+' for '+site+
@@ -120,6 +141,9 @@ def _get_table_obs(self, site='US-UMB', tstep='annual', ystart=-1, yend=9999,
     err = _to_float(_get_first(row, ['obs_err', 'error', 'uncertainty']))
     if err is None or err <= 0:
       err = max(abs(obs)*error_fraction, error_floor)
+    if source_var == 'GPP' and fluxnet_var == 'FPSN':
+      obs = obs * GPP_GC_DAY_TO_FPSN_UMOL_S
+      err = err * GPP_GC_DAY_TO_FPSN_UMOL_S
     myobs[idx] = obs
     myobs_err[idx] = err
     valid_count = valid_count+1

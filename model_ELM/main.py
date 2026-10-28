@@ -503,7 +503,10 @@ class ELMcase():
               sys.exit(1)
         self.metdir = metdir
         if self.forcing == 'site':
-            self.metdir = metdir+'/1x1pt_'+self.site
+            # Accept either a site-forcing parent or an exact versioned
+            # directory containing the cpl-bypass forcing file.
+            if not os.path.isfile(os.path.join(metdir, 'all_hourly.nc')):
+                self.metdir = os.path.join(metdir, '1x1pt_'+self.site)
     self.get_metdata_year_range()
 
   def is_bypass(self):

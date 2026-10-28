@@ -36,6 +36,11 @@ checksum validator. The smoke-test configurations
 cpl_bypass case. See the data repository README for the complete clone, Docker,
 and validation commands.
 
+For AmeriFlux sites, [the FLUXNET Shuttle interface](docs/FLUXNET_SHUTTLE.md)
+downloads a site product and converts its CSV tables to cpl-bypass forcing and
+monthly observation files. The US-MMS example includes a one-year Docker smoke
+configuration.
+
 Generated case inputs are written directly to that case's run directory. The
 run-directory path contains the configured case prefix (normally a date) and
 the complete case name. In particular, `domain.nc`, `surfdata.nc`,

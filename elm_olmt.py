@@ -728,6 +728,28 @@ def main():
 
     import model_ELM
 
+    shuttle_config = cfg.get('fluxnet_shuttle', {})
+    shuttle_enabled = shuttle_config.get(
+        'enabled', str(sitegroup).strip().lower() == 'fluxnet_shuttle')
+    shuttle_inputs = {}
+    if shuttle_enabled:
+        if runtype != 'site' or mettype != 'site' or not use_cpl_bypass:
+            raise ValueError('[fluxnet_shuttle] requires site runs with mettype=site and use_cpl_bypass=True')
+        if sites == [''] or 'all' in sites:
+            raise ValueError('[fluxnet_shuttle] requires explicit site IDs')
+        from tools.fluxnet_shuttle_to_olmt import cached_site, sync_site
+        shuttle_root = shuttle_config.get('output_root', os.path.join(
+            inputdata, 'atm', 'datm7', 'CLM1PT_data', 'fluxnet_shttle'))
+        for shuttle_site in sites:
+            if os.environ.get('OLMT_SHUTTLE_PREPARED') == '1':
+                result = cached_site(shuttle_site, shuttle_root)
+            else:
+                result = sync_site(shuttle_site, shuttle_root,
+                                   height=shuttle_config.get('height', None))
+            shuttle_inputs[shuttle_site] = result['directory']
+            print('FLUXNET Shuttle '+shuttle_site+': '+
+                  ('reusing ' if result['reused'] else 'saved ')+result['directory'])
+
     nsites = len(sites)
     jobnum = np.zeros(len(compsets),int)  #list of submitted job ids
 
@@ -857,12 +879,13 @@ def main():
         if ('phase2' in suffix[c]):
             # Set the starting year from the last case
             cases[c].startyear = cases[c-1].startyear+cases[c-1].run_n
+        case_metdir = shuttle_inputs.get(site, metdir)
         if (istreatment[c]):
             tname = suffix[c]
             if 'metdir' in treatment_options[tname].keys():
-                metdir = treatment_options[tname]['metdir']
-        if (metdir != ''):
-            cases[c].get_forcing(mettype=mettype, metdir=metdir)
+                case_metdir = treatment_options[tname]['metdir']
+        if (case_metdir != ''):
+            cases[c].get_forcing(mettype=mettype, metdir=case_metdir)
         else:
             cases[c].get_forcing(mettype=mettype)
 
@@ -898,8 +921,9 @@ def main():
                         print('Adding observation variable to postprocessing: '+v)
                         cases[c].postproc_vars.append(v)
                     print('Getting observations for variable: '+v)
+                    site_obs_dir = shuttle_inputs[site] if shuttle_enabled and obs_dir == 'shuttle' else obs_dir
                     cases[c].get_fluxnet_obs(site=site,tstep=postproc_freq,ystart=obs_startyear, \
-                        yend=obs_endyear,fluxnet_var=v, myobsdir=obs_dir, valid_months=valid_months, \
+                        yend=obs_endyear,fluxnet_var=v, myobsdir=site_obs_dir, valid_months=valid_months, \
                         time_average = postproc_timeaverage, obs_format=obs_format, \
                         error_fraction=obs_error_fraction, error_floor=obs_error_floor)
         else:

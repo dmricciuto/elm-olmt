@@ -1,0 +1,3 @@
+# parameter PFT_index lower upper
+flnr 7 0.07 0.22
+mbbopt 7 4.5 13.5
