@@ -16,6 +16,8 @@ config_files/*
 !config_files/Marcell_S2_diag50hydro.cfg
 !config_files/Marcell_S2_diag50hydro_regwt.cfg
 !config_files/SPRUCE_microbe_pretreatment_ensemble_20260929.cfg
+!config_files/Marcell_regional_microbe.cfg
+!config_files/MN_WI_MI_microbe_regional.cfg
 !config_files/US-MMS_SP_shuttle_flnr_mbbopt_30.cfg
 
 # Local short dependency-chain experiments are intentionally not versioned.
