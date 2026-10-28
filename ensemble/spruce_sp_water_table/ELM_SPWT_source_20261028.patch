@@ -1,0 +1,2110 @@
+diff --git a/components/elm/bld/ELMBuildNamelist.pm b/components/elm/bld/ELMBuildNamelist.pm
+index 539dc443ee..fea2f9b69b 100755
+--- a/components/elm/bld/ELMBuildNamelist.pm
++++ b/components/elm/bld/ELMBuildNamelist.pm
+@@ -2341,6 +2341,18 @@ sub setup_logic_peatland_roots {
+     add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
+                 'use_prognostic_moss_water', 'val'=>$value);
+   }
++  if ( ! defined($nl->get_value('use_moss_topsoil_ice_limitation')) ) {
++    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
++    my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
++    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
++                'use_moss_topsoil_ice_limitation', 'val'=>$value);
++  }
++  if ( ! defined($nl->get_value('use_moss_separate_respiration_stress')) ) {
++    my $use_humhol = $nl->get_value('use_humhol') || '.false.';
++    my $value = ($use_humhol =~ /true/i) ? '.true.' : '.false.';
++    add_default($test_files, $nl_flags->{'inputdata_rootdir'}, $definition, $defaults, $nl,
++                'use_moss_separate_respiration_stress', 'val'=>$value);
++  }
+   if (value_is_true($nl->get_value('use_moss_capillary_nutrients')) &&
+       !value_is_true($nl->get_value('use_peatland_roots'))) {
+     fatal_error("use_moss_capillary_nutrients=.true. requires use_peatland_roots=.true.\n");
+diff --git a/components/elm/bld/namelist_files/namelist_defaults.xml b/components/elm/bld/namelist_files/namelist_defaults.xml
+index 5d8dbd4cc6..95120494c2 100644
+--- a/components/elm/bld/namelist_files/namelist_defaults.xml
++++ b/components/elm/bld/namelist_files/namelist_defaults.xml
+@@ -124,6 +124,8 @@ attributes from the config_cache.xml file (with keys converted to upper-case).
+ <use_peatland_roots>.false.</use_peatland_roots>
+ <use_moss_capillary_nutrients>.false.</use_moss_capillary_nutrients>
+ <use_prognostic_moss_water>.false.</use_prognostic_moss_water>
++<use_moss_topsoil_ice_limitation>.false.</use_moss_topsoil_ice_limitation>
++<use_moss_separate_respiration_stress>.false.</use_moss_separate_respiration_stress>
+ <use_peatland_vertical_transport>.false.</use_peatland_vertical_transport>
+ <use_peatland_compaction_profile>.false.</use_peatland_compaction_profile>
+ 
+diff --git a/components/elm/bld/namelist_files/namelist_definition.xml b/components/elm/bld/namelist_files/namelist_definition.xml
+index fb07b525eb..9dab33d0bd 100644
+--- a/components/elm/bld/namelist_files/namelist_definition.xml
++++ b/components/elm/bld/namelist_files/namelist_definition.xml
+@@ -992,6 +992,28 @@ to FALSE to retain the historical diagnostic mapping from layers 3--4 liquid
+ volumetric water content to moss water content.
+ </entry>
+ 
++<entry id="use_moss_topsoil_ice_limitation" type="logical" category="physics"
++       group="elm_inparm" valid_values="" value=".false.">
++Experimental peatland moss photosynthesis sensitivity. Scale the moss
++tissue-water photosynthesis factor by the liquid fraction of water in the top
++soil layer, SOILLIQ/(SOILLIQ+SOILICE). This is an instantaneous proxy for
++capitulum thaw, not a prognostic moss ice store; it does not freeze or thaw
++water in the moss mass or alter the energy budget. Defaults to TRUE when
++use_humhol is enabled and FALSE otherwise; an explicit setting takes priority.
++</entry>
++
++<entry id="use_moss_separate_respiration_stress" type="logical" category="physics"
++       group="elm_inparm" valid_values="" value=".false.">
++Experimental peatland moss leaf-respiration moisture response. If TRUE,
++calculate leaf maintenance respiration stress separately from the
++photosynthesis/VPD response, using moss_leaf_mr_dry_fraction and
++moss_leaf_mr_full_water_content from the parameter file. Fine-root
++maintenance respiration is unchanged. With topsoil ice limitation enabled,
++the separate leaf response is also scaled by the topsoil liquid fraction.
++Defaults to TRUE when use_humhol is enabled and FALSE otherwise; set FALSE
++explicitly to retain the previous shared-scalar behavior.
++</entry>
++
+ <entry id="use_peatland_vertical_transport" type="logical" category="physics"
+        group="elm_inparm" valid_values="" value=".false.">
+ If TRUE, peat-bearing topounits use peat-specific vertical transport
+diff --git a/components/elm/docs/dev-guide/peatland-shading.md b/components/elm/docs/dev-guide/peatland-shading.md
+index 0c938d6726..78506b6026 100644
+--- a/components/elm/docs/dev-guide/peatland-shading.md
++++ b/components/elm/docs/dev-guide/peatland-shading.md
+@@ -66,11 +66,11 @@ use_surface_structure_shading = .true.
+ [surface_data]
+ TopounitStructureShadeFrac = 0, 0, 1.0, 1, 0, 0.0, 2, 0, 0.0
+ TopounitStructureLightTrans = 0, 0, 0.5, 1, 0, 1.0, 2, 0, 1.0
+-TopounitStructureSnowRetention = 0, 0, 0.2, 1, 0, 1.0, 2, 0, 1.0
++TopounitStructureSnowRetention = 0, 0, 0.8, 1, 0, 1.0, 2, 0, 1.0
+ ```
+ 
+ This example gives topounit 0 a 50% effective reduction in ground shortwave
+-absorption, retains 20% of its incident snowfall, and leaves topounits 1 and 2
++absorption, retains 80% of its incident snowfall, and leaves topounits 1 and 2
+ unchanged. The companion SPRUCE OLMT configuration uses this layout for its
+ boardwalk/frustum, hollow, and hummock topounits, respectively.
+ 
+diff --git a/components/elm/src/biogeochem/C14DecayMod.F90 b/components/elm/src/biogeochem/C14DecayMod.F90
+index f2d3d4d2fd..391d7e37c1 100644
+--- a/components/elm/src/biogeochem/C14DecayMod.F90
++++ b/components/elm/src/biogeochem/C14DecayMod.F90
+@@ -8,7 +8,7 @@ module C14DecayMod
+   use elm_varpar             , only : ndecomp_cascade_transitions, nlevdecomp, ndecomp_pools
+   use elm_varcon             , only : secspday
+   use elm_varctl             , only : spinup_state
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, spinup_factor_for_column
+   use CNStateType            , only : cnstate_type
+   use elm_varctl             , only : nu_com
+   use ColumnDataType         , only : c14_col_cs
+@@ -129,15 +129,15 @@ contains
+ 
+       if (.not. is_active_betr_bgc) then
+          do l = 1, ndecomp_pools
+-            if ( spinup_state .eq. 1) then
+-               ! speed up radioactive decay by the same factor as decomposition so tat SOM ages prematurely in all respects
+-               spinup_term = spinup_factor(l)
+-            else
+-               spinup_term = 1.
+-            endif
+             do j = 1, nlevdecomp
+                do fc = 1,num_soilc
+                   c = filter_soilc(fc)
++                  if (spinup_state == 1) then
++                     ! Match radioactive decay to this column's AD factor.
++                     spinup_term = spinup_factor_for_column(c,l)
++                  else
++                     spinup_term = 1._r8
++                  end if
+                   if (spinup_term > 1._r8 .and. yr .ge. 40) then
+                       decomp_cpools_vr(c,j,l) = decomp_cpools_vr(c,j,l) * (1._r8 - decay_const * &
+                           (spinup_term / cnstate_vars%scalaravg_col(c,j)) * dt)
+diff --git a/components/elm/src/biogeochem/CH4Mod.F90 b/components/elm/src/biogeochem/CH4Mod.F90
+index 203bfe4c2b..98ab967e9e 100644
+--- a/components/elm/src/biogeochem/CH4Mod.F90
++++ b/components/elm/src/biogeochem/CH4Mod.F90
+@@ -18,7 +18,7 @@ module CH4Mod
+   use landunit_varcon    , only : istdlak
+   use elm_time_manager   , only : get_step_size, get_nstep
+   use elm_varctl         , only : iulog, use_cn, use_lch4, use_microbe_methane, &
+-       use_legacy_ch4_with_microbe, use_fates
++       use_legacy_ch4_with_microbe, use_fates, use_humhol
+   use abortutils         , only : endrun
+   use decompMod          , only : bounds_type
+   use SharedParamsMod    , only : ParamsShareInst
+@@ -31,6 +31,7 @@ module CH4Mod
+   use SoilStateType      , only : soilstate_type
+   use GridcellType       , only : grc_pp
+   use TopounitDataType   , only : top_as  ! for topounit-level atmospheric state forcing
++  use TopounitType       , only : top_pp
+   use LandunitType       , only : lun_pp
+   use ColumnType         , only : col_pp
+   use ColumnDataType     , only : col_es, col_ws, col_wf, col_cf, col_nf
+@@ -1971,7 +1972,7 @@ contains
+     real(r8) :: q10lake          ! For now, take to be the same as q10ch4 * 1.5.
+     real(r8) :: q10lakebase      ! (K) base temperature for lake CH4 production
+     real(r8) :: partition_z
+-    real(r8) :: mino2lim         ! minimum anaerobic decomposition rate as a fraction of potential aerobic rate
++    real(r8) :: mino2lim_col(bounds%begc:bounds%endc) ! shared minimum anaerobic rate by column
+     real(r8) :: q10ch4           ! additional Q10 for methane production ABOVE the soil decomposition temperature relationship
+     real(r8) :: q10ch4base       ! temperature at which the effective f_ch4 actually equals the constant f_ch4
+     real(r8) :: f_ch4            ! ratio of CH4 production to total C mineralization
+@@ -2059,7 +2060,12 @@ contains
+       q10lakebase      = CH4ParamsInst%q10lakebase
+ 
+       ! Shared constant with other modules
+-      mino2lim = ParamsShareInst%mino2lim
++      do fc = 1, num_methc
++         c = filter_methc(fc)
++         mino2lim_col(c) = ParamsShareInst%mino2lim
++         if (use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) &
++              mino2lim_col(c) = ParamsShareInst%mino2lim_peat
++      end do
+ 
+       q10lake = q10ch4 * 1.5_r8
+ 
+@@ -2122,7 +2128,7 @@ contains
+                         if (annavg_finrw(c) /= spval) then
+                            seasonalfin = max(finundated(c)-annavg_finrw(c), 0._r8)
+                            if (seasonalfin > 0._r8) then
+-                              sif(c) = (annavg_finrw(c) + mino2lim*seasonalfin) / finundated(c)
++                              sif(c) = (annavg_finrw(c) + mino2lim_col(c)*seasonalfin) / finundated(c)
+                               base_decomp = base_decomp * sif(c)
+                            end if
+                         end if
+diff --git a/components/elm/src/biogeochem/CNDecompCascadeConType.F90 b/components/elm/src/biogeochem/CNDecompCascadeConType.F90
+index 919351d8ac..24c9fef996 100644
+--- a/components/elm/src/biogeochem/CNDecompCascadeConType.F90
++++ b/components/elm/src/biogeochem/CNDecompCascadeConType.F90
+@@ -9,6 +9,9 @@ module CNDecompCascadeConType
+   use decompMod      , only : bounds_type
+   use shr_infnan_mod , only : nan => shr_infnan_nan, assignment(=)
+   use elm_varpar     , only : ndecomp_cascade_transitions, ndecomp_pools
++  use elm_varctl     , only : use_humhol
++  use ColumnType     , only : col_pp
++  use TopounitType   , only : top_pp
+   !
+   implicit none
+   save
+@@ -16,6 +19,7 @@ module CNDecompCascadeConType
+   !
+   ! !PUBLIC MEMBER FUNCTIONS:
+   public :: init_decomp_cascade_constants
++  public :: initial_cn_ratio_for_column, initial_cp_ratio_for_column, spinup_factor_for_column
+   !
+   type, public :: decomp_cascade_type
+      !-- properties of each pathway along decomposition cascade 
+@@ -36,12 +40,15 @@ module CNDecompCascadeConType
+      logical           , pointer  :: is_dissolved(:)                   ! TRUE => pool is dissolved organic matter
+      logical           , pointer  :: is_microbial_biomass(:)          ! TRUE => pool is living microbial biomass
+      real(r8)          , pointer  :: initial_cn_ratio(:)               ! c:n ratio for initialization of pools
++     real(r8)          , pointer  :: initial_cn_ratio_peat(:)          ! peat-topounit C:N ratios
+      real(r8)          , pointer  :: initial_cp_ratio(:)               ! c:n ratio for initialization of pools
++     real(r8)          , pointer  :: initial_cp_ratio_peat(:)          ! peat-topounit C:P ratios
+      real(r8)          , pointer  :: initial_stock(:)                  ! initial concentration for seeding at spinup
+      logical           , pointer  :: is_metabolic(:)                   ! TRUE => pool is metabolic material
+      logical           , pointer  :: is_cellulose(:)                   ! TRUE => pool is cellulose
+      logical           , pointer  :: is_lignin(:)                      ! TRUE => pool is lignin
+      real(r8)          , pointer  :: spinup_factor(:)                  ! factor by which to scale AD and relevant processes
++     real(r8)          , pointer  :: spinup_factor_peat(:)             ! peat-topounit AD factors
+      real(r8)          , pointer  :: decomp_k_pools(:)                 ! Kd in 1/sec for pool
+   end type decomp_cascade_type
+ 
+@@ -75,12 +82,15 @@ contains
+     allocate(decomp_cascade_con%is_dissolved(0:ndecomp_pools))
+     allocate(decomp_cascade_con%is_microbial_biomass(0:ndecomp_pools))
+     allocate(decomp_cascade_con%initial_cn_ratio(0:ndecomp_pools))
++    allocate(decomp_cascade_con%initial_cn_ratio_peat(0:ndecomp_pools))
+     allocate(decomp_cascade_con%initial_cp_ratio(0:ndecomp_pools))
++    allocate(decomp_cascade_con%initial_cp_ratio_peat(0:ndecomp_pools))
+     allocate(decomp_cascade_con%initial_stock(0:ndecomp_pools))
+     allocate(decomp_cascade_con%is_metabolic(0:ndecomp_pools))
+     allocate(decomp_cascade_con%is_cellulose(0:ndecomp_pools))
+     allocate(decomp_cascade_con%is_lignin(0:ndecomp_pools))
+     allocate(decomp_cascade_con%spinup_factor(0:ndecomp_pools))
++    allocate(decomp_cascade_con%spinup_factor_peat(0:ndecomp_pools))
+     allocate(decomp_cascade_con%decomp_k_pools(0:ndecomp_pools))
+ 
+     !-- properties of each pathway along decomposition cascade 
+@@ -101,14 +111,47 @@ contains
+     decomp_cascade_con%is_dissolved(0:ndecomp_pools)                   = .false.
+     decomp_cascade_con%is_microbial_biomass(0:ndecomp_pools)          = .false.
+     decomp_cascade_con%initial_cn_ratio(0:ndecomp_pools)               = nan
++    decomp_cascade_con%initial_cn_ratio_peat(0:ndecomp_pools)          = nan
+     decomp_cascade_con%initial_cp_ratio(0:ndecomp_pools)               = nan
++    decomp_cascade_con%initial_cp_ratio_peat(0:ndecomp_pools)          = nan
+     decomp_cascade_con%initial_stock(0:ndecomp_pools)                  = nan
+     decomp_cascade_con%is_metabolic(0:ndecomp_pools)                   = .false.
+     decomp_cascade_con%is_cellulose(0:ndecomp_pools)                   = .false.
+     decomp_cascade_con%is_lignin(0:ndecomp_pools)                      = .false.
+     decomp_cascade_con%spinup_factor(0:ndecomp_pools)                  = nan
++    decomp_cascade_con%spinup_factor_peat(0:ndecomp_pools)             = nan
+     decomp_cascade_con%decomp_k_pools(0:ndecomp_pools)                 = nan
+ 
+   end subroutine init_decomp_cascade_constants
+ 
++  real(r8) function initial_cn_ratio_for_column(c, pool) result(ratio)
++    !$acc routine seq
++    integer, intent(in) :: c, pool
++    ratio = decomp_cascade_con%initial_cn_ratio(pool)
++    if (use_humhol) then
++       if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) &
++            ratio = decomp_cascade_con%initial_cn_ratio_peat(pool)
++    end if
++  end function initial_cn_ratio_for_column
++
++  real(r8) function initial_cp_ratio_for_column(c, pool) result(ratio)
++    !$acc routine seq
++    integer, intent(in) :: c, pool
++    ratio = decomp_cascade_con%initial_cp_ratio(pool)
++    if (use_humhol) then
++       if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) &
++            ratio = decomp_cascade_con%initial_cp_ratio_peat(pool)
++    end if
++  end function initial_cp_ratio_for_column
++
++  real(r8) function spinup_factor_for_column(c, pool) result(factor)
++    !$acc routine seq
++    integer, intent(in) :: c, pool
++    factor = decomp_cascade_con%spinup_factor(pool)
++    if (use_humhol) then
++       if (top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) &
++            factor = decomp_cascade_con%spinup_factor_peat(pool)
++    end if
++  end function spinup_factor_for_column
++
+ end module CNDecompCascadeConType
+diff --git a/components/elm/src/biogeochem/CNNitrogenStateType.F90 b/components/elm/src/biogeochem/CNNitrogenStateType.F90
+index 93911c4f63..e08d347281 100644
+--- a/components/elm/src/biogeochem/CNNitrogenStateType.F90
++++ b/components/elm/src/biogeochem/CNNitrogenStateType.F90
+@@ -13,7 +13,7 @@ module CNNitrogenStateType
+   use elm_varctl             , only : iulog, override_bgc_restart_mismatch_dump, spinup_state
+   use decompMod              , only : bounds_type
+   use pftvarcon              , only : iscft, nstor
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, initial_cn_ratio_for_column
+   use VegetationPropertiesType         , only : veg_vp
+   use abortutils             , only : endrun
+   use spmdMod                , only : masterproc 
+@@ -642,7 +642,7 @@ contains
+           this%sminn_col(c) = 0._r8
+           do j = 1, nlevdecomp
+              do k = 1, ndecomp_pools
+-                this%decomp_npools_vr_col(c,j,k) = decomp_cpools_vr_col(c,j,k) / decomp_cascade_con%initial_cn_ratio(k)
++                this%decomp_npools_vr_col(c,j,k) = decomp_cpools_vr_col(c,j,k) / initial_cn_ratio_for_column(c,k)
+              end do
+              this%sminn_vr_col(c,j) = 0._r8
+              this%ntrunc_vr_col(c,j) = 0._r8
+@@ -657,8 +657,8 @@ contains
+              end do
+           end if
+           do k = 1, ndecomp_pools
+-             this%decomp_npools_col(c,k)    = decomp_cpools_col(c,k)    / decomp_cascade_con%initial_cn_ratio(k)
+-             this%decomp_npools_1m_col(c,k) = decomp_cpools_1m_col(c,k) / decomp_cascade_con%initial_cn_ratio(k)
++             this%decomp_npools_col(c,k)    = decomp_cpools_col(c,k)    / initial_cn_ratio_for_column(c,k)
++             this%decomp_npools_1m_col(c,k) = decomp_cpools_1m_col(c,k) / initial_cn_ratio_for_column(c,k)
+           end do
+ 
+           do j = 1, nlevdecomp_full
+diff --git a/components/elm/src/biogeochem/DecompCascadeBGCMod.F90 b/components/elm/src/biogeochem/DecompCascadeBGCMod.F90
+index 5a46a7c426..a3119a612c 100644
+--- a/components/elm/src/biogeochem/DecompCascadeBGCMod.F90
++++ b/components/elm/src/biogeochem/DecompCascadeBGCMod.F90
+@@ -11,7 +11,7 @@ module DecompCascadeBGCMod
+   use shr_log_mod            , only : errMsg => shr_log_errMsg
+   use elm_varpar             , only : nlevsoi, nlevgrnd, nlevdecomp, ndecomp_cascade_transitions, ndecomp_pools
+   use elm_varpar             , only : i_met_lit, i_cel_lit, i_lig_lit, i_cwd
+-  use elm_varctl             , only : iulog, spinup_state, anoxia, use_lch4, use_vertsoilc
++  use elm_varctl             , only : iulog, spinup_state, anoxia, use_lch4, use_vertsoilc, use_humhol
+   use elm_varcon             , only : zsoi
+   use decompMod              , only : bounds_type
+   use abortutils             , only : endrun
+@@ -22,6 +22,7 @@ module DecompCascadeBGCMod
+   use CanopyStateType        , only : canopystate_type
+   use ch4Mod                 , only : ch4_type
+   use ColumnType             , only : col_pp
++  use TopounitType           , only : top_pp
+   use ColumnDataType         , only : col_es, col_cf
+ 
+   use timeinfomod
+@@ -625,6 +626,10 @@ contains
+ 
+     end associate
+ 
++    decomp_cascade_con%initial_cn_ratio_peat(:) = decomp_cascade_con%initial_cn_ratio(:)
++    decomp_cascade_con%initial_cp_ratio_peat(:) = decomp_cascade_con%initial_cp_ratio(:)
++    decomp_cascade_con%spinup_factor_peat(:) = decomp_cascade_con%spinup_factor(:)
++
+   end subroutine init_decompcascade_bgc
+ 
+   !-----------------------------------------------------------------------
+@@ -674,9 +679,9 @@ contains
+     real(r8):: tau_cwd                      ! corrected fragmentation rate constant CWD
+     real(r8):: cwdc_loss                    ! fragmentation rate for CWD carbon (gC/m2/s)
+     real(r8):: cwdn_loss                    ! fragmentation rate for CWD nitrogen (gN/m2/s)
+-    real(r8):: Q10                          ! temperature dependence
++    real(r8):: Q10_col(bounds%begc:bounds%endc) ! temperature dependence by column
+     real(r8):: froz_q10                     ! separate q10 for frozen soil respiration rates.  default to same as above zero rates
+-    real(r8):: decomp_depth_efolding        ! (meters) e-folding depth for reduction in decomposition [
++    real(r8):: decomp_depth_efolding_col(bounds%begc:bounds%endc) ! e-folding depth (m)
+     integer :: i_litr1
+     integer :: i_litr2
+     integer :: i_litr3
+@@ -689,7 +694,7 @@ contains
+     real(r8):: t1                           ! temperature argument
+     real(r8):: normalization_factor         ! factor by which to offset the decomposition rates frm century to a q10 formulation
+     real(r8):: depth_scalar(bounds%begc:bounds%endc,1:nlevdecomp)
+-    real(r8):: mino2lim                     !minimum anaerobic decomposition rate
++    real(r8):: mino2lim_col(bounds%begc:bounds%endc) ! minimum anaerobic decomposition rate
+     !-----------------------------------------------------------------------
+ 
+     !----- CENTURY T response function
+@@ -714,7 +719,17 @@ contains
+          decomp_k_pools => decomp_cascade_con%decomp_k_pools  & !(0: ndecomp_pools)    ! pflotran (0 for atm. co2)
+          )
+ 
+-      mino2lim = ParamsShareInst%mino2lim
++      do fc = 1, num_soilc
++         c = filter_soilc(fc)
++         Q10_col(c) = ParamsShareInst%Q10_hr
++         mino2lim_col(c) = ParamsShareInst%mino2lim
++         decomp_depth_efolding_col(c) = ParamsShareInst%decomp_depth_efolding
++         if (use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
++            Q10_col(c) = ParamsShareInst%Q10_hr_peat
++            mino2lim_col(c) = ParamsShareInst%mino2lim_peat
++            decomp_depth_efolding_col(c) = ParamsShareInst%decomp_depth_efolding_peat
++         end if
++      end do
+       if ( use_century_tfunc .and. normalize_q10_to_century_tfunc ) then
+ #ifndef _OPENACC
+           call endrun(msg='ERROR: cannot have both use_century_tfunc and normalize_q10_to_century_tfunc set as true'//&
+@@ -750,13 +765,11 @@ contains
+       !tau_cwd = DecompBGCParamsInst%tau_cwd_bgc
+ 
+       ! set "Q10" parameter
+-      Q10 = ParamsShareInst%Q10_hr
+ 
+       ! set "froz_q10" parameter
+       froz_q10  = ParamsShareInst%froz_q10
+ 
+       ! Set "decomp_depth_efolding" parameter
+-      decomp_depth_efolding = ParamsShareInst%decomp_depth_efolding
+ 
+       ! translate to per-second time constant
+       k_l1 = 1._r8    / (secspday * days_per_year * tau_l1)
+@@ -835,10 +848,10 @@ contains
+                   if (j==1) t_scalar(c,:) = 0._r8
+                   if (t_soisno(c,j) >= SHR_CONST_TKFRZ) then
+                      t_scalar(c,1)=t_scalar(c,1) + &
+-                          (Q10**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))*fr(c,j)
++                          (Q10_col(c)**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))*fr(c,j)
+                   else
+                      t_scalar(c,1)=t_scalar(c,1) + &
+-                          (Q10**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))*fr(c,j)
++                          (Q10_col(c)**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))*fr(c,j)
+                   endif
+                end do
+             end do
+@@ -902,11 +915,11 @@ contains
+                      if (j==1) o_scalar(c,:) = 0._r8
+ 
+                      if (.not. anoxia_wtsat) then
+-                        o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * max(o2stress_unsat(c,j), mino2lim)
++                        o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * max(o2stress_unsat(c,j), mino2lim_col(c))
+                      else
+                         o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * &
+-                             (max(o2stress_unsat(c,j), mino2lim)*(1._r8 - finundated(c)) + &
+-                             max(o2stress_sat(c,j), mino2lim)*finundated(c) )
++                             (max(o2stress_unsat(c,j), mino2lim_col(c))*(1._r8 - finundated(c)) + &
++                             max(o2stress_sat(c,j), mino2lim_col(c))*finundated(c) )
+                      end if
+                   end do
+                end do
+@@ -935,9 +948,9 @@ contains
+                do fc = 1,num_soilc
+                   c = filter_soilc(fc)
+                   if (t_soisno(c,j) >= SHR_CONST_TKFRZ) then
+-                     t_scalar(c,j)= (Q10**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))
++                     t_scalar(c,j)= (Q10_col(c)**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))
+                   else
+-                     t_scalar(c,j)= (Q10**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))
++                     t_scalar(c,j)= (Q10_col(c)**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))
+                   endif
+                end do
+             end do
+@@ -991,10 +1004,10 @@ contains
+                      c = filter_soilc(fc)
+ 
+                      if (.not. anoxia_wtsat) then
+-                        o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim)
++                        o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim_col(c))
+                      else
+-                        o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim) * (1._r8 - finundated(c)) + &
+-                             max(o2stress_sat(c,j), mino2lim) * finundated(c)
++                        o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim_col(c)) * (1._r8 - finundated(c)) + &
++                             max(o2stress_sat(c,j), mino2lim_col(c)) * finundated(c)
+                      end if
+                   end do
+                end do
+@@ -1009,10 +1022,11 @@ contains
+ 
+       if ( normalize_q10_to_century_tfunc ) then
+          ! scale all decomposition rates by a constant to compensate for offset between original CENTURY temp func and Q10
+-         normalization_factor = (catanf(normalization_tref)/catanf_30) / (q10**((normalization_tref-25._r8)/10._r8))
+          do j = 1, nlevdecomp
+             do fc = 1,num_soilc
+                c = filter_soilc(fc)
++               normalization_factor = (catanf(normalization_tref)/catanf_30) / &
++                    (Q10_col(c)**((normalization_tref-25._r8)/10._r8))
+                t_scalar(c,j) = t_scalar(c,j) * normalization_factor
+             end do
+          end do
+@@ -1024,7 +1038,7 @@ contains
+          do j = 1, nlevdecomp
+             do fc = 1,num_soilc
+                c = filter_soilc(fc)
+-               depth_scalar(c,j) = exp(-zsoi(j)/decomp_depth_efolding)
++               depth_scalar(c,j) = exp(-zsoi(j)/decomp_depth_efolding_col(c))
+             end do
+          end do
+       end if
+diff --git a/components/elm/src/biogeochem/DecompCascadeCNMod.F90 b/components/elm/src/biogeochem/DecompCascadeCNMod.F90
+index adbcb34f28..e306876f61 100644
+--- a/components/elm/src/biogeochem/DecompCascadeCNMod.F90
++++ b/components/elm/src/biogeochem/DecompCascadeCNMod.F90
+@@ -12,13 +12,13 @@ module DecompCascadeCNMod
+   use elm_varpar             , only : nlevsoi, nlevgrnd, nlevdecomp, ndecomp_cascade_transitions, ndecomp_pools
+   use elm_varpar             , only : i_met_lit, i_cel_lit, i_lig_lit, i_cwd
+   use elm_varpar             , only : i_bacteria, i_fungi, i_dom
+-  use elm_varctl             , only : iulog, spinup_state, anoxia, use_lch4, use_vertsoilc
++  use elm_varctl             , only : iulog, spinup_state, anoxia, use_lch4, use_vertsoilc, use_humhol
+   use elm_varctl             , only : use_microbe_methane
+   use elm_varcon             , only : zsoi, spval
+   use decompMod              , only : bounds_type
+   use abortutils             , only : endrun
+   use SharedParamsMod        , only : ParamsShareInst, anoxia_wtsat, nlev_soildecomp_standard
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, spinup_factor_for_column
+   use MicrobeDecompMod       , only : initMicrobeDecompCascade
+   use MicrobeDecompMod       , only : getMicrobeDecompTimestepRates
+   use MicrobeDecompMod       , only : MicrobeDecompParamsInst
+@@ -27,6 +27,7 @@ module DecompCascadeCNMod
+   use CanopyStateType        , only : canopystate_type
+   use ch4Mod                 , only : ch4_type
+   use ColumnType             , only : col_pp
++  use TopounitType           , only : top_pp
+   use ColumnDataType         , only : col_es, col_cf
+ 
+   use timeinfoMod
+@@ -46,11 +47,13 @@ module DecompCascadeCNMod
+      real(r8), pointer :: cn_s2_cn         => null() !C:N for SOM 2
+      real(r8), pointer :: cn_s3_cn         => null() !C:N for SOM 3
+      real(r8), pointer :: cn_s4_cn         => null() !C:N for SOM 4
++     real(r8), pointer :: cn_s_peat(:)     => null() ! peat-topounit C:N for SOM 1-4
+ 
+      real(r8), pointer :: np_s1_new_cn     => null()     !C:P for SOM 1
+      real(r8), pointer :: np_s2_new_cn     => null()     !C:P for SOM 2
+      real(r8), pointer :: np_s3_new_cn     => null()     !C:P for SOM 3
+      real(r8), pointer :: np_s4_new_cn     => null()     !C:P for SOM 4
++     real(r8), pointer :: np_s_new_peat(:) => null() ! peat-topounit N:P for SOM 1-4
+ 
+      real(r8), pointer :: cp_s1_new_cn     => null()     !C:P for SOM 1
+      real(r8), pointer :: cp_s2_new_cn     => null()     !C:P for SOM 2
+@@ -70,6 +73,7 @@ module DecompCascadeCNMod
+      real(r8), pointer  :: k_l1_cn         => null() !decomposition rate for litter 1
+      real(r8), pointer  :: k_l2_cn         => null() !decomposition rate for litter 2
+      real(r8), pointer  :: k_l3_cn         => null() !decomposition rate for litter 3
++     real(r8), pointer  :: k_l3_cn_peat    => null() !peat-topounit litter 3 rate
+      real(r8), pointer  :: k_s1_cn         => null() !decomposition rate for SOM 1
+      real(r8), pointer  :: k_s2_cn         => null() !decomposition rate for SOM 2
+      real(r8), pointer  :: k_s3_cn         => null() !decomposition rate for SOM 3
+@@ -82,6 +86,7 @@ module DecompCascadeCNMod
+      integer , pointer :: nlitpools        => null() !3
+      integer , pointer :: ncwdpools        => null() !1
+      real(r8), pointer :: spinup_vector(:) => null() ! multipliers for soil decomp during accelerated spinup
++     real(r8), pointer :: spinup_vector_peat(:) => null() ! peat-topounit AD multipliers
+ 
+ 
+   end type DecompCNParamsType
+@@ -114,6 +119,7 @@ contains
+      character(len=100) :: errCode = '-Error reading in parameters file:'
+      logical            :: readv ! has variable been read in or not
+      real(r8)           :: tempr ! temporary to read in constant
++     integer            :: i
+      character(len=100) :: tString ! temp. var for reading
+ 
+      !EOP
+@@ -122,10 +128,12 @@ contains
+      allocate(DecompCNParamsInst%cn_s2_cn    ); DecompCNParamsInst%cn_s2_cn    =spval
+      allocate(DecompCNParamsInst%cn_s3_cn    ); DecompCNParamsInst%cn_s3_cn    =spval
+      allocate(DecompCNParamsInst%cn_s4_cn    ); DecompCNParamsInst%cn_s4_cn    =spval
++     allocate(DecompCNParamsInst%cn_s_peat(4))
+      allocate(DecompCNParamsInst%np_s1_new_cn); DecompCNParamsInst%np_s1_new_cn=spval
+      allocate(DecompCNParamsInst%np_s2_new_cn); DecompCNParamsInst%np_s2_new_cn=spval
+      allocate(DecompCNParamsInst%np_s3_new_cn); DecompCNParamsInst%np_s3_new_cn=spval
+      allocate(DecompCNParamsInst%np_s4_new_cn); DecompCNParamsInst%np_s4_new_cn=spval
++     allocate(DecompCNParamsInst%np_s_new_peat(4))
+      allocate(DecompCNParamsInst%cp_s1_new_cn); DecompCNParamsInst%cp_s1_new_cn=spval
+      allocate(DecompCNParamsInst%cp_s2_new_cn); DecompCNParamsInst%cp_s2_new_cn=spval
+      allocate(DecompCNParamsInst%cp_s3_new_cn); DecompCNParamsInst%cp_s3_new_cn=spval
+@@ -141,6 +149,7 @@ contains
+      allocate(DecompCNParamsInst%k_l1_cn     ); DecompCNParamsInst%k_l1_cn     =spval
+      allocate(DecompCNParamsInst%k_l2_cn     ); DecompCNParamsInst%k_l2_cn     =spval
+      allocate(DecompCNParamsInst%k_l3_cn     ); DecompCNParamsInst%k_l3_cn     =spval
++     allocate(DecompCNParamsInst%k_l3_cn_peat); DecompCNParamsInst%k_l3_cn_peat=spval
+      allocate(DecompCNParamsInst%k_s1_cn     ); DecompCNParamsInst%k_s1_cn     =spval
+      allocate(DecompCNParamsInst%k_s2_cn     ); DecompCNParamsInst%k_s2_cn     =spval
+      allocate(DecompCNParamsInst%k_s3_cn     ); DecompCNParamsInst%k_s3_cn     =spval
+@@ -154,6 +163,7 @@ contains
+      ! These are not read off of netcdf file
+      allocate(DecompCNParamsInst%spinup_vector(DecompCNParamsInst%nsompools+DecompCNParamsInst%nlitpools+ &
+          DecompCNParamsInst%ncwdpools))
++     allocate(DecompCNParamsInst%spinup_vector_peat(size(DecompCNParamsInst%spinup_vector)))
+      !DecompCNParamsInst%spinup_vector(:) = (/ 1.0_r8, 1.0_r8, 5.0_r8, 70.0_r8 /)
+      !These will be set below
+ 
+@@ -249,6 +259,26 @@ contains
+      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+      DecompCNParamsInst%k_l3_cn=tempr
+ 
++     DecompCNParamsInst%cn_s_peat = (/DecompCNParamsInst%cn_s1_cn, DecompCNParamsInst%cn_s2_cn, &
++          DecompCNParamsInst%cn_s3_cn, DecompCNParamsInst%cn_s4_cn/)
++     DecompCNParamsInst%np_s_new_peat = (/DecompCNParamsInst%np_s1_new_cn, &
++          DecompCNParamsInst%np_s2_new_cn, DecompCNParamsInst%np_s3_new_cn, &
++          DecompCNParamsInst%np_s4_new_cn/)
++     DecompCNParamsInst%k_l3_cn_peat = DecompCNParamsInst%k_l3_cn
++     if (use_humhol) then
++        do i = 1, 4
++           write(tString,'("cn_s",i1,"_peat")') i
++           call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++           if (readv) DecompCNParamsInst%cn_s_peat(i) = tempr
++           write(tString,'("np_s",i1,"_new_peat")') i
++           call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++           if (readv) DecompCNParamsInst%np_s_new_peat(i) = tempr
++        end do
++        tString='k_l3_peat'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++        if (readv) DecompCNParamsInst%k_l3_cn_peat = tempr
++     end if
++
+      tString='k_s1'
+      call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+@@ -292,6 +322,9 @@ contains
+      DecompCNParamsInst%spinup_vector(6) = max(1.0_r8, 1.0_r8 / (DecompCNParamsInst%k_s3_cn * 365.0_r8))
+      DecompCNParamsInst%spinup_vector(7) = max(1.0_r8, 1.0_r8 / (DecompCNParamsInst%k_s4_cn * 365.0_r8))
+      DecompCNParamsInst%spinup_vector(8) = max(1.0_r8, 0.5_r8 * 1.0_r8 / (DecompCNParamsInst%k_frag_cn * 365.0_r8))
++     DecompCNParamsInst%spinup_vector_peat(:) = DecompCNParamsInst%spinup_vector(:)
++     DecompCNParamsInst%spinup_vector_peat(3) = &
++          max(1.0_r8, 1.0_r8 / (DecompCNParamsInst%k_l3_cn_peat * 365.0_r8))
+ 
+    end subroutine readDecompCNParams
+ 
+@@ -398,7 +431,10 @@ contains
+       if (use_microbe_methane) then
+          call initMicrobeDecompCascade(bounds, cnstate_vars, cn_s1, cn_s2, cn_s3, cn_s4, &
+               cn_s1*np_s1_new, cn_s2*np_s2_new, cn_s3*np_s3_new, cn_s4*np_s4_new, &
+-              cwd_fcel, cwd_flig, DecompCNParamsInst%spinup_vector)
++              cwd_fcel, cwd_flig, DecompCNParamsInst%spinup_vector, &
++              DecompCNParamsInst%cn_s_peat, &
++              DecompCNParamsInst%cn_s_peat * DecompCNParamsInst%np_s_new_peat, &
++              DecompCNParamsInst%spinup_vector_peat)
+          return
+       end if
+ 
+@@ -632,8 +668,25 @@ contains
+ 
+     end associate
+ 
++    call init_peat_cascade_properties()
++
+    end subroutine init_decompcascade_cn
+ 
++   subroutine init_peat_cascade_properties()
++     integer :: i, pool
++
++     decomp_cascade_con%initial_cn_ratio_peat(:) = decomp_cascade_con%initial_cn_ratio(:)
++     decomp_cascade_con%initial_cp_ratio_peat(:) = decomp_cascade_con%initial_cp_ratio(:)
++     decomp_cascade_con%spinup_factor_peat(:) = decomp_cascade_con%spinup_factor(:)
++     do i = 1, 4
++        pool = i + 4
++        decomp_cascade_con%initial_cn_ratio_peat(pool) = DecompCNParamsInst%cn_s_peat(i)
++        decomp_cascade_con%initial_cp_ratio_peat(pool) = &
++             DecompCNParamsInst%cn_s_peat(i) * DecompCNParamsInst%np_s_new_peat(i)
++     end do
++     decomp_cascade_con%spinup_factor_peat(i_lig_lit) = DecompCNParamsInst%spinup_vector_peat(3)
++   end subroutine init_peat_cascade_properties
++
+    !-----------------------------------------------------------------------
+    subroutine decomp_rate_constants_cn(bounds, &
+         num_soilc, filter_soilc, &
+@@ -672,6 +725,7 @@ contains
+      real(r8):: k_l1                         ! decomposition rate constant litter 1
+      real(r8):: k_l2                         ! decomposition rate constant litter 2
+      real(r8):: k_l3                         ! decomposition rate constant litter 3
++     real(r8):: k_l3_col(bounds%begc:bounds%endc) ! column-specific litter 3 rate
+      real(r8):: k_s1                         ! decomposition rate constant SOM 1
+      real(r8):: k_s2                         ! decomposition rate constant SOM 2
+      real(r8):: k_s3                         ! decomposition rate constant SOM 3
+@@ -698,11 +752,11 @@ contains
+      integer :: i_soil3
+      integer :: i_soil4
+      integer :: c, fc, j, k, l
+-     real(r8):: Q10                          ! temperature dependence
++     real(r8):: Q10_col(bounds%begc:bounds%endc) ! temperature dependence by column
+      real(r8):: froz_q10                     ! separate q10 for frozen soil respiration rates.  default to same as above zero rates
+-     real(r8):: decomp_depth_efolding        ! (meters) e-folding depth for reduction in decomposition [
++     real(r8):: decomp_depth_efolding_col(bounds%begc:bounds%endc) ! e-folding depth (m)
+      real(r8):: depth_scalar(bounds%begc:bounds%endc,1:nlevdecomp)
+-     real(r8) :: mino2lim                    ! minimum anaerobic decomposition rate as a
++     real(r8) :: mino2lim_col(bounds%begc:bounds%endc) ! minimum anaerobic decomposition rate
+      real(r8) :: som2_t_scalar                ! microbial-cascade SOM2 temperature response
+      real(r8) :: som3_t_scalar                ! microbial-cascade SOM3 temperature response
+      real(r8) :: som4_t_scalar                ! microbial-cascade SOM4 temperature response
+@@ -730,7 +784,17 @@ contains
+           decomp_k_pools => decomp_cascade_con%decomp_k_pools  & !(0: ndecomp_pools)    ! pflotran (0 for atm. co2)
+           )
+ 
+-       mino2lim = ParamsShareInst%mino2lim
++       do fc = 1, num_soilc
++          c = filter_soilc(fc)
++          Q10_col(c) = ParamsShareInst%Q10_hr
++          mino2lim_col(c) = ParamsShareInst%mino2lim
++          decomp_depth_efolding_col(c) = ParamsShareInst%decomp_depth_efolding
++          if (use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) then
++             Q10_col(c) = ParamsShareInst%Q10_hr_peat
++             mino2lim_col(c) = ParamsShareInst%mino2lim_peat
++             decomp_depth_efolding_col(c) = ParamsShareInst%decomp_depth_efolding_peat
++          end if
++       end do
+ 
+        ! set time steps
+        dt = dtime_mod
+@@ -758,6 +822,12 @@ contains
+        k_l1 = 1.0_r8-exp(-k_l1*dtd)
+        k_l2 = 1.0_r8-exp(-k_l2*dtd)
+        k_l3 = 1.0_r8-exp(-k_l3*dtd)
++       do fc = 1, num_soilc
++          c = filter_soilc(fc)
++          k_l3_col(c) = k_l3
++          if (use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8) &
++               k_l3_col(c) = 1._r8-exp(-DecompCNParamsInst%k_l3_cn_peat*dtd)
++       end do
+ 
+        k_s1 = 1.0_r8-exp(-k_s1*dtd)
+        k_s2 = 1.0_r8-exp(-k_s2*dtd)
+@@ -776,13 +846,8 @@ contains
+           end do
+        end if
+        minpsi=DecompCNParamsInst%minpsi_cn
+-       Q10 = ParamsShareInst%Q10_hr
+        ! set "froz_q10" parameter
+        froz_q10  = ParamsShareInst%froz_q10
+-       if (use_vertsoilc) then
+-          ! Set "decomp_depth_efolding" parameter
+-          decomp_depth_efolding = ParamsShareInst%decomp_depth_efolding
+-       end if
+ 
+        i_litr1 = 1
+        i_litr2 = 2
+@@ -822,6 +887,13 @@ contains
+           k_l1 = k_l1 * DecompCNParamsInst%spinup_vector(1)
+           k_l2 = k_l2 * DecompCNParamsInst%spinup_vector(2)
+           k_l3 = k_l3 * DecompCNParamsInst%spinup_vector(3)
++          do fc = 1, num_soilc
++             c = filter_soilc(fc)
++             k_l3_col(c) = k_l3_col(c) * &
++                  merge(DecompCNParamsInst%spinup_vector_peat(3), &
++                  DecompCNParamsInst%spinup_vector(3), &
++                  use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8)
++          end do
+           k_s1 = k_s1 * DecompCNParamsInst%spinup_vector(4)
+           k_s2 = k_s2 * DecompCNParamsInst%spinup_vector(5)
+           k_s3 = k_s3 * DecompCNParamsInst%spinup_vector(6)
+@@ -874,10 +946,10 @@ contains
+                 !! t_scalar(c,1)=t_scalar(c,1) + (1.5**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))*fr(c,j)
+                 if (t_soisno(c,j) >= SHR_CONST_TKFRZ) then
+                    t_scalar(c,1)=t_scalar(c,1) + &
+-                        (Q10**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))*fr(c,j)
++                        (Q10_col(c)**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))*fr(c,j)
+                 else
+                    t_scalar(c,1)=t_scalar(c,1) + &
+-                        (Q10**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))*fr(c,j)
++                        (Q10_col(c)**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))*fr(c,j)
+                 endif
+              end do
+           end do
+@@ -926,11 +998,11 @@ contains
+                       if (j==1) o_scalar(c,:) = 0._r8
+ 
+                       if (.not. anoxia_wtsat) then
+-                         o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * max(o2stress_unsat(c,j), mino2lim)
++                         o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * max(o2stress_unsat(c,j), mino2lim_col(c))
+                       else
+                          o_scalar(c,1) = o_scalar(c,1) + fr(c,j) * &
+-                              (max(o2stress_unsat(c,j), mino2lim)*(1._r8 - finundated(c)) + &
+-                              max(o2stress_sat(c,j), mino2lim)*finundated(c) )
++                              (max(o2stress_unsat(c,j), mino2lim_col(c))*(1._r8 - finundated(c)) + &
++                              max(o2stress_sat(c,j), mino2lim_col(c))*finundated(c) )
+                       end if
+                    end do
+                 end do
+@@ -960,9 +1032,9 @@ contains
+                 !! use separate (possibly equal) t funcs above and below freezing point
+                 !! t_scalar(c,j)= (1.5**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))
+                 if (t_soisno(c,j) >= SHR_CONST_TKFRZ) then
+-                   t_scalar(c,j)= (Q10**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))
++                   t_scalar(c,j)= (Q10_col(c)**((t_soisno(c,j)-(SHR_CONST_TKFRZ+25._r8))/10._r8))
+                 else
+-                   t_scalar(c,j)= (Q10**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))
++                   t_scalar(c,j)= (Q10_col(c)**(-25._r8/10._r8))*(froz_q10**((t_soisno(c,j)-SHR_CONST_TKFRZ)/10._r8))
+                 endif
+              end do
+           end do
+@@ -1007,10 +1079,10 @@ contains
+                    c = filter_soilc(fc)
+ 
+                    if (.not. anoxia_wtsat) then
+-                      o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim)
++                      o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim_col(c))
+                    else
+-                      o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim) * (1._r8 - finundated(c)) + &
+-                           max(o2stress_sat(c,j), mino2lim) * finundated(c)
++                      o_scalar(c,j) = max(o2stress_unsat(c,j), mino2lim_col(c)) * (1._r8 - finundated(c)) + &
++                           max(o2stress_sat(c,j), mino2lim_col(c)) * finundated(c)
+                    end if
+                 end do
+              end do
+@@ -1027,7 +1099,7 @@ contains
+           do j = 1, nlevdecomp
+              do fc = 1,num_soilc
+                 c = filter_soilc(fc)
+-                depth_scalar(c,j) = exp(-zsoi(j)/decomp_depth_efolding)
++                depth_scalar(c,j) = exp(-zsoi(j)/decomp_depth_efolding_col(c))
+              end do
+           end do
+        end if
+@@ -1054,7 +1126,7 @@ contains
+                 c = filter_soilc(fc)
+                 decomp_k(c,j,i_litr1) = k_l1 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_litr2) = k_l2 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+-                decomp_k(c,j,i_litr3) = k_l3 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
++                decomp_k(c,j,i_litr3) = k_l3_col(c) * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil1) = k_s1 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil2) = k_s2 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil3) = k_s3 * t_scalar(c,j) * w_scalar(c,j) * depth_scalar(c,j) * o_scalar(c,j) / dt
+@@ -1098,7 +1170,7 @@ contains
+                 c = filter_soilc(fc)
+                 decomp_k(c,j,i_litr1) = k_l1 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_litr2) = k_l2 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+-                decomp_k(c,j,i_litr3) = k_l3 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
++                decomp_k(c,j,i_litr3) = k_l3_col(c) * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil1) = k_s1 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil2) = k_s2 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+                 decomp_k(c,j,i_soil3) = k_s3 * t_scalar(c,j) * w_scalar(c,j) * o_scalar(c,j) / dt
+@@ -1145,7 +1217,7 @@ contains
+                / cnstate_vars%scalaravg_col(c,j)
+              if ( decomp_cascade_con%spinup_factor(i_litr2) > 1._r8) decomp_k(c,j,i_litr2) = decomp_k(c,j,i_litr2)  &
+                / cnstate_vars%scalaravg_col(c,j)
+-             if ( decomp_cascade_con%spinup_factor(i_litr3) > 1._r8) decomp_k(c,j,i_litr3) = decomp_k(c,j,i_litr3)  &
++             if ( spinup_factor_for_column(c,i_litr3) > 1._r8) decomp_k(c,j,i_litr3) = decomp_k(c,j,i_litr3)  &
+                   / cnstate_vars%scalaravg_col(c,j)
+              if ( decomp_cascade_con%spinup_factor(i_cwd)   > 1._r8) decomp_k(c,j,i_cwd)   = decomp_k(c,j,i_cwd)    &
+                    / cnstate_vars%scalaravg_col(c,j)
+diff --git a/components/elm/src/biogeochem/MicrobeDecompMod.F90 b/components/elm/src/biogeochem/MicrobeDecompMod.F90
+index bb1739f960..4793bd5f2b 100644
+--- a/components/elm/src/biogeochem/MicrobeDecompMod.F90
++++ b/components/elm/src/biogeochem/MicrobeDecompMod.F90
+@@ -14,7 +14,7 @@ module MicrobeDecompMod
+   use decompMod              , only : bounds_type
+   use elm_varpar             , only : nlevdecomp, i_met_lit, i_cel_lit, i_lig_lit, i_cwd
+   use elm_varpar             , only : i_bacteria, i_fungi, i_dom
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, initial_cn_ratio_for_column
+   use CNStateType            , only : cnstate_type
+   use ColumnType             , only : col_pp
+   use VegetationType         , only : veg_pp
+@@ -313,13 +313,15 @@ contains
+ 
+   !-----------------------------------------------------------------------
+   subroutine initMicrobeDecompCascade(bounds, cnstate_vars, cn_s1, cn_s2, cn_s3, cn_s4, &
+-       cp_s1, cp_s2, cp_s3, cp_s4, cwd_fcel, cwd_flig, spinup_vector)
++       cp_s1, cp_s2, cp_s3, cp_s4, cwd_fcel, cwd_flig, spinup_vector, &
++       peat_cn, peat_cp, peat_spinup_vector)
+     type(bounds_type), intent(in) :: bounds
+     type(cnstate_type), intent(inout) :: cnstate_vars
+     real(r8), intent(in) :: cn_s1, cn_s2, cn_s3, cn_s4
+     real(r8), intent(in) :: cp_s1, cp_s2, cp_s3, cp_s4
+     real(r8), intent(in) :: cwd_fcel, cwd_flig
+     real(r8), intent(in) :: spinup_vector(:)
++    real(r8), intent(in) :: peat_cn(4), peat_cp(4), peat_spinup_vector(:)
+ 
+     integer :: c
+     integer :: pft
+@@ -328,11 +330,17 @@ contains
+ 
+     call initialize_pool_metadata(cn_s1, cn_s2, cn_s3, cn_s4, cp_s1, cp_s2, cp_s3, cp_s4, &
+          spinup_vector)
++    decomp_cascade_con%initial_cn_ratio_peat(:) = decomp_cascade_con%initial_cn_ratio(:)
++    decomp_cascade_con%initial_cp_ratio_peat(:) = decomp_cascade_con%initial_cp_ratio(:)
++    decomp_cascade_con%spinup_factor_peat(:) = decomp_cascade_con%spinup_factor(:)
++    decomp_cascade_con%initial_cn_ratio_peat(5:8) = peat_cn(:)
++    decomp_cascade_con%initial_cp_ratio_peat(5:8) = peat_cp(:)
++    decomp_cascade_con%spinup_factor_peat(i_lig_lit) = peat_spinup_vector(3)
+     call initialize_transition_metadata()
+ 
+     do c = bounds%begc, bounds%endc
+        pft = dominant_column_pft(c)
+-       call build_column_pathways(pft, cwd_fcel, cwd_flig, fractions, respirations)
++       call build_column_pathways(c, pft, cwd_fcel, cwd_flig, fractions, respirations)
+        call validateMicrobeDecompDonorClosure(fractions)
+        cnstate_vars%pathfrac_decomp_cascade_col(c,1:nlevdecomp,:) = &
+             spread(fractions, dim=1, ncopies=nlevdecomp)
+@@ -504,8 +512,8 @@ contains
+   end subroutine initialize_transition_metadata
+ 
+   !-----------------------------------------------------------------------
+-  subroutine build_column_pathways(pft, cwd_fcel, cwd_flig, fractions, respirations)
+-    integer, intent(in) :: pft
++  subroutine build_column_pathways(c, pft, cwd_fcel, cwd_flig, fractions, respirations)
++    integer, intent(in) :: c, pft
+     real(r8), intent(in) :: cwd_fcel, cwd_flig
+     real(r8), intent(out) :: fractions(microbe_decomp_ntransitions)
+     real(r8), intent(out) :: respirations(microbe_decomp_ntransitions)
+@@ -534,20 +542,20 @@ contains
+          fractions(9), fractions(10), fractions(11), fractions(43), &
+          respirations(9), respirations(10))
+ 
+-    call substrate_paths(decomp_cascade_con%initial_cn_ratio(5), MicrobeDecompParamsInst%s1dom_f, &
++    call substrate_paths(initial_cn_ratio_for_column(c,5), MicrobeDecompParamsInst%s1dom_f, &
+          MicrobeDecompParamsInst%s1s2_f, pft, MicrobeDecompParamsInst%m_rf_s1m(pft), &
+          fractions(12), fractions(13), fractions(14), fractions(44), &
+          respirations(12), respirations(13))
+-    call substrate_paths(decomp_cascade_con%initial_cn_ratio(6), MicrobeDecompParamsInst%s2dom_f, &
++    call substrate_paths(initial_cn_ratio_for_column(c,6), MicrobeDecompParamsInst%s2dom_f, &
+          MicrobeDecompParamsInst%s2s3_f, pft, MicrobeDecompParamsInst%m_rf_s2m(pft), &
+          fractions(15), fractions(16), fractions(17), fractions(45), &
+          respirations(15), respirations(16))
+-    call substrate_paths(decomp_cascade_con%initial_cn_ratio(7), MicrobeDecompParamsInst%s3dom_f, &
++    call substrate_paths(initial_cn_ratio_for_column(c,7), MicrobeDecompParamsInst%s3dom_f, &
+          MicrobeDecompParamsInst%s3s4_f, pft, MicrobeDecompParamsInst%m_rf_s3m(pft), &
+          fractions(18), fractions(19), fractions(20), fractions(46), &
+          respirations(18), respirations(19))
+ 
+-    call microbial_allocation(decomp_cascade_con%initial_cn_ratio(8), pft, &
++    call microbial_allocation(initial_cn_ratio_for_column(c,8), pft, &
+          bacteria_fraction, fungi_fraction)
+     residual = 1._r8 - MicrobeDecompParamsInst%s4dom_f
+     fractions(21) = bacteria_fraction * residual
+diff --git a/components/elm/src/biogeochem/PrecisionControlMod.F90 b/components/elm/src/biogeochem/PrecisionControlMod.F90
+index 10f601487c..29e6bcd9af 100644
+--- a/components/elm/src/biogeochem/PrecisionControlMod.F90
++++ b/components/elm/src/biogeochem/PrecisionControlMod.F90
+@@ -41,7 +41,7 @@ contains
+     use elm_varpar , only : nlevdecomp_full, crop_prog
+     use pftvarcon  , only : iscft
+     use tracer_varcon          , only : is_active_betr_bgc
+-    use CNDecompCascadeConType , only : decomp_cascade_con
++    use CNDecompCascadeConType , only : decomp_cascade_con, initial_cn_ratio_for_column
+     !
+     ! !ARGUMENTS:
+     integer                  , intent(in)    :: num_soilc       ! number of soil columns in filter
+@@ -664,11 +664,14 @@ contains
+                   cn_eca = 0.0_r8
+                   do l = 1,ndecomp_pools
+                      if ( col_cs%decomp_cpools_vr(c,j,l) > 0.0_r8 ) then
+-                          if(abs(col_cs%decomp_cpools_vr(c,j,l) / col_ns%decomp_npools_vr(c,j,l) - initial_cn_ratio(l) ) > 1.0e-3_r8 &
++                          if(abs(col_cs%decomp_cpools_vr(c,j,l) / col_ns%decomp_npools_vr(c,j,l) - &
++                               initial_cn_ratio_for_column(c,l)) > 1.0e-3_r8 &
+                           .and. (.not. floating_cn_ratio_decomp_pools(l)) ) then
+-                        cn_eca = cn_eca - ( col_cs%decomp_cpools_vr(c,j,l) / initial_cn_ratio(l) - col_ns%decomp_npools_vr(c,j,l) )
++                        cn_eca = cn_eca - ( col_cs%decomp_cpools_vr(c,j,l) / &
++                             initial_cn_ratio_for_column(c,l) - col_ns%decomp_npools_vr(c,j,l) )
+ 
+-                          col_ns%decomp_npools_vr(c,j,l) = col_cs%decomp_cpools_vr(c,j,l) / initial_cn_ratio(l)
++                          col_ns%decomp_npools_vr(c,j,l) = col_cs%decomp_cpools_vr(c,j,l) / &
++                               initial_cn_ratio_for_column(c,l)
+                      end if
+                    end if
+                   end do
+diff --git a/components/elm/src/biogeochem/SatellitePhenologyMod.F90 b/components/elm/src/biogeochem/SatellitePhenologyMod.F90
+index 688b254bd8..ccb9ee4b5b 100644
+--- a/components/elm/src/biogeochem/SatellitePhenologyMod.F90
++++ b/components/elm/src/biogeochem/SatellitePhenologyMod.F90
+@@ -16,7 +16,7 @@ module SatellitePhenologyMod
+   use decompMod       , only : bounds_type
+   use abortutils      , only : endrun
+   use elm_varctl      , only : scmlat,scmlon,single_column
+-  use elm_varctl      , only : iulog, use_lai_streams
++  use elm_varctl      , only : iulog, use_lai_streams, use_humhol
+   use elm_varcon      , only : grlnd
+   use controlMod      , only : NLFilename
+   use decompMod       , only : gsmap_lnd_gdc2glo
+@@ -75,6 +75,7 @@ contains
+     !
+     ! !USES:
+     use elm_varctl       , only : inst_name
++    use elm_varpar       , only : maxpatch_pft
+     use elm_time_manager , only : get_calendar
+     use ncdio_pio        , only : pio_subsystem
+     use shr_pio_mod      , only : shr_pio_getiotype
+@@ -102,7 +103,6 @@ contains
+     character(*), parameter    :: subName = "('laidyn_init')"
+     character(*), parameter    :: F00 = "('(laidyn_init) ',4a)"
+     character(*), parameter    :: laiString = "LAI"  ! base string for field string
+-    integer     , parameter    :: numLaiFields = 16  ! number of fields to build field string
+     character(CX)    :: fldList            ! field string
+     !-----------------------------------------------------------------------
+     !
+@@ -157,7 +157,9 @@ contains
+     !
+     ! create the field list for these lai fields...use in shr_strdata_create
+     !
+-    fldList = shr_string_listCreateField( numLaiFields, laiString )
++    ! The stream must include the active PFTs, including peatland moss (PFT 18)
++    ! in 22-PFT cases.  Keep 16-PFT cases on their original field list.
++    fldList = shr_string_listCreateField( maxpatch_pft - 1, laiString )
+ 
+     call shr_strdata_create(sdat_lai,name="laidyn",    &
+          pio_subsystem=pio_subsystem,                  &
+@@ -304,7 +306,7 @@ contains
+     ! Calculates leaf areas (tlai, elai),  stem areas (tsai, esai) and height (htop).
+     !
+     ! !USES:
+-    use pftvarcon,  only : woody
++    use pftvarcon,  only : woody, nonvascular
+     use elm_varctl, only : use_fates_sp
+     !
+     ! !ARGUMENTS:
+@@ -363,6 +365,13 @@ contains
+          tsai(p) = timwt(1)*msai2t(p,1) + timwt(2)*msai2t(p,2)
+          htop(p) = timwt(1)*mhvt2t(p,1) + timwt(2)*mhvt2t(p,2)
+          hbot(p) = timwt(1)*mhvb2t(p,1) + timwt(2)*mhvb2t(p,2)
++         ! Older surface files lack the added Sphagnum PFT height. A zero
++         ! height gives zero aerodynamic roughness when moss LAI is exposed.
++         if (use_humhol .and. nint(nonvascular(veg_pp%itype(p))) == 1 .and. &
++              htop(p) <= 0._r8) then
++            htop(p) = 0.10_r8
++            hbot(p) = 0._r8
++         end if
+ 
+          ! adjust lai and sai for burying by snow. if exposed lai and sai
+          ! are less than 0.05, set equal to zero to prevent numerical
+diff --git a/components/elm/src/biogeochem/SharedParamsMod.F90 b/components/elm/src/biogeochem/SharedParamsMod.F90
+index 151311eca7..93e4d4bf9e 100644
+--- a/components/elm/src/biogeochem/SharedParamsMod.F90
++++ b/components/elm/src/biogeochem/SharedParamsMod.F90
+@@ -15,12 +15,15 @@ module SharedParamsMod
+ 
+       real(r8), pointer :: Q10_mr                => null() ! temperature dependence for maintenance respiraton
+       real(r8), pointer :: Q10_hr                => null() ! temperature dependence for heterotrophic respiration
++      real(r8), pointer :: Q10_hr_peat           => null() ! peat-topounit override
+       real(r8), pointer :: minpsi                => null() ! minimum soil water potential for heterotrophic resp
+       real(r8), pointer :: cwd_fcel              => null() ! cellulose fraction of coarse woody debris
+       real(r8), pointer :: cwd_flig              => null() ! lignin fraction of coarse woody debris
+       real(r8), pointer :: froz_q10              => null() ! separate q10 for frozen soil respiration rates
+       real(r8), pointer :: decomp_depth_efolding => null() ! e-folding depth for reduction in decomposition (m)
++      real(r8), pointer :: decomp_depth_efolding_peat => null() ! peat-topounit override (m)
+       real(r8), pointer :: mino2lim              => null() ! minimum anaerobic decomposition rate as a fraction of potential aerobic rate
++      real(r8), pointer :: mino2lim_peat         => null() ! peat-topounit override
+       real(r8), pointer :: organic_max           => null() ! organic matter content (kg/m3) where soil is assumed to act like peat
+ 
+   end type ParamsShareType
+@@ -44,6 +47,9 @@ module SharedParamsMod
+   real(r8), public :: moss_water_content_max = 8._r8
+   real(r8), public :: moss_water_drainage_threshold = 8.5_r8
+   real(r8), public :: moss_water_substrate_rewetting_timescale_days = 1._r8
++  ! Experimental leaf-MR response, independent of the photosynthesis/VPD scalar.
++  real(r8), public :: moss_leaf_mr_dry_fraction = 0.4_r8
++  real(r8), public :: moss_leaf_mr_full_water_content = 6._r8
+   real(r8), public :: peat_compaction_surface_density = 20._r8
+   real(r8), public :: peat_compaction_deep_density = 90._r8
+   real(r8), public :: peat_compaction_initial_acrotelm_depth = 0.25_r8
+@@ -54,8 +60,15 @@ module SharedParamsMod
+   real(r8), public :: peat_compaction_growing_season_end_doy = 305._r8
+   real(r8), public :: peat_compaction_timescale_years = 1._r8
+   real(r8), public :: soil_ice_impedance_exponent = 6._r8
++  ! Experimental upper-peat liquid pathway during partial freezing; zero disables it.
++  real(r8), public :: peat_partial_ice_liquid_kmax = 0._r8 ! mm/s
+   real(r8), public :: peat_hydraulic_b_max = 12._r8
+   real(r8), public :: peat_hydraulic_hksat_min = 1.e-4_r8
++  real(r8), public :: peat_hydraulic_hksat_scale = 1._r8
++  real(r8), public :: peat_jules_sucsat_scale = 1._r8
++  real(r8), public :: peat_jules_b_scale = 1._r8
++  ! Zero preserves the surface-data fdrain decay depth (1/fdrain).
++  real(r8), public :: peat_drainage_decay_depth = 0._r8
+   real(r8), public :: peat_hydraulic_carbon_fraction = 0.56_r8
+   real(r8), public :: peat_hydraulic_particle_density = 1260._r8
+   real(r8), public :: peat_hydraulic_bulk_density_min = 35._r8
+@@ -76,6 +89,8 @@ module SharedParamsMod
+   !$acc declare copyin(moss_water_content_max)
+   !$acc declare copyin(moss_water_drainage_threshold)
+   !$acc declare copyin(moss_water_substrate_rewetting_timescale_days)
++  !$acc declare copyin(moss_leaf_mr_dry_fraction)
++  !$acc declare copyin(moss_leaf_mr_full_water_content)
+   !$acc declare copyin(peat_compaction_surface_density)
+   !$acc declare copyin(peat_compaction_deep_density)
+   !$acc declare copyin(peat_compaction_initial_acrotelm_depth)
+@@ -86,8 +101,13 @@ module SharedParamsMod
+   !$acc declare copyin(peat_compaction_growing_season_end_doy)
+   !$acc declare copyin(peat_compaction_timescale_years)
+   !$acc declare copyin(soil_ice_impedance_exponent)
++  !$acc declare copyin(peat_partial_ice_liquid_kmax)
+   !$acc declare copyin(peat_hydraulic_b_max)
+   !$acc declare copyin(peat_hydraulic_hksat_min)
++  !$acc declare copyin(peat_hydraulic_hksat_scale)
++  !$acc declare copyin(peat_jules_sucsat_scale)
++  !$acc declare copyin(peat_jules_b_scale)
++  !$acc declare copyin(peat_drainage_decay_depth)
+   !$acc declare copyin(peat_hydraulic_carbon_fraction)
+   !$acc declare copyin(peat_hydraulic_particle_density)
+   !$acc declare copyin(peat_hydraulic_bulk_density_min)
+@@ -97,6 +117,14 @@ module SharedParamsMod
+ 
+ contains
+ 
++  pure real(r8) function moss_dry_mass_from_lai(lai, sla) result(mass)
++    ! SP has no prognostic vegetation carbon. Infer patch-scale dry mass
++    ! (kg m-2) from prescribed leaf area and SLA (m2 gC-1).
++    real(r8), intent(in) :: lai, sla
++    mass = max(0._r8, lai) / max(sla, 1.e-12_r8) * &
++         1.e-3_r8 / moss_carbon_fraction_dry_mass
++  end function moss_dry_mass_from_lai
++
+   !-----------------------------------------------------------------------
+    subroutine ParamsReadShared(ncid)
+      !
+@@ -120,12 +148,15 @@ contains
+      !
+      allocate(ParamsShareInst%Q10_mr               )
+      allocate(ParamsShareInst%Q10_hr               )
++     allocate(ParamsShareInst%Q10_hr_peat          )
+      allocate(ParamsShareInst%minpsi               )
+      allocate(ParamsShareInst%cwd_fcel             )
+      allocate(ParamsShareInst%cwd_flig             )
+      allocate(ParamsShareInst%froz_q10             )
+      allocate(ParamsShareInst%decomp_depth_efolding)
++     allocate(ParamsShareInst%decomp_depth_efolding_peat)
+      allocate(ParamsShareInst%mino2lim             )
++     allocate(ParamsShareInst%mino2lim_peat        )
+      allocate(ParamsShareInst%organic_max          )
+      tString='q10_mr'
+      call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+@@ -136,6 +167,12 @@ contains
+      call ncd_io(varname=trim(tString),data=tempr, flag='read', ncid=ncid, readvar=readv)
+      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+      ParamsShareInst%Q10_hr=tempr
++     ParamsShareInst%Q10_hr_peat=tempr
++     if (use_humhol) then
++        tString='q10_hr_peat'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++        if (readv) ParamsShareInst%Q10_hr_peat=tempr
++     end if
+ 
+ 
+      tString='minpsi_hr'
+@@ -162,11 +199,23 @@ contains
+      call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+      ParamsShareInst%decomp_depth_efolding=tempr
++     ParamsShareInst%decomp_depth_efolding_peat=tempr
++     if (use_humhol) then
++        tString='decomp_depth_efolding_peat'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++        if (readv) ParamsShareInst%decomp_depth_efolding_peat=tempr
++     end if
+ 
+      tString='mino2lim'
+      call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+      if ( .not. readv ) call endrun(msg=trim(errCode)//trim(tString)//errMsg(__FILE__, __LINE__))
+      ParamsShareInst%mino2lim=tempr
++     ParamsShareInst%mino2lim_peat=tempr
++     if (use_humhol) then
++        tString='mino2lim_peat'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++        if (readv) ParamsShareInst%mino2lim_peat=tempr
++     end if
+      !ParamsShareInst%mino2lim=0.2_r8
+ 
+      tString='organic_max'
+@@ -238,6 +287,14 @@ contains
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) moss_water_substrate_rewetting_timescale_days=tempr
+ 
++        tString='moss_leaf_mr_dry_fraction'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) moss_leaf_mr_dry_fraction=tempr
++
++        tString='moss_leaf_mr_full_water_content'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) moss_leaf_mr_full_water_content=tempr
++
+         tString='peat_compaction_surface_density'
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) peat_compaction_surface_density=tempr
+@@ -287,6 +344,10 @@ contains
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) soil_ice_impedance_exponent=tempr
+ 
++        tString='peat_partial_ice_liquid_kmax'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv, posNOTonfile=.true.)
++        if (readv) peat_partial_ice_liquid_kmax=tempr
++
+         tString='peat_hydraulic_b_max'
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) peat_hydraulic_b_max=tempr
+@@ -295,6 +356,22 @@ contains
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) peat_hydraulic_hksat_min=tempr
+ 
++        tString='peat_hydraulic_hksat_scale'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) peat_hydraulic_hksat_scale=tempr
++
++        tString='peat_jules_sucsat_scale'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) peat_jules_sucsat_scale=tempr
++
++        tString='peat_jules_b_scale'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) peat_jules_b_scale=tempr
++
++        tString='peat_drainage_decay_depth'
++        call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
++        if (readv) peat_drainage_decay_depth=tempr
++
+         tString='peat_hydraulic_carbon_fraction'
+         call ncd_io(trim(tString),tempr, 'read', ncid, readvar=readv)
+         if (readv) peat_hydraulic_carbon_fraction=tempr
+@@ -320,6 +397,12 @@ contains
+            call endrun(msg=' ERROR: moss_capillary_connectivity_timescale_days must be positive'//&
+                 errMsg(__FILE__, __LINE__))
+         end if
++        if (moss_leaf_mr_dry_fraction < 0._r8 .or. &
++             moss_leaf_mr_dry_fraction > 1._r8 .or. &
++             moss_leaf_mr_full_water_content <= 0._r8) then
++           call endrun(msg=' ERROR: invalid moss leaf-MR moisture parameters'//&
++                errMsg(__FILE__, __LINE__))
++        end if
+         if (moss_water_layer_thickness <= 0._r8 .or. &
+              moss_water_saturated_suction <= 0._r8 .or. &
+              moss_water_clapp_hornberger_b <= 0._r8 .or. &
+@@ -341,6 +424,10 @@ contains
+            call endrun(msg=' ERROR: soil_ice_impedance_exponent must be nonnegative'//&
+                 errMsg(__FILE__, __LINE__))
+         end if
++        if (peat_partial_ice_liquid_kmax < 0._r8 .or. peat_partial_ice_liquid_kmax > 0.001_r8) then
++           call endrun(msg=' ERROR: peat_partial_ice_liquid_kmax must be in [0,0.001] mm/s'//&
++                errMsg(__FILE__, __LINE__))
++        end if
+         if (peat_hydraulic_b_max < 2.7_r8) then
+            call endrun(msg=' ERROR: peat_hydraulic_b_max must be at least 2.7'//&
+                 errMsg(__FILE__, __LINE__))
+@@ -350,6 +437,15 @@ contains
+            call endrun(msg=' ERROR: peat_hydraulic_hksat_min must be in (0,0.28] mm/s'//&
+                 errMsg(__FILE__, __LINE__))
+         end if
++        if (peat_hydraulic_hksat_scale <= 0._r8 .or. &
++             peat_drainage_decay_depth < 0._r8) then
++           call endrun(msg=' ERROR: invalid peat hydraulic Ksat scale or drainage decay depth'//&
++                errMsg(__FILE__, __LINE__))
++        end if
++        if (peat_jules_sucsat_scale <= 0._r8 .or. peat_jules_b_scale <= 0._r8) then
++           call endrun(msg=' ERROR: JULES-Peat retention scales must be positive'//&
++                errMsg(__FILE__, __LINE__))
++        end if
+         if (peat_hydraulic_carbon_fraction <= 0._r8 .or. &
+              peat_hydraulic_carbon_fraction > 1._r8 .or. &
+              peat_hydraulic_particle_density <= 0._r8 .or. &
+@@ -389,6 +485,8 @@ contains
+         !$acc update device(moss_water_content_max)
+         !$acc update device(moss_water_drainage_threshold)
+         !$acc update device(moss_water_substrate_rewetting_timescale_days)
++        !$acc update device(moss_leaf_mr_dry_fraction)
++        !$acc update device(moss_leaf_mr_full_water_content)
+         !$acc update device(peat_compaction_surface_density)
+         !$acc update device(peat_compaction_deep_density)
+         !$acc update device(peat_compaction_initial_acrotelm_depth)
+@@ -399,8 +497,13 @@ contains
+         !$acc update device(peat_compaction_growing_season_end_doy)
+         !$acc update device(peat_compaction_timescale_years)
+         !$acc update device(soil_ice_impedance_exponent)
++        !$acc update device(peat_partial_ice_liquid_kmax)
+         !$acc update device(peat_hydraulic_b_max)
+         !$acc update device(peat_hydraulic_hksat_min)
++        !$acc update device(peat_hydraulic_hksat_scale)
++        !$acc update device(peat_jules_sucsat_scale)
++        !$acc update device(peat_jules_b_scale)
++        !$acc update device(peat_drainage_decay_depth)
+         !$acc update device(peat_hydraulic_carbon_fraction)
+         !$acc update device(peat_hydraulic_particle_density)
+         !$acc update device(peat_hydraulic_bulk_density_min)
+@@ -442,8 +545,11 @@ contains
+                 peat_compaction_growing_season_end_doy
+            write(iulog,*) '  peat_compaction_timescale_years (yr) = ', peat_compaction_timescale_years
+            write(iulog,*) '  soil_ice_impedance_exponent = ', soil_ice_impedance_exponent
++           write(iulog,*) '  peat_partial_ice_liquid_kmax (mm/s) = ', peat_partial_ice_liquid_kmax
+            write(iulog,*) '  peat_hydraulic_b_max = ', peat_hydraulic_b_max
+            write(iulog,*) '  peat_hydraulic_hksat_min (mm/s) = ', peat_hydraulic_hksat_min
++           write(iulog,*) '  peat_jules_sucsat_scale = ', peat_jules_sucsat_scale
++           write(iulog,*) '  peat_jules_b_scale = ', peat_jules_b_scale
+            write(iulog,*) '  peat_hydraulic_carbon_fraction = ', peat_hydraulic_carbon_fraction
+            write(iulog,*) '  peat_hydraulic_particle_density (kg/m3) = ', &
+                 peat_hydraulic_particle_density
+diff --git a/components/elm/src/biogeochem/SoilLittDecompMod.F90 b/components/elm/src/biogeochem/SoilLittDecompMod.F90
+index 6b23fa88da..0843427aca 100644
+--- a/components/elm/src/biogeochem/SoilLittDecompMod.F90
++++ b/components/elm/src/biogeochem/SoilLittDecompMod.F90
+@@ -20,7 +20,8 @@ module SoilLittDecompMod
+   use MicrobeDecompMod       , only : MicrobeDecompParamsInst
+   use NitrifDenitrifMod    , only : nitrif_denitrif
+   use VerticalProfileMod     , only : decomp_vertprofiles
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, &
++       initial_cn_ratio_for_column, initial_cp_ratio_for_column
+   use CNStateType            , only : cnstate_type
+   !!  add phosphorus  -X. YANG
+   use elm_varctl             , only : nu_com
+@@ -240,7 +241,7 @@ contains
+             do j = 1,nlevdecomp
+                do fc = 1,num_soilc
+                   c = filter_soilc(fc)
+-                  cn_decomp_pools(c,j,l) = initial_cn_ratio(l)
++                  cn_decomp_pools(c,j,l) = initial_cn_ratio_for_column(c,l)
+                end do
+             end do
+          end if
+@@ -261,14 +262,14 @@ contains
+             do j = 1,nlevdecomp
+                do fc = 1,num_soilc
+                   c = filter_soilc(fc)
+-                  cp_decomp_pools(c,j,l) = initial_cp_ratio(l)
++                  cp_decomp_pools(c,j,l) = initial_cp_ratio_for_column(c,l)
+                end do
+             end do
+          end if
+          do j = 1,nlevdecomp
+             do fc = 1,num_soilc
+                c = filter_soilc(fc)
+-               cp_decomp_pools_new(c,j,l) = initial_cp_ratio(l)
++               cp_decomp_pools_new(c,j,l) = initial_cp_ratio_for_column(c,l)
+             end do
+          end do
+       end do
+diff --git a/components/elm/src/biogeochem/SoilLittVertTranspMod.F90 b/components/elm/src/biogeochem/SoilLittVertTranspMod.F90
+index 05794373b2..53e50d043a 100644
+--- a/components/elm/src/biogeochem/SoilLittVertTranspMod.F90
++++ b/components/elm/src/biogeochem/SoilLittVertTranspMod.F90
+@@ -14,7 +14,7 @@ module SoilLittVertTranspMod
+   use elm_varcon             , only : secspday
+   use decompMod              , only : bounds_type
+   use abortutils             , only : endrun
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, spinup_factor_for_column
+   use MicrobeDecompMod       , only : MicrobeDecompParamsInst
+   use SharedParamsMod        , only : peat_compaction_surface_density, &
+                                       peat_compaction_deep_density, &
+@@ -543,8 +543,8 @@ contains
+                   if (.not. is_dissolved(s)) then
+                      peat_pool_factor = 1._r8
+                      if (spinup_state == 1) then
+-                        peat_pool_factor = spinup_factor(s)
+-                        if (spinup_factor(s) > 1._r8 .and. year_curr >= 40) then
++                        peat_pool_factor = spinup_factor_for_column(c,s)
++                        if (peat_pool_factor > 1._r8 .and. year_curr >= 40) then
+                            peat_pool_factor = peat_pool_factor / &
+                                 max(cnstate_vars%scalaravg_col(c,j), epsilon)
+                         end if
+@@ -825,7 +825,7 @@ contains
+ 
+                         if ( spinup_state .eq. 1 ) then
+                            ! increase transport (both advection and diffusion) by the same factor as accelerated decomposition for a given pool
+-                           spinup_term = spinup_factor(s)
++                           spinup_term = spinup_factor_for_column(c,s)
+                         else
+                            spinup_term = 1.
+                         endif
+diff --git a/components/elm/src/biogeophys/CanopyFluxesMod.F90 b/components/elm/src/biogeophys/CanopyFluxesMod.F90
+index 33f020ece4..d5c2a22378 100644
+--- a/components/elm/src/biogeophys/CanopyFluxesMod.F90
++++ b/components/elm/src/biogeophys/CanopyFluxesMod.F90
+@@ -103,7 +103,8 @@ contains
+     use SharedParamsMod    , only : moss_water_saturated_suction, &
+          moss_water_clapp_hornberger_b, &
+          moss_water_content_min, moss_water_content_max, &
+-         moss_carbon_fraction_dry_mass
++         moss_carbon_fraction_dry_mass, moss_water_initial_content, &
++         moss_dry_mass_from_lai
+     use elm_varcon         , only : c14ratio
+     use elm_time_manager   , only : get_curr_date
+     use shr_const_mod      , only : SHR_CONST_PI
+@@ -370,6 +371,7 @@ contains
+          lbl_rsc_h2o          => canopystate_vars%lbl_rsc_h2o_patch        , & ! Output: [real(r8) (:)   ] laminar boundary layer resistance for h2o
+          frac_veg_nosno       => canopystate_vars%frac_veg_nosno_patch     , & ! Input:  [integer  (:)   ]  fraction of vegetation not covered by snow (0 OR 1) [-]
+          elai                 => canopystate_vars%elai_patch               , & ! Input:  [real(r8) (:)   ]  one-sided leaf area index with burying by snow
++         tlai                 => canopystate_vars%tlai_patch               , & ! Input:  [real(r8) (:)   ]  one-sided leaf area index without snow burial
+          esai                 => canopystate_vars%esai_patch               , & ! Input:  [real(r8) (:)   ]  one-sided stem area index with burying by snow
+          laisun               => canopystate_vars%laisun_patch             , & ! Input:  [real(r8) (:)   ]  sunlit leaf area
+          laisha               => canopystate_vars%laisha_patch             , & ! Input:  [real(r8) (:)   ]  shaded leaf area
+@@ -918,8 +920,15 @@ contains
+                   ! dry mass, matching the units expected by the historical
+                   ! Sphagnum water-response equation.
+                   moss_storage_min = 0._r8
+-                  moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+-                       1.e-3_r8 / moss_carbon_fraction_dry_mass
++                  if (use_cn) then
++                     moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
++                          1.e-3_r8 / moss_carbon_fraction_dry_mass
++                  else
++                     moss_biomass_kg = moss_dry_mass_from_lai(tlai(p), slatop(veg_pp%itype(p)))
++                     if (h2o_moss_storage(p) < 0._r8) then
++                        h2o_moss_storage(p) = moss_biomass_kg * moss_water_initial_content
++                     end if
++                  end if
+                   if (moss_biomass_kg > 1.e-12_r8) then
+                      moss_water_ratio = max(moss_storage_min, &
+                           h2o_moss_storage(p)) / moss_biomass_kg
+@@ -938,7 +947,15 @@ contains
+                   h2o_moss_storage(p) = 0._r8
+                   moss_water_potential(p) = 0._r8
+                end if
+-               if (elai(p) > 0._r8) then
++               if (use_prognostic_moss_water) then
++                  ! Keep the diagnostic consistent with the biomass used by
++                  ! the prognostic store, including when snow buries the LAI.
++                  if (moss_biomass_kg > 1.e-12_r8) then
++                     h2o_moss_wc(p) = h2o_moss_inter(p) + h2ocan(p) / moss_biomass_kg
++                  else
++                     h2o_moss_wc(p) = 0._r8
++                  end if
++               else if (elai(p) > 0._r8) then
+                   h2o_moss_wc(p) = h2o_moss_inter(p) + h2ocan(p) / &
+                        (elai(p) / slatop(veg_pp%itype(p)) * 2._r8 / 1000._r8)
+                else
+diff --git a/components/elm/src/biogeophys/HydrologyNoDrainageMod.F90 b/components/elm/src/biogeophys/HydrologyNoDrainageMod.F90
+index d47f604ccc..0e6a9fa102 100644
+--- a/components/elm/src/biogeophys/HydrologyNoDrainageMod.F90
++++ b/components/elm/src/biogeophys/HydrologyNoDrainageMod.F90
+@@ -216,7 +216,7 @@ contains
+ 
+       if (use_prognostic_moss_water) then
+          call MossWaterExchange(bounds, num_hydrologyc, filter_hydrologyc, &
+-              soilstate_vars, dtime)
++              soilstate_vars, canopystate_vars, dtime)
+       end if
+ 
+       !!TODO:  need to fix the waterstate_vars dependence here.
+@@ -638,10 +638,12 @@ contains
+ 
+   !-----------------------------------------------------------------------
+   subroutine MossWaterExchange(bounds, num_hydrologyc, filter_hydrologyc, &
+-       soilstate_vars, dtime)
++       soilstate_vars, canopystate_vars, dtime)
+     ! Conservative operator-split exchange between the living-moss water
+     ! store and the upper peat. Positive flux is from soil to moss.
+-    use elm_varctl       , only : use_prognostic_moss_water
++    use elm_varctl       , only : use_prognostic_moss_water, use_cn
++    use pftvarcon        , only : slatop
++    use SharedParamsMod  , only : moss_dry_mass_from_lai
+     use subgridAveMod    , only : p2c
+     use SharedParamsMod  , only : moss_water_layer_thickness, &
+          moss_water_saturated_suction, moss_water_clapp_hornberger_b, &
+@@ -654,6 +656,7 @@ contains
+     integer              , intent(in)    :: num_hydrologyc
+     integer              , intent(in)    :: filter_hydrologyc(:)
+     type(soilstate_type) , intent(inout) :: soilstate_vars
++    type(canopystate_type), intent(in)   :: canopystate_vars
+     real(r8)             , intent(in)    :: dtime
+     integer :: c, p, pi, fc
+     real(r8) :: store_min, store_max, se, se_interface, psi_moss, kmoss, ksoil
+@@ -686,8 +689,13 @@ contains
+           veg_ws%h2o_moss_storage(p) = max(store_min, &
+                veg_ws%h2o_moss_storage(p) - &
+                max(0._r8, veg_wf%qflx_tran_veg(p)) * dtime)
+-          moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+-               1.e-3_r8 / moss_carbon_fraction_dry_mass
++          if (use_cn) then
++             moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
++                  1.e-3_r8 / moss_carbon_fraction_dry_mass
++          else
++             moss_biomass_kg = moss_dry_mass_from_lai( &
++                  canopystate_vars%tlai_patch(p), slatop(veg_pp%itype(p)))
++          end if
+           store_max = moss_biomass_kg * moss_water_drainage_threshold
+           retained_water = min(max(0._r8, veg_ws%h2ocan(p)), &
+                max(0._r8, store_max - veg_ws%h2o_moss_storage(p)))
+@@ -713,8 +721,13 @@ contains
+           p = col_pp%pfti(c) + pi - 1
+           if (veg_pp%active(p) .and. &
+                nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+-             moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+-                  1.e-3_r8 / moss_carbon_fraction_dry_mass
++             if (use_cn) then
++                moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
++                     1.e-3_r8 / moss_carbon_fraction_dry_mass
++             else
++                moss_biomass_kg = moss_dry_mass_from_lai( &
++                     canopystate_vars%tlai_patch(p), slatop(veg_pp%itype(p)))
++             end if
+              store_max = moss_biomass_kg * moss_water_drainage_threshold
+              if (moss_biomass_kg > 1.e-12_r8) then
+                 moss_water_ratio = veg_ws%h2o_moss_storage(p) / moss_biomass_kg
+@@ -806,8 +819,13 @@ contains
+              veg_ws%h2o_moss_storage(p) = max(store_min, &
+                   veg_ws%h2o_moss_storage(p) + &
+                   veg_wf%qflx_moss_soil(p) * dtime)
+-             moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
+-                  1.e-3_r8 / moss_carbon_fraction_dry_mass
++             if (use_cn) then
++                moss_biomass_kg = max(0._r8, veg_cs%totvegc(p)) * &
++                     1.e-3_r8 / moss_carbon_fraction_dry_mass
++             else
++                moss_biomass_kg = moss_dry_mass_from_lai( &
++                     canopystate_vars%tlai_patch(p), slatop(veg_pp%itype(p)))
++             end if
+              if (moss_biomass_kg > 1.e-12_r8) then
+                 moss_water_ratio = veg_ws%h2o_moss_storage(p) / moss_biomass_kg
+              else
+diff --git a/components/elm/src/biogeophys/PhotosynthesisMod.F90 b/components/elm/src/biogeophys/PhotosynthesisMod.F90
+index ad9d578483..86ac5d74e2 100644
+--- a/components/elm/src/biogeophys/PhotosynthesisMod.F90
++++ b/components/elm/src/biogeophys/PhotosynthesisMod.F90
+@@ -12,6 +12,8 @@ module  PhotosynthesisMod
+   use shr_log_mod         , only : errMsg => shr_log_errMsg
+   use abortutils          , only : endrun
+   use elm_varctl          , only : iulog, use_c13, use_c14, use_cn, use_fates, use_humhol
++  use elm_varctl          , only : use_moss_topsoil_ice_limitation
++  use elm_varctl          , only : use_moss_separate_respiration_stress
+   use elm_varpar          , only : nlevcan
+   use elm_varctl          , only : use_hydrstress
+   use elm_varpar          , only : nvegwcs, mxpft_nc, mxpft
+@@ -32,7 +34,8 @@ module  PhotosynthesisMod
+   use elm_varctl          , only : carbonphosphorus_only
+   use elm_varctl          , only : iulog
+   use pftvarcon           , only : noveg
+-  use SharedParamsMod     , only : ParamsShareInst
++  use SharedParamsMod     , only : ParamsShareInst, moss_leaf_mr_dry_fraction, &
++                                 moss_leaf_mr_full_water_content
+   use TopounitDataType    , only : top_as
+   use TopounitType        , only : top_pp
+   use VegetationDataType  , only : veg_es, veg_ns, veg_ps
+@@ -361,7 +364,8 @@ contains
+     real(r8) :: sum_nscaler
+     real(r8) :: total_lai
+     integer  :: rad_layers_patch
+-    real(r8) :: wcscaler, vpd_pa, vpd_stress
++    real(r8) :: wcscaler, moss_mr_scaler, vpd_pa, vpd_stress
++    real(r8) :: topsoil_water_total, topsoil_liquid_fraction
+     !------------------------------------------------------------------------------
+     ! Temperature and soil water response functions
+ 
+@@ -548,6 +552,33 @@ contains
+                     (vpd_pa-vpd_min_moss)/(vpd_max_moss-vpd_min_moss)
+             end if
+             wcscaler = max(0._r8, min(1._r8, wcscaler*vpd_stress))
++            topsoil_liquid_fraction = 1._r8
++            if (use_moss_topsoil_ice_limitation) then
++               ! A reversible sensitivity proxy: the living-moss store has
++               ! no separate ice state, so use the top peat liquid fraction
++               ! to limit photosynthetic availability during freeze/thaw.
++               topsoil_water_total = max(0._r8, col_ws%h2osoi_liq(c,1)) + &
++                    max(0._r8, col_ws%h2osoi_ice(c,1))
++               if (topsoil_water_total > 1.e-12_r8) then
++                  topsoil_liquid_fraction = max(0._r8, col_ws%h2osoi_liq(c,1)) / &
++                       topsoil_water_total
++                  wcscaler = wcscaler * topsoil_liquid_fraction
++               end if
++            end if
++            moss_mr_scaler = wcscaler
++            if (use_moss_separate_respiration_stress) then
++               ! Leaf respiration responds to tissue water independently of
++               ! VPD and photosynthetic capacity. Fine-root MR is calculated
++               ! separately and is not changed here. The nonzero dry limit
++               ! is an experimental sensitivity, not a calibrated value.
++               moss_mr_scaler = moss_leaf_mr_dry_fraction + &
++                    (1._r8 - moss_leaf_mr_dry_fraction) * &
++                    min(1._r8, max(0._r8, h2o_moss_wc(p)) / &
++                    moss_leaf_mr_full_water_content)
++               if (use_moss_topsoil_ice_limitation) then
++                  moss_mr_scaler = moss_mr_scaler * topsoil_liquid_fraction
++               end if
++            end if
+             bbb(p) = max(bbb(p)*wcscaler, 1._r8)
+             mbb(p) = 0._r8
+          else
+@@ -841,7 +872,11 @@ contains
+             if (use_humhol .and. &
+                 nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+                vcmax_z(p,iv) = vcmax_z(p,iv) * wcscaler
+-               lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
++               if (use_moss_separate_respiration_stress) then
++                  lmr_z(p,iv) = lmr_z(p,iv) * moss_mr_scaler
++               else
++                  lmr_z(p,iv) = lmr_z(p,iv) * wcscaler
++               end if
+             else
+                vcmax_z(p,iv) = vcmax_z(p,iv) * btran(p)
+                lmr_z(p,iv) = lmr_z(p,iv) * btran(p)
+diff --git a/components/elm/src/biogeophys/SoilHydrologyMod.F90 b/components/elm/src/biogeophys/SoilHydrologyMod.F90
+index a67a721d2f..8738cd1ea1 100644
+--- a/components/elm/src/biogeophys/SoilHydrologyMod.F90
++++ b/components/elm/src/biogeophys/SoilHydrologyMod.F90
+@@ -8,7 +8,7 @@ module SoilHydrologyMod
+   use shr_log_mod       , only : errMsg => shr_log_errMsg
+   use decompMod         , only : bounds_type
+   use elm_varctl        , only : iulog, use_vichydro, use_humhol, use_fen_bog_drainage
+-  use SharedParamsMod   , only : soil_ice_impedance_exponent
++  use SharedParamsMod   , only : soil_ice_impedance_exponent, peat_drainage_decay_depth
+   use elm_varctl        , only : use_lnd_rof_two_way, lnd_rof_coupling_nstep
+   use elm_varctl        , only : use_modified_infil, use_ocn_lnd_one_way
+   use elm_varcon        , only : denh2o, denice, rpi, spval
+@@ -1434,7 +1434,7 @@ contains
+      use column_varcon    , only : icol_roof, icol_road_imperv, icol_road_perv
+      use elm_varctl       , only : use_vsfm, use_var_soil_thick, use_firn_percolation_and_compaction
+      use SoilWaterMovementMod, only : zengdecker_2009_with_var_soil_thick
+-     use pftvarcon        , only : rsub_top_globalmax
++     use pftvarcon        , only : rsub_top_globalmax, rsub_top_globalmax_peat
+      use LandunitType     , only : lun_pp
+      use landunit_varcon  , only : istice_mec, istice
+      use domainMod        , only : ldomain
+@@ -1841,7 +1841,9 @@ contains
+                    rsub_top_max = dsmax_tmp(c)
+                 else
+                    imped=10._r8**(-soil_ice_impedance_exponent*(icefracsum/dzsum))
+-                   rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), rsub_top_globalmax)
++                   rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), &
++                        merge(rsub_top_globalmax_peat, rsub_top_globalmax, &
++                        use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8))
+                 end if
+              endif
+ 
+@@ -1856,6 +1858,8 @@ contains
+              t = col_pp%topounit(c)
+              use_bog_drainage = use_humhol .and. top_pp%peat_depth(t) > 0._r8 .and. &
+                   (top_pp%is_bog(t) .or. use_fen_bog_drainage)
++             if (use_bog_drainage .and. peat_drainage_decay_depth > 0._r8) &
++                  fff(c) = 1._r8 / peat_drainage_decay_depth
+              rsub_top_zwt = zwt(c)
+              rsub_top_outlet_depth = 0._r8
+              if (use_bog_drainage .and. grc_pp%ntopounits(g) > 1) then
+@@ -2438,7 +2442,7 @@ contains
+      use elm_varcon       , only : pondmx, tfrz, watmin,rpi, secspday, nlvic
+      use column_varcon    , only : icol_roof, icol_road_imperv, icol_road_perv
+      use elm_varctl       , only : use_vsfm
+-     use pftvarcon        , only : rsub_top_globalmax
++     use pftvarcon        , only : rsub_top_globalmax, rsub_top_globalmax_peat
+      !
+      ! !ARGUMENTS:
+      type(bounds_type)        , intent(in)    :: bounds
+@@ -2791,7 +2795,9 @@ contains
+                    rsub_top_max = dsmax_tmp(c)
+                 else
+                    imped=10._r8**(-soil_ice_impedance_exponent*(icefracsum/dzsum))
+-                   rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), rsub_top_globalmax)
++                   rsub_top_max = min(10._r8 * sin((rpi/180.) * col_pp%topo_slope(c)), &
++                        merge(rsub_top_globalmax_peat, rsub_top_globalmax, &
++                        use_humhol .and. top_pp%peat_depth(col_pp%topounit(c)) > 0._r8))
+                 end if
+              endif
+              if (use_vichydro) then
+diff --git a/components/elm/src/biogeophys/SoilStateType.F90 b/components/elm/src/biogeophys/SoilStateType.F90
+index 1dbdb28fa1..71ab1248ae 100644
+--- a/components/elm/src/biogeophys/SoilStateType.F90
++++ b/components/elm/src/biogeophys/SoilStateType.F90
+@@ -34,6 +34,7 @@ module SoilStateType
+   implicit none
+   save
+   public
++  private :: prescribed_peat_transition_integral
+   !
+   ! !PUBLIC TYPES:
+   type, public :: soilstate_type
+@@ -345,7 +346,9 @@ contains
+     use fileutils           , only : getfil
+     use organicFileMod      , only : organicrd
+     use SharedParamsMod   , only : ParamsShareInst, peat_hydraulic_b_max, peat_hydraulic_hksat_min, &
+-                                       peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max
++                                       peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max, &
++                                       peat_hydraulic_carbon_fraction, peat_compaction_surface_density, &
++                                       peat_compaction_deep_density, peat_compaction_transition_width
+     use FuncPedotransferMod , only : pedotransf, get_ipedof
+     use RootBiophysMod      , only : init_vegrootfr
+     use, intrinsic :: ieee_exceptions
+@@ -373,6 +376,7 @@ contains
+     real(r8)           :: zsapric_col                   ! column-local organic hydraulic transition depth (m)
+     real(r8)           :: organic_depth                 ! depth used by organic hydraulic functions (m)
+     real(r8)           :: organic_bulk_density          ! dry organic-matter bulk density (kg/m3)
++    real(r8)           :: peat_layer_top, peat_layer_bottom, peat_transition_fraction
+     real(r8)           :: max_bog_elevation             ! highest active bog-peat elevation in this gridcell (m)
+     real(r8)           :: csol_bedrock   = 2.0e6_r8     ! vol. heat capacity of granite/sandstone  J/(m3 K)(Shabbir, 2000)
+     real(r8)           :: pcalpha        = 0.5_r8       ! percolation threshold
+@@ -794,11 +798,25 @@ contains
+                 if (use_humhol .and. use_jules_peat_hydraulics .and. &
+                      top_pp%peat_depth(t) > 0._r8 .and. &
+                      organic_depth <= top_pp%peat_depth(t)) then
+-                   ! Initialize density-dependent peat hydraulics from the
+-                   ! supplied dry organic-matter density. During integration,
+-                   ! SoilLittVertTransp refreshes these properties from the
+-                   ! modeled physical-equivalent solid peat density.
+-                   organic_bulk_density = this%cellorg_col(c,min(lev,nlevsoi))
++                   ! SP has no prognostic peat carbon. Use the same prescribed
++                   ! acrotelm-dependent target density as the CNP compaction
++                   ! scheme, converted from kg C to kg dry organic matter.
++                   ! CNP instead initializes from the surface ORGANIC field
++                   ! and refreshes hydraulics from modeled peat carbon.
++                   if (.not. use_cn .and. top_pp%acrotelm_depth(t) > 0._r8) then
++                      peat_layer_top = max(0._r8, zsoi(lev) - 0.5_r8 * dzsoi(lev))
++                      peat_layer_bottom = peat_layer_top + dzsoi(lev)
++                      peat_transition_fraction = min(1._r8, max(0._r8, &
++                           (prescribed_peat_transition_integral(peat_layer_bottom, &
++                            top_pp%acrotelm_depth(t), peat_compaction_transition_width) - &
++                            prescribed_peat_transition_integral(peat_layer_top, &
++                            top_pp%acrotelm_depth(t), peat_compaction_transition_width)) / dzsoi(lev)))
++                      organic_bulk_density = (peat_compaction_surface_density + &
++                           (peat_compaction_deep_density - peat_compaction_surface_density) * &
++                           peat_transition_fraction) / peat_hydraulic_carbon_fraction
++                   else
++                      organic_bulk_density = this%cellorg_col(c,min(lev,nlevsoi))
++                   end if
+                    call jules_peat_hydraulic_properties(organic_bulk_density, &
+                         om_watsat, om_b, om_sucsat, om_hksat)
+                 else
+@@ -1008,7 +1026,8 @@ contains
+     ! hydraulic properties using Chadburn et al. (2022), equations 13-16:
+     ! https://doi.org/10.5194/gmd-15-1633-2022
+     !
+-    use SharedParamsMod, only : peat_hydraulic_particle_density, &
++    use SharedParamsMod, only : peat_hydraulic_particle_density, peat_hydraulic_hksat_scale, &
++         peat_jules_sucsat_scale, peat_jules_b_scale, &
+          peat_hydraulic_bulk_density_min, peat_hydraulic_bulk_density_max
+     real(r8), intent(in)  :: bulk_density ! kg dry organic matter / m3
+     real(r8), intent(out) :: watsat       ! m3/m3
+@@ -1019,12 +1038,25 @@ contains
+ 
+     rho = min(peat_hydraulic_bulk_density_max, &
+          max(peat_hydraulic_bulk_density_min, bulk_density))
+-    sucsat = 1000._r8 * exp(0.023_r8 * rho - 5.08_r8)
+-    bsw = 0.0304_r8 * rho + 1.53_r8
+-    hksat = 1000._r8 * exp(-0.0532_r8 * rho - 6.63_r8)
++    sucsat = peat_jules_sucsat_scale * 1000._r8 * exp(0.023_r8 * rho - 5.08_r8)
++    bsw = peat_jules_b_scale * (0.0304_r8 * rho + 1.53_r8)
++    hksat = peat_hydraulic_hksat_scale * 1000._r8 * exp(-0.0532_r8 * rho - 6.63_r8)
+     watsat = 1._r8 - rho / peat_hydraulic_particle_density
+   end subroutine jules_peat_hydraulic_properties
+ 
++  pure real(r8) function prescribed_peat_transition_integral(z, acrotelm_depth, width)
++    real(r8), intent(in) :: z, acrotelm_depth, width
++
++    if (z <= acrotelm_depth) then
++       prescribed_peat_transition_integral = 0._r8
++    else if (z < acrotelm_depth + width) then
++       prescribed_peat_transition_integral = &
++            (z - acrotelm_depth)**2 / (2._r8 * width)
++    else
++       prescribed_peat_transition_integral = z - acrotelm_depth - 0.5_r8 * width
++    end if
++  end function prescribed_peat_transition_integral
++
+   !------------------------------------------------------------------------
+   subroutine Restart(this, bounds, ncid, flag)
+     !
+diff --git a/components/elm/src/biogeophys/SoilWaterMovementMod.F90 b/components/elm/src/biogeophys/SoilWaterMovementMod.F90
+index a4b5764824..fa0c97f194 100644
+--- a/components/elm/src/biogeophys/SoilWaterMovementMod.F90
++++ b/components/elm/src/biogeophys/SoilWaterMovementMod.F90
+@@ -269,7 +269,7 @@ contains
+     ! !USES:
+       !$acc routine seq
+     use elm_varctl           , only : use_var_soil_thick, use_humhol, use_peatland_roots, iulog
+-    use SharedParamsMod      , only : soil_ice_impedance_exponent
++    use SharedParamsMod      , only : soil_ice_impedance_exponent, peat_partial_ice_liquid_kmax
+     use shr_kind_mod         , only : r8 => shr_kind_r8
+     use shr_const_mod        , only : SHR_CONST_TKFRZ, SHR_CONST_LATICE, SHR_CONST_G
+     use decompMod            , only : bounds_type
+@@ -370,6 +370,7 @@ contains
+     real(r8) :: soilwater_expected_delta
+     real(r8) :: soilwater_resid_with_qcharge
+     real(r8) :: soilwater_qcharge_storage_delta
++    real(r8) :: connected_open, partial_ice_hk
+     real(r8) :: soilwater_root_sink(bounds%begc:bounds%endc)
+     logical  :: soilwater_aquifer_layer_active(bounds%begc:bounds%endc)
+     logical  :: used_explicit_fallback
+@@ -413,6 +414,7 @@ contains
+          qflx_infl         =>    col_wf%qflx_infl       , & ! Input:  [real(r8) (:)   ]  infiltration (mm H2O /s)
+          qflx_rootsoi_col  =>    col_wf%qflx_rootsoi    , & ! Input: [real(r8) (:,:) ]  vegetation/soil water exchange (mm H2O/s) (+ = to atm)
+          qflx_adv          =>    col_wf%qflx_adv        , & ! Output: [real(r8) (:,:) ] interface water flux [mm H2O/s] (+ downward)
++         qflx_adv_hist     =>    col_wf%qflx_adv_upper_hist , & ! Output: upper-face interface flux by layer [mm H2O/s]
+          t_soisno          =>    col_es%t_soisno        & ! Input:  [real(r8) (:,:) ]  soil temperature (Kelvin)
+          )
+ 
+@@ -592,6 +594,29 @@ contains
+             dhkdw(c,j) = imped(c,j)*(2._r8*bsw(c,j)+3._r8)*s2* &
+                  (1._r8/(watsat(c,j)+watsat(c,min(nlevsoi, j+1))))
+ 
++            ! Experimental liquid-connected path across partially frozen
++            ! upper peat interfaces. Keep the ordinary matrix solution when
++            ! disabled, unfrozen, or either side is completely ice-filled.
++            ! The extra conductance is bounded by a parameter and the open
++            ! pore fraction on both sides; its derivative is lagged for this
++            ! timestep rather than treating it as matrix-water conductance.
++            if (use_humhol .and. peat_partial_ice_liquid_kmax > 0._r8 .and. &
++                 j <= 3 .and. j < nlevbed) then
++               t = col_pp%topounit(c)
++               if (top_pp%peat_depth(t) > 0._r8 .and. &
++                    max(icefrac(c,j), icefrac(c,j+1)) > 0._r8 .and. &
++                    h2osoi_liq(c,j) > watmin .and. h2osoi_liq(c,j+1) > watmin) then
++                  connected_open = max(0._r8, min(1._r8-icefrac(c,j), &
++                       1._r8-icefrac(c,j+1)))
++                  partial_ice_hk = min(peat_partial_ice_liquid_kmax, &
++                       hksat(c,j)*connected_open**2)
++                  if (partial_ice_hk > hk(c,j)) then
++                     hk(c,j) = partial_ice_hk
++                     dhkdw(c,j) = 0._r8
++                  end if
++               end if
++            end if
++
+             !compute un-restricted hydraulic conductivity
+             !call soil_water_retention_curve%soil_hk(hksat(c,j), imped(c,j), s1, bsw(c,j), hktmp, dhkds)
+             !if(hktmp/=hk(c,j))write(10,*)'diff',hktmp,hk(c,j)
+@@ -1192,6 +1217,19 @@ contains
+          do j = nlevbed+1, nlevgrnd
+             qflx_adv(c,j) = 0._r8
+          end do
++         ! The Darcy qout above is evaluated before the implicit solve; it
++         ! can be much larger than the water actually exchanged after the
++         ! solve and the conservative layer corrections. Diagnose realized
++         ! interface flow from each layer's liquid-water budget instead.
++         qflx_adv_hist(c,1) = qin(c,1)
++         do j = 1, nlevbed-1
++            qflx_adv_hist(c,j+1) = qflx_adv_hist(c,j) - &
++                 qflx_rootsoi_col(c,j) - &
++                 (h2osoi_liq(c,j)-h2osoi_liq_before(c,j))/dtime
++         end do
++         do j = nlevbed+1, nlevgrnd
++            qflx_adv_hist(c,j) = 0._r8
++         end do
+       end do
+ 
+     end associate
+diff --git a/components/elm/src/cpl/lnd_import_export.F90 b/components/elm/src/cpl/lnd_import_export.F90
+index 739aa9b8b3..7aae966851 100644
+--- a/components/elm/src/cpl/lnd_import_export.F90
++++ b/components/elm/src/cpl/lnd_import_export.F90
+@@ -87,7 +87,7 @@ contains
+     integer  :: swrad_period_len, swrad_period_start, thishr, thismin
+     real(r8) :: timetemp(2)
+     real(r8) :: latixy(500000), longxy(500000)
+-    integer ::  ierr, varid, dimid, yr, mon, day, tod, nindex(2), caldaym(13)
++    integer ::  ierr, varid, dimid, met_xtype, yr, mon, day, tod, nindex(2), caldaym(13)
+     integer ::  popdens_nlon, popdens_nlat, popdens_lon_dimid, popdens_lat_dimid
+     integer ::  lightng_nlon, lightng_nlat, lightng_ntime
+     integer ::  lightng_lon_dimid, lightng_lat_dimid, lightng_time_dimid
+@@ -470,9 +470,21 @@ contains
+             atm2lnd_vars%timelen_spinup(v) = nyears_spinup*(365*nint(24./atm2lnd_vars%timeres(v)))
+     
+             ierr = nf90_inq_varid(met_ncids(v), trim(atm2lnd_vars%metvars(v)), varid)
++            if (ierr /= nf90_noerr) call endrun(sub//' ERROR: Missing CPL_BYPASS meteorology variable '// &
++                 trim(atm2lnd_vars%metvars(v))//' in '//trim(metdata_fname))
++            ierr = nf90_inquire_variable(met_ncids(v), varid, xtype=met_xtype)
++            if (ierr /= nf90_noerr) call endrun(sub//' ERROR: Could not inspect CPL_BYPASS meteorology variable '// &
++                 trim(atm2lnd_vars%metvars(v))//' in '//trim(metdata_fname))
++            if (met_xtype /= nf90_short) call endrun(sub// &
++                 ' ERROR: CPL_BYPASS requires packed int16 meteorology for '// &
++                 trim(atm2lnd_vars%metvars(v))//' in '//trim(metdata_fname))
+             !get the conversion factors
+             ierr = nf90_get_att(met_ncids(v), varid, 'scale_factor', atm2lnd_vars%scale_factors(v))
++            if (ierr /= nf90_noerr) call endrun(sub//' ERROR: Missing scale_factor for '// &
++                 trim(atm2lnd_vars%metvars(v))//' in '//trim(metdata_fname))
+             ierr = nf90_get_att(met_ncids(v), varid, 'add_offset', atm2lnd_vars%add_offsets(v))
++            if (ierr /= nf90_noerr) call endrun(sub//' ERROR: Missing add_offset for '// &
++                 trim(atm2lnd_vars%metvars(v))//' in '//trim(metdata_fname))
+             !get the met data         
+             starti(1) = 1
+             starti(2) = gtoget
+diff --git a/components/elm/src/data_types/ColumnDataType.F90 b/components/elm/src/data_types/ColumnDataType.F90
+index e39ca79e0c..6328002b9c 100644
+--- a/components/elm/src/data_types/ColumnDataType.F90
++++ b/components/elm/src/data_types/ColumnDataType.F90
+@@ -48,7 +48,8 @@ module ColumnDataType
+   use restUtilMod
+   use CNStateType     , only: cnstate_type
+   use tracer_varcon   , only : is_active_betr_bgc
+-  use CNDecompCascadeConType , only : decomp_cascade_con
++  use CNDecompCascadeConType , only : decomp_cascade_con, initial_cn_ratio_for_column, &
++       initial_cp_ratio_for_column, spinup_factor_for_column
+   use ColumnType      , only : col_pp
+   use LandunitType    , only : lun_pp
+   use GridcellType    , only : grc_pp
+@@ -494,6 +495,7 @@ module ColumnDataType
+     real(r8), pointer :: qflx_gross_evap_soil (:)   => null() ! gross infiltration from soil, this satisfies the relationship qflx_infl = qflx_gross_infl_soil-qflx_gross_evap_soil
+     real(r8), pointer :: qflx_gross_infl_soil (:)   => null() ! gross infiltration, before considering the evaporation
+     real(r8), pointer :: qflx_adv             (:,:) => null() ! advective flux across different soil layer interfaces [mm H2O/s] [+ downward]
++    real(r8), pointer :: qflx_adv_upper_hist  (:,:) => null() ! upper-interface liquid flux for history (mm H2O/s) [+ downward]
+     real(r8), pointer :: qflx_rootsoi         (:,:) => null() ! root and soil water exchange [mm H2O/s] [+ into root]
+     real(r8), pointer :: dwb                  (:)   => null() !  water mass change [+ increase] [mm H2O/s]
+     real(r8), pointer :: qflx_infl            (:)   => null() ! infiltration (mm H2O /s)
+@@ -3098,11 +3100,11 @@ contains
+               do c = bounds%begc, bounds%endc
+                  do j = 1, nlevdecomp
+                     if ( exit_spinup ) then
+-                       m = decomp_cascade_con%spinup_factor(k)
+-                       if (decomp_cascade_con%spinup_factor(k) > 1) m = m / cnstate_vars%scalaravg_col(c,j)
++                       m = spinup_factor_for_column(c,k)
++                       if (m > 1) m = m / cnstate_vars%scalaravg_col(c,j)
+                     else if ( enter_spinup ) then
+-                       m = 1. / decomp_cascade_con%spinup_factor(k)
+-                       if (decomp_cascade_con%spinup_factor(k) > 1) m = m * cnstate_vars%scalaravg_col(c,j)
++                       m = 1. / spinup_factor_for_column(c,k)
++                       if (spinup_factor_for_column(c,k) > 1) m = m * cnstate_vars%scalaravg_col(c,j)
+                     end if
+                     this%decomp_cpools_vr(c,j,k) = this%decomp_cpools_vr(c,j,k) * m
+                  end do ! nlevdecomp
+@@ -3761,7 +3763,7 @@ contains
+           this%sminn(c) = 0._r8
+           do j = 1, nlevdecomp
+              do k = 1, ndecomp_pools
+-                this%decomp_npools_vr(c,j,k) = col_cs%decomp_cpools_vr(c,j,k) / decomp_cascade_con%initial_cn_ratio(k)
++                this%decomp_npools_vr(c,j,k) = col_cs%decomp_cpools_vr(c,j,k) / initial_cn_ratio_for_column(c,k)
+              end do
+              this%sminn_vr(c,j) = 0._r8
+              this%ntrunc_vr(c,j) = 0._r8
+@@ -3776,8 +3778,8 @@ contains
+              end do
+           end if
+           do k = 1, ndecomp_pools
+-             this%decomp_npools(c,k)    = col_cs%decomp_cpools(c,k)    / decomp_cascade_con%initial_cn_ratio(k)
+-             this%decomp_npools_1m(c,k) = col_cs%decomp_cpools_1m(c,k) / decomp_cascade_con%initial_cn_ratio(k)
++             this%decomp_npools(c,k)    = col_cs%decomp_cpools(c,k)    / initial_cn_ratio_for_column(c,k)
++             this%decomp_npools_1m(c,k) = col_cs%decomp_cpools_1m(c,k) / initial_cn_ratio_for_column(c,k)
+           end do
+ 
+           do j = 1, nlevdecomp_full
+@@ -4227,11 +4229,11 @@ contains
+           do c = bounds%begc, bounds%endc
+              do j = 1, nlevdecomp
+                 if ( exit_spinup ) then
+-		             m = decomp_cascade_con%spinup_factor(k)
+-                   if (decomp_cascade_con%spinup_factor(k) > 1) m = m / cnstate_vars%scalaravg_col(c,j)
++		             m = spinup_factor_for_column(c,k)
++                   if (m > 1) m = m / cnstate_vars%scalaravg_col(c,j)
+                 else if ( enter_spinup ) then
+-                   m = 1. / decomp_cascade_con%spinup_factor(k)
+-		             if (decomp_cascade_con%spinup_factor(k) > 1) m = m * cnstate_vars%scalaravg_col(c,j)
++                   m = 1. / spinup_factor_for_column(c,k)
++                   if (spinup_factor_for_column(c,k) > 1) m = m * cnstate_vars%scalaravg_col(c,j)
+                 end if
+                 this%decomp_npools_vr(c,j,k) = this%decomp_npools_vr(c,j,k) * m
+              end do
+@@ -4916,7 +4918,7 @@ contains
+           this%sminp(c) = 0._r8
+           do j = 1, nlevdecomp
+              do k = 1, ndecomp_pools
+-                this%decomp_ppools_vr(c,j,k) = col_cs%decomp_cpools_vr(c,j,k) / decomp_cascade_con%initial_cp_ratio(k)
++                this%decomp_ppools_vr(c,j,k) = col_cs%decomp_cpools_vr(c,j,k) / initial_cp_ratio_for_column(c,k)
+              end do
+              this%sminp_vr(c,j) = 0._r8
+              this%ptrunc_vr(c,j) = 0._r8
+@@ -4931,8 +4933,8 @@ contains
+              end do
+           end if
+           do k = 1, ndecomp_pools
+-             this%decomp_ppools(c,k)    = col_cs%decomp_cpools(c,k)    / decomp_cascade_con%initial_cp_ratio(k)
+-             this%decomp_ppools_1m(c,k) = col_cs%decomp_cpools_1m(c,k) / decomp_cascade_con%initial_cp_ratio(k)
++             this%decomp_ppools(c,k)    = col_cs%decomp_cpools(c,k)    / initial_cp_ratio_for_column(c,k)
++             this%decomp_ppools_1m(c,k) = col_cs%decomp_cpools_1m(c,k) / initial_cp_ratio_for_column(c,k)
+           end do
+ 
+           do j = 1, nlevdecomp_full
+@@ -5196,11 +5198,11 @@ contains
+           do c = bounds%begc, bounds%endc
+              do j = 1, nlevdecomp
+ 	             if ( exit_spinup ) then
+-		             m = decomp_cascade_con%spinup_factor(k)
+-                   if (decomp_cascade_con%spinup_factor(k) > 1) m = m  / cnstate_vars%scalaravg_col(c,j)
++		             m = spinup_factor_for_column(c,k)
++                   if (m > 1) m = m  / cnstate_vars%scalaravg_col(c,j)
+                 else if ( enter_spinup ) then
+-                   m = 1. / decomp_cascade_con%spinup_factor(k)
+-		             if (decomp_cascade_con%spinup_factor(k) > 1) m = m  * cnstate_vars%scalaravg_col(c,j)
++                   m = 1. / spinup_factor_for_column(c,k)
++                   if (spinup_factor_for_column(c,k) > 1) m = m  * cnstate_vars%scalaravg_col(c,j)
+                 end if
+                 this%decomp_ppools_vr(c,j,k) = this%decomp_ppools_vr(c,j,k) * m
+              end do
+@@ -5883,6 +5885,7 @@ contains
+     allocate(this%qflx_gross_evap_soil   (begc:endc))             ; this%qflx_gross_evap_soil (:)   = spval
+     allocate(this%qflx_gross_infl_soil   (begc:endc))             ; this%qflx_gross_infl_soil (:)   = spval
+     allocate(this%qflx_adv               (begc:endc,0:nlevgrnd))  ; this%qflx_adv             (:,:) = spval
++    allocate(this%qflx_adv_upper_hist    (begc:endc,1:nlevgrnd))  ; this%qflx_adv_upper_hist  (:,:) = 0._r8
+     allocate(this%qflx_rootsoi           (begc:endc,1:nlevgrnd))  ; this%qflx_rootsoi         (:,:) = spval
+     allocate(this%dwb                    (begc:endc))             ; this%dwb                  (:)   = spval
+     allocate(this%qflx_infl              (begc:endc))             ; this%qflx_infl            (:)   = spval
+@@ -5977,6 +5980,10 @@ contains
+           avgflag='A', long_name='infiltration', &
+            ptr_col=this%qflx_infl, c2l_scale_type='urbanf')
+ 
++    call hist_addfld2d (fname='QFLX_SOIL_LIQ_UPPER', units='mm/s', type2d='levgrnd', &
++         avgflag='A', long_name='liquid flux across upper interface of each soil layer; positive downward', &
++         ptr_col=this%qflx_adv_upper_hist, default='inactive')
++
+     call hist_addfld2d (fname='QFLX_ROOTSOI', units='mm/s', type2d='levgrnd', &
+          avgflag='A', long_name='root and soil water exchange; positive uptake into roots', &
+          ptr_col=this%qflx_rootsoi, default='inactive')
+diff --git a/components/elm/src/data_types/VegetationDataType.F90 b/components/elm/src/data_types/VegetationDataType.F90
+index 48ccfa9c90..7fc489917a 100644
+--- a/components/elm/src/data_types/VegetationDataType.F90
++++ b/components/elm/src/data_types/VegetationDataType.F90
+@@ -1978,8 +1978,8 @@ module VegetationDataType
+   !------------------------------------------------------------------------
+   subroutine InitializePrognosticMossWater(bounds)
+     ! Initialize only missing prognostic moss-water states. This is called
+-    ! after cold-start or restart carbon states have been finalized, so the
+-    ! initial water store can scale with the actual live moss carbon.
++    ! after cold-start or restart carbon states have been finalized. In SP,
++    ! leave the sentinel until prescribed LAI is available at the first step.
+     type(bounds_type), intent(in) :: bounds
+     integer :: p
+ 
+@@ -1992,12 +1992,13 @@ module VegetationDataType
+        if (veg_pp%active(p) .and. &
+             nint(veg_vp%nonvascular(veg_pp%itype(p))) == 1) then
+           if (veg_ws%h2o_moss_storage(p) < 0._r8) then
+-             ! Convert live moss C to dry mass before applying the specified
+-             ! water content. With 10 gC m-2, fC=0.5, and 5 gH2O g-1 dry
+-             ! mass, this initializes 0.1 kg H2O m-2.
+-             veg_ws%h2o_moss_storage(p) = max(0._r8, veg_cs%totvegc(p)) * &
+-                  1.e-3_r8 / moss_carbon_fraction_dry_mass * &
+-                  moss_water_initial_content
++             if (use_cn) then
++                ! With 10 gC m-2, fC=0.5 and 5 gH2O g-1 dry mass,
++                ! this initializes 0.1 kg H2O m-2.
++                veg_ws%h2o_moss_storage(p) = max(0._r8, veg_cs%totvegc(p)) * &
++                     1.e-3_r8 / moss_carbon_fraction_dry_mass * &
++                     moss_water_initial_content
++             end if
+           end if
+        else
+           veg_ws%h2o_moss_storage(p) = 0._r8
+diff --git a/components/elm/src/main/controlMod.F90 b/components/elm/src/main/controlMod.F90
+index e421899687..c21050b8eb 100644
+--- a/components/elm/src/main/controlMod.F90
++++ b/components/elm/src/main/controlMod.F90
+@@ -73,7 +73,8 @@ module controlMod
+                         use_hydrstress, lateral_connectivity, domain_decomp_type, &
+                         use_IM2_hillslope_hydrology, use_humhol, use_fen_bog_drainage, &
+                         use_peatland_roots, use_moss_capillary_nutrients, &
+-                        use_prognostic_moss_water, &
++                        use_prognostic_moss_water, use_moss_topsoil_ice_limitation, &
++                        use_moss_separate_respiration_stress, &
+                         use_peatland_vertical_transport, &
+                         use_peatland_compaction_profile, &
+                         use_jules_peat_hydraulics, &
+@@ -413,6 +414,7 @@ contains
+ 
+     namelist /elm_inparm/ use_humhol, use_fen_bog_drainage, use_peatland_roots, &
+          use_moss_capillary_nutrients, use_prognostic_moss_water, &
++         use_moss_topsoil_ice_limitation, use_moss_separate_respiration_stress, &
+          use_peatland_vertical_transport, &
+          use_peatland_compaction_profile, use_jules_peat_hydraulics, &
+          use_deep_soil_heating, &
+@@ -1225,6 +1227,8 @@ contains
+     call mpi_bcast (use_peatland_roots, 1, MPI_LOGICAL, 0, mpicom, ier)
+     call mpi_bcast (use_moss_capillary_nutrients, 1, MPI_LOGICAL, 0, mpicom, ier)
+     call mpi_bcast (use_prognostic_moss_water, 1, MPI_LOGICAL, 0, mpicom, ier)
++    call mpi_bcast (use_moss_topsoil_ice_limitation, 1, MPI_LOGICAL, 0, mpicom, ier)
++    call mpi_bcast (use_moss_separate_respiration_stress, 1, MPI_LOGICAL, 0, mpicom, ier)
+     call mpi_bcast (use_peatland_vertical_transport, 1, MPI_LOGICAL, 0, mpicom, ier)
+     call mpi_bcast (use_peatland_compaction_profile, 1, MPI_LOGICAL, 0, mpicom, ier)
+     call mpi_bcast (use_jules_peat_hydraulics, 1, MPI_LOGICAL, 0, mpicom, ier)
+@@ -1243,6 +1247,8 @@ contains
+     !$acc update device(use_peatland_vertical_transport)
+     !$acc update device(use_moss_capillary_nutrients)
+     !$acc update device(use_prognostic_moss_water)
++    !$acc update device(use_moss_topsoil_ice_limitation)
++    !$acc update device(use_moss_separate_respiration_stress)
+     !$acc update device(use_peatland_compaction_profile)
+     !$acc update device(use_jules_peat_hydraulics)
+ 
+@@ -1268,6 +1274,14 @@ contains
+        call endrun(msg=' ERROR: use_prognostic_moss_water=.true. requires '//&
+             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+     end if
++    if (use_moss_topsoil_ice_limitation .and. .not. use_humhol) then
++       call endrun(msg=' ERROR: use_moss_topsoil_ice_limitation=.true. requires '//&
++            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
++    end if
++    if (use_moss_separate_respiration_stress .and. .not. use_humhol) then
++       call endrun(msg=' ERROR: use_moss_separate_respiration_stress=.true. requires '//&
++            'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
++    end if
+     if (use_peatland_vertical_transport .and. .not. use_humhol) then
+        call endrun(msg=' ERROR: use_peatland_vertical_transport=.true. requires '//&
+             'use_humhol=.true.'//errMsg(__FILE__, __LINE__))
+@@ -1447,6 +1461,8 @@ contains
+     write(iulog,*) '    use_peatland_roots = ', use_peatland_roots
+     write(iulog,*) '    use_moss_capillary_nutrients = ', use_moss_capillary_nutrients
+     write(iulog,*) '    use_prognostic_moss_water = ', use_prognostic_moss_water
++    write(iulog,*) '    use_moss_topsoil_ice_limitation = ', use_moss_topsoil_ice_limitation
++    write(iulog,*) '    use_moss_separate_respiration_stress = ', use_moss_separate_respiration_stress
+     write(iulog,*) '    use_peatland_vertical_transport = ', use_peatland_vertical_transport
+     write(iulog,*) '    use_peatland_compaction_profile = ', use_peatland_compaction_profile
+     write(iulog,*) '    use_jules_peat_hydraulics = ', use_jules_peat_hydraulics
+diff --git a/components/elm/src/main/elm_varctl.F90 b/components/elm/src/main/elm_varctl.F90
+index 82abf6002b..de4dba4464 100644
+--- a/components/elm/src/main/elm_varctl.F90
++++ b/components/elm/src/main/elm_varctl.F90
+@@ -500,6 +500,8 @@ module elm_varctl
+   logical, public            :: use_peatland_roots           = .false.
+   logical, public            :: use_moss_capillary_nutrients = .false.
+   logical, public            :: use_prognostic_moss_water    = .false.
++  logical, public            :: use_moss_topsoil_ice_limitation = .false.
++  logical, public            :: use_moss_separate_respiration_stress = .false.
+   logical, public            :: use_peatland_vertical_transport = .false.
+   logical, public            :: use_peatland_compaction_profile = .false.
+   logical, public            :: use_jules_peat_hydraulics       = .false.
+@@ -523,6 +525,8 @@ module elm_varctl
+   !$acc declare copyin(use_peatland_roots)
+   !$acc declare copyin(use_moss_capillary_nutrients)
+   !$acc declare copyin(use_prognostic_moss_water)
++  !$acc declare copyin(use_moss_topsoil_ice_limitation)
++  !$acc declare copyin(use_moss_separate_respiration_stress)
+   !$acc declare copyin(use_peatland_vertical_transport)
+   !$acc declare copyin(use_peatland_compaction_profile)
+   !$acc declare copyin(use_jules_peat_hydraulics)
+diff --git a/components/elm/src/main/pftvarcon.F90 b/components/elm/src/main/pftvarcon.F90
+index b687500a6e..f528225886 100644
+--- a/components/elm/src/main/pftvarcon.F90
++++ b/components/elm/src/main/pftvarcon.F90
+@@ -11,7 +11,7 @@ module pftvarcon
+   use abortutils  , only : endrun
+   use elm_varpar  , only : mxpft, numrad, ivis, inir
+   use elm_varpar  , only:  mxpft_nc
+-  use elm_varctl  , only : iulog, use_vertsoilc
++  use elm_varctl  , only : iulog, use_vertsoilc, use_humhol
+   use elm_varpar  , only : nlevdecomp_full, nsoilorder
+   use elm_varctl  , only : nu_com
+   !-------------------------------------------------------------------------------------------
+@@ -312,6 +312,7 @@ module pftvarcon
+   real(r8)              :: laimax
+   ! Hydrology
+   real(r8)              :: rsub_top_globalmax
++  real(r8)              :: rsub_top_globalmax_peat
+   real(r8)              :: humhol_ht                ! fallback hummock-hollow relief (m)
+   real(r8)              :: qflx_h2osfc_surfrate     ! peat surface-water export coefficient (1/(mm s))
+   real(r8)              :: peatland_fen_outlet_depth ! terminal fen outlet stage above ground (mm)
+@@ -1052,6 +1053,12 @@ contains
+     end if
+     call ncd_io('rsub_top_globalmax', rsub_top_globalmax, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+     if (.not. readv) rsub_top_globalmax = 10._r8
++    rsub_top_globalmax_peat = rsub_top_globalmax
++    if (use_humhol) then
++       call ncd_io('rsub_top_globalmax_peat', rsub_top_globalmax_peat, 'read', ncid, &
++            readvar=readv, posNOTonfile=.true.)
++       if (.not. readv) rsub_top_globalmax_peat = rsub_top_globalmax
++    end if
+     call ncd_io('humhol_ht', humhol_ht, 'read', ncid, readvar=readv, posNOTonfile=.true.)
+     if (.not. readv) humhol_ht = 0.15_r8
+     call ncd_io('qflx_h2osfc_surfrate', qflx_h2osfc_surfrate, 'read', ncid, readvar=readv, posNOTonfile=.true.)

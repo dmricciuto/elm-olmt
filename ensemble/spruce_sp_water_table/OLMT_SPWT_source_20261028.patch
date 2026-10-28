@@ -1,0 +1,17 @@
+diff --git a/model_ELM/makepointdata.py b/model_ELM/makepointdata.py
+index 266abe3..fe7066d 100755
+--- a/model_ELM/makepointdata.py
++++ b/model_ELM/makepointdata.py
+@@ -670,6 +670,12 @@ def expand_surface_pft_dimension(self, ds, dim_name, target_size=22):
+         old_index[pft_axis] = slice(0, current_size)
+         new_index[pft_axis] = slice(0, current_size)
+         new_values[tuple(new_index)] = var_data.values[tuple(old_index)]
++        if dim_name == 'lsmpft' and var_name == 'MONTHLY_HEIGHT_TOP' and target_size > 18:
++            # The source 17-PFT surface has no Sphagnum canopy height. Give
++            # the added moss PFT (18) a 10-cm height for SP aerodynamics.
++            moss_index = [slice(None)] * var_data.ndim
++            moss_index[pft_axis] = 18
++            new_values[tuple(moss_index)] = 0.10
+         expanded[var_name] = xr.DataArray(new_values, dims=var_data.dims, attrs=var_data.attrs)
+ 
+     ds.close()
