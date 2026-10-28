@@ -1,9 +1,13 @@
 import unittest
+from types import SimpleNamespace
 
 import numpy as np
 import xarray as xr
 
-from model_ELM.makepointdata import add_topounit_dimension, spruce_topounit_fractions
+from model_ELM.makepointdata import (
+    add_topounit_dimension, set_first_topounit_bareground,
+    spruce_topounit_fractions,
+)
 
 
 class SpruceAcrotelmSurfaceTests(unittest.TestCase):
@@ -68,6 +72,49 @@ class SpruceAcrotelmSurfaceTests(unittest.TestCase):
         np.testing.assert_array_equal(
             surface["TopounitAcrotelmDepth"].values[:, 0], [0.0, 0.0]
         )
+
+    def test_fen_moss_fraction_preserves_bog_pfts(self):
+        pfts = np.zeros((3, 22, 1))
+        pfts[:, 14, 0] = 75.0
+        pfts[:, 18, 0] = 25.0
+        surface = xr.Dataset(
+            {"PCT_NAT_PFT": (("topounit", "natpft", "gridcell"), pfts)}
+        )
+        site = SimpleNamespace(case_options={"spruce_fen_moss_fraction": "25"})
+        updated = set_first_topounit_bareground(site, surface)
+        np.testing.assert_allclose(updated.PCT_NAT_PFT.values[0, :, 0].sum(), 100.0)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 0, 0], 75.0)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 18, 0], 25.0)
+        np.testing.assert_array_equal(updated.PCT_NAT_PFT.values[1:, :, :], pfts[1:, :, :])
+
+    def test_fen_defaults_to_bare_ground(self):
+        pfts = np.zeros((3, 22, 1))
+        surface = xr.Dataset(
+            {"PCT_NAT_PFT": (("topounit", "natpft", "gridcell"), pfts)}
+        )
+        site = SimpleNamespace(case_options={})
+        updated = set_first_topounit_bareground(site, surface)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 0, 0], 100.0)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 18, 0], 0.0)
+
+    def test_fen_can_be_all_moss(self):
+        pfts = np.zeros((3, 22, 1))
+        surface = xr.Dataset(
+            {"PCT_NAT_PFT": (("topounit", "natpft", "gridcell"), pfts)}
+        )
+        site = SimpleNamespace(case_options={"spruce_fen_moss_fraction": "100"})
+        updated = set_first_topounit_bareground(site, surface)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 0, 0], 0.0)
+        self.assertEqual(updated.PCT_NAT_PFT.values[0, 18, 0], 100.0)
+
+    def test_fen_moss_fraction_rejects_invalid_percent(self):
+        pfts = np.zeros((3, 22, 1))
+        surface = xr.Dataset(
+            {"PCT_NAT_PFT": (("topounit", "natpft", "gridcell"), pfts)}
+        )
+        site = SimpleNamespace(case_options={"spruce_fen_moss_fraction": "120"})
+        with self.assertRaisesRegex(ValueError, "between 0 and 100"):
+            set_first_topounit_bareground(site, surface)
 
 
 if __name__ == "__main__":

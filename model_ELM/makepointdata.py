@@ -419,7 +419,7 @@ def setpfts(self, ds, pct_pft, zerootherlandunits=True, year=None, first_baregro
 
 
 def set_first_topounit_bareground(self, ds):
-    """Make topounit index 0 bare ground by setting natpft 0 to 100%."""
+    """Set the SPRUCE fen to bare ground or a configured Sphagnum/bare mix."""
     if 'PCT_NAT_PFT' not in ds:
         return ds
     arr = ds['PCT_NAT_PFT']
@@ -434,7 +434,17 @@ def set_first_topounit_bareground(self, ds):
     idx_nat0 = [slice(None)] * arr.ndim
     idx_nat0[top_i] = 0
     idx_nat0[nat_i] = 0
-    arr.values[tuple(idx_nat0)] = 100.0
+    fen_moss_fraction = _case_option_float(
+        getattr(self, 'case_options', {}), 'spruce_fen_moss_fraction', 0.0)
+    if not 0.0 <= fen_moss_fraction <= 100.0:
+        raise ValueError('spruce_fen_moss_fraction must be between 0 and 100 percent')
+    arr.values[tuple(idx_nat0)] = 100.0 - fen_moss_fraction
+    if fen_moss_fraction > 0.0:
+        if arr.sizes['natpft'] <= 18:
+            raise ValueError('SPRUCE fen moss requires PFT index 18 on the surface')
+        idx_moss = idx_nat0.copy()
+        idx_moss[nat_i] = 18
+        arr.values[tuple(idx_moss)] = fen_moss_fraction
     return ds
 
 
@@ -670,6 +680,12 @@ def expand_surface_pft_dimension(self, ds, dim_name, target_size=22):
         old_index[pft_axis] = slice(0, current_size)
         new_index[pft_axis] = slice(0, current_size)
         new_values[tuple(new_index)] = var_data.values[tuple(old_index)]
+        if dim_name == 'lsmpft' and var_name == 'MONTHLY_HEIGHT_TOP' and target_size > 18:
+            # The source 17-PFT surface has no Sphagnum canopy height. Give
+            # the added moss PFT (18) a 10-cm height for SP aerodynamics.
+            moss_index = [slice(None)] * var_data.ndim
+            moss_index[pft_axis] = 18
+            new_values[tuple(moss_index)] = 0.10
         expanded[var_name] = xr.DataArray(new_values, dims=var_data.dims, attrs=var_data.attrs)
 
     ds.close()

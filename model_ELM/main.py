@@ -1429,7 +1429,7 @@ class ELMcase():
               'fsurdat', 'finidat', 'flanduse_timeseries', 'fatmlndfrac', 'maxpatch_pft', \
               'peatlands_upland_only', 'peatlands_upland_topounit', \
               'peatlands_upland_pfts', 'peatlands_upland_pft_fractions', \
-              'site_npfts', 'site_pft_fractions', \
+              'site_npfts', 'site_pft_fractions', 'spruce_fen_moss_fraction', \
               'external_mask_file', 'external_mask_var', 'external_mask_min', \
               'external_mask_max', 'external_mask_values', 'external_mask_invert', \
               'external_mask_lat_var', 'external_mask_lon_var', \
