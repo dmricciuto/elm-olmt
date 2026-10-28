@@ -10,7 +10,15 @@ the count for its sites; for the five ICOS sites, the count is the Shuttle
 catalogue's first-to-last span. This step does **not** download flux or
 meteorological products.
 
-The files are under `inputdata/lnd/clm2/PTCLM/`:
+The installed files are under the sibling `inputdata/lnd/clm2/PTCLM/`.
+Versioned copies are in this repository's `inputdata/PTCLM/` directory;
+copy them into the model inputdata tree when setting up a new environment:
+
+```bash
+cp inputdata/PTCLM/fluxnet_shuttle_* ../inputdata/lnd/clm2/PTCLM/
+```
+
+The files are:
 
 - `fluxnet_shuttle_sitedata.txt`: coordinates, elevation, and available years.
 - `fluxnet_shuttle_pftdata.txt`: 17-PFT ELM fractions, using existing OLMT

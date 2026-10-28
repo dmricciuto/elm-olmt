@@ -1,0 +1,247 @@
+site_code,name,state,lon,lat,elev,startyear,endyear,alignyear
+AR-CCa,Carlos Casares agriculture,AR,-61.3181,-35.621,83,2012,2020,1851
+AR-CCg,Carlos Casares grassland,AR,-61.1855,-35.9244,84,2018,2024,1851
+BR-ITA,MataFLUX: Multi-species tree restoration planting,BR,-48.6467,-23.0604,820,2020,2024,1851
+BR-Ji3,Ji-Paraná/RO - Reserva Biológica do Jaru (RBJ),BR,-61.8725,-10.1866,160,2004,2010,1851
+BR-Ma2,Manaus - ZF2 K34,BR,-60.2093,-2.6091,130,1999,2016,1851
+BR-Ma3,"ZF3, Colosso farm",BR,-59.8835,-2.3907,147,2008,2018,1851
+BR-Npw,Northern Pantanal Wetland,BR,-56.412,-16.498,120,2013,2017,1851
+BR-Sa1,Santarem-Km67-Primary Forest,BR,-54.9589,-2.8567,88,2002,2011,1851
+BR-Sa3,Santarem-Km83-Logged Forest,BR,-54.9714,-3.018,100,2000,2004,1851
+BR-Xpw,XomanoFlux,BR,-56.461,-16.373,124,2017,2022,1851
+CA-ARB,Attawapiskat River Bog,CA,-83.9452,52.695,90,2011,2024,1851
+CA-ARF,Attawapiskat River Fen,CA,-83.955,52.7008,88,2011,2024,1851
+CA-Ca1,British Columbia - 1949 Douglas-fir stand,CA,-125.3336,49.8673,300,1997,2010,1851
+CA-Ca2,British Columbia - Clearcut Douglas-fir stand (harvested winter 1999/2000),CA,-125.2909,49.8705,300,2000,2010,1851
+CA-Ca3,British Columbia - Pole sapling Douglas-fir stand,CA,-124.9004,49.5346,170,2001,2024,1851
+CA-Cbo,"Ontario - Mixed Deciduous, Borden Forest Site",CA,-79.9341,44.3184,210,1996,2024,1851
+CA-DB2,Delta Burns Bog 2,CA,-122.9951,49.119,4,2019,2024,1851
+CA-DBB,Delta Burns Bog,CA,-122.9849,49.1293,4,2015,2024,1851
+CA-Gro,"Ontario - Groundhog River, Boreal Mixedwood Forest",CA,-82.1556,48.2167,340,2003,2014,1851
+CA-KLP,Kinoje Lake Peatland,CA,-81.7684,51.5902,71,2011,2020,1851
+CA-LP1,British Columbia - Mountain pine beetle-attacked lodgepole pine stand,CA,-122.8414,55.1119,751,2007,2024,1851
+CA-Man,Manitoba - Northern Old Black Spruce (former BOREAS Northern Study Area),CA,-98.4808,55.8796,259,1994,2008,1851
+CA-Mer,"Ontario - Eastern Peatland, Mer Bleue",CA,-75.5186,45.4094,70,1998,2020,1851
+CA-Ojp,"Saskatchewan - Western Boreal, Mature Jack Pine",CA,-104.692,53.9163,579,1999,2010,1851
+CA-PB1,Polar Bear 1 - Peat Plateau,CA,-83.4579,54.9417,29,2016,2024,1851
+CA-PB2,Polar Bear 2 - Fen,CA,-83.4736,54.9389,26,2017,2024,1851
+CA-Qfo,"Quebec - Eastern Boreal, Mature Black Spruce",CA,-74.3421,49.6925,382,2003,2010,1851
+CA-SCB,Scotty Creek Bog,CA,-121.2984,61.3089,280,2014,2019,1851
+CA-SCC,Scotty Creek Landscape,CA,-121.2992,61.3079,285,2013,2024,1851
+CA-SF2,"Saskatchewan - Western Boreal, forest burned in 1989",CA,-105.8775,54.2539,520,2001,2005,1851
+CA-SF3,"Saskatchewan - Western Boreal, forest burned in 1998",CA,-106.0053,54.0916,540,2001,2006,1851
+CA-SJ2,"Saskatchewan - Western Boreal, Jack Pine forest harvested in 2002",CA,-104.649,53.945,580,2003,2008,1851
+CA-TP1,Ontario - Turkey Point 2002 Plantation White Pine,CA,-80.5595,42.6609,265,2002,2023,1851
+CA-TP2,Ontario - Turkey Point 1989 Plantation White Pine,CA,-80.4588,42.7744,212,2002,2007,1851
+CA-TP3,Ontario - Turkey Point 1974 Plantation White Pine,CA,-80.3483,42.7068,184,2002,2023,1851
+CA-TP4,Ontario - Turkey Point 1939 Plantation White Pine,CA,-80.3574,42.7102,184,2002,2023,1851
+CA-TPD,Ontario - Turkey Point Mature Deciduous,CA,-80.5577,42.6353,260,2012,2023,1851
+CL-SDF,Senda Darwin Forest,CL,-73.676,-41.883,50,2014,2021,1851
+CL-SDP,Senda Darwin Peatland,CL,-73.666,-41.879,50,2014,2021,1851
+CR-AqC,Aquiares Coffee-Flux,CR,-83.7289,9.938369,1042,2009,2016,1851
+GF-Guy,Guyaflux,GF,-52.9248,5.2787,40,2004,2025,1851
+GL-Dsk,Disko,GL,-53.51413,69.25349,8,2020,2025,1851
+GL-NuF,Nuuk Fen,GL,-51.386066,64.130936,43,2019,2025,1851
+GL-ZaH,Zackenberg Gras,GL,-20.550869,74.4733,41,2020,2025,1851
+MX-Tes,"Tesopaco, secondary tropical dry forest",MX,-109.2977,27.8446,460,2004,2008,1851
+PE-QFR,Quistococha Forest Reserve,PE,-73.319,-3.8344,104,2018,2022,1851
+PR-xGU,NEON Guanica Forest (GUAN),PR,-66.8687,17.9696,143,2019,2024,1851
+PR-xLA,NEON Lajas Experimental Station (LAJA),PR,-67.0769,18.0212,24,2019,2024,1851
+US-A03,ARM-AMF3-Oliktok,US,-149.8823,70.4953,5,2015,2021,1851
+US-A10,ARM-NSA-Barrow,US,-156.6149,71.3242,4,2011,2022,1851
+US-ADR,Amargosa Desert Research Site (ADRS),US,-116.6933,36.7653,842,2011,2017,1851
+US-ALQ,Allequash Creek Site,US,-89.6067,46.0308,497,2015,2025,1851
+US-ARM,ARM Southern Great Plains site- Lamont,US,-97.4888,36.6058,314,2003,2025,1851
+US-Akn,Savannah River Site,US,-81.5653,33.3825,93,2011,2022,1851
+US-Aud,Audubon Research Ranch,US,-110.5104,31.5907,1469,2002,2024,1851
+US-BZB,Bonanza Creek Thermokarst Bog,US,-148.3208,64.6955,100,2011,2025,1851
+US-BZF,Bonanza Creek Rich Fen,US,-148.3121,64.7013,95,2011,2025,1851
+US-BZo,Bonanza Creek Old Thermokarst Bog,US,-148.33,64.6936,100,2018,2025,1851
+US-Bar,Bartlett Experimental Forest,US,-71.2881,44.0646,272,2004,2023,1851
+US-Bi1,Bouldin Island Alfalfa,US,-121.4993,38.0992,-2.7,2016,2024,1851
+US-Bi2,Bouldin Island corn,US,-121.5351,38.1091,-5,2017,2025,1851
+US-CF1,CAF-LTAR Cook East,US,-117.0821,46.7815,794,2017,2021,1851
+US-CF3,CAF-LTAR Boyd North,US,-117.1261,46.7551,795,2017,2021,1851
+US-CF4,CAF-LTAR Boyd South,US,-117.1285,46.7518,795,2017,2021,1851
+US-CGG,Concord Grazed Grassland,US,-121.9761,37.938,119.5,2019,2024,1851
+US-CMW,Charleston Mesquite Woodland,US,-110.1777,31.6637,1199,2001,2021,1851
+US-CS2,Tri county school Pine Forest,US,-89.5002,44.1467,328,2018,2022,1851
+US-CdM,Cedar Mesa,US,-109.7471,37.5241,1860,2019,2024,1851
+US-Ced,Cedar Bridge,US,-74.3791,39.8398,58,2005,2014,1851
+US-ChR,Chestnut Ridge,US,-84.3324,35.9311,286,2006,2019,1851
+US-Cms,Central Marsh,US,-156.6223,71.3202,6,1999,2005,1851
+US-Cop,Corral Pocket,US,-109.39,38.09,1520,2001,2007,1851
+US-Cst,Crossett Experimental Forest,US,-91.9204,33.0442,50,2013,2017,1851
+US-Cwt,Coweeta,US,-83.4275,35.0592,690,2011,2024,1851
+US-DFC,"US Dairy Forage Research Center, Prairie du Sac",US,-89.7117,43.3448,264.9,2018,2024,1851
+US-DS3,Staten Rice 1,US,-121.549,38.1235,-7,2021,2025,1851
+US-Dk1,Duke Forest-open field,US,-79.0934,35.9712,168,2001,2008,1851
+US-Dk2,Duke Forest-hardwoods,US,-79.1004,35.9736,168,2001,2008,1851
+US-Dk3,Duke Forest - loblolly pine,US,-79.0942,35.9782,163,2001,2008,1851
+US-Dmg,Dutch Slough Marsh Gilbert Tract,US,-121.6691,38.0015,1,2021,2025,1851
+US-EA4,EAA Field Research Park Woodland,US,-98.3816,29.6633,297,2021,2025,1851
+US-EDN,Eden Landing Ecological Reserve,US,-122.114,37.6156,2,2018,2024,1851
+US-EML,"Eight Mile Lake Permafrost thaw gradient, Healy Alaska.",US,-149.2536,63.8784,662,2008,2023,1851
+US-Elm,Everglades (long hydroperiod marsh),US,-80.7826,25.5519,0.77,2008,2024,1851
+US-Esm,Everglades (short hydroperiod marsh),US,-80.5946,25.4379,1.07,2008,2024,1851
+US-Fmf,Flagstaff - Managed Forest,US,-111.7273,35.1426,2160,2005,2010,1851
+US-Fo1,Flux Observations of Carbon from an Airborne Laboratory (FOCAL) Campaign Site 1,US,-148.5671,70.085,28,2013,2024,1851
+US-Fuf,Flagstaff - Unmanaged Forest,US,-111.762,35.089,2180,2005,2010,1851
+US-Fwf,Flagstaff - Wildfire,US,-111.7718,35.4454,2270,2005,2010,1851
+US-GLE,GLEES,US,-106.2399,41.3665,3197,2005,2020,1851
+US-HB1,North Inlet Crab Haul Creek,US,-79.1957,33.3455,0.1,2018,2024,1851
+US-HB2,Hobcaw Barony Mature Longleaf Pine,US,-79.244,33.3242,4.7,2018,2024,1851
+US-HB3,Hobcaw Barony Longleaf Pine Restoration,US,-79.2322,33.3482,7.3,2019,2024,1851
+US-HB4,Minim Creek Brackish Impoundment,US,-79.2975,33.2015,1,2020,2024,1851
+US-HBK,Hubbard Brook Experimental Forest,US,-71.7181,43.9397,367,2016,2024,1851
+US-HRA,Humnoke Farm Rice Field – Field A,US,-91.7517,34.5852,60,2015,2024,1851
+US-HRC,Humnoke Farm Rice Field – Field C,US,-91.7517,34.5888,60,2015,2024,1851
+US-Ha1,Harvard Forest EMS Tower (HFR1),US,-72.1715,42.5378,340,1991,2025,1851
+US-Ho2,Howland Forest (west tower),US,-68.747,45.209,61,1999,2025,1851
+US-Ho3,Howland Forest (harvest site),US,-68.7265,45.2072,61,2003,2021,1851
+US-Hsm,Hill Slough Marsh,US,-122.0212,38.2368,1.113,2021,2025,1851
+US-IAB,Iowa State University NE tower,US,-93.7016,42.0001,314.4,2019,2024,1851
+US-IAC,Iowa State University SE tower,US,-93.7016,41.9984,315,2019,2024,1851
+US-IAM,Iowa State University Miscanthus,US,-93.7042,41.9994,314,2019,2024,1851
+US-ICh,Imnavait Creek Watershed Heath Tundra,US,-149.2958,68.6068,940,2007,2025,1851
+US-ICs,Imnavait Creek Watershed Wet Sedge Tundra,US,-149.311,68.6058,920,2007,2025,1851
+US-ICt,Imnavait Creek Watershed Tussock Tundra,US,-149.3041,68.6063,930,2007,2025,1851
+US-Jo1,Jornada Experimental Range Bajada Site,US,-106.635,32.582,1188,2010,2022,1851
+US-Jo2,Jornada Experimental Range Mixed Shrubland,US,-106.6032,32.5849,1469,2010,2020,1851
+US-KFS,Kansas Field Station,US,-95.1907,39.0561,310,2007,2019,1851
+US-KLS,Kansas Land Institute,US,-97.5684,38.7745,373,2012,2019,1851
+US-Kon,Konza Prairie LTER (KNZ),US,-96.5603,39.0824,417,2004,2019,1851
+US-LA2,Salvador WMA Freshwater Marsh,US,-90.2869,29.8587,0,2011,2023,1851
+US-LA3,Barataria Bay Saline Marsh,US,-89.9153,29.4936,0.2,2019,2023,1851
+US-LS1,San Pedro River Lewis Springs Sacaton Grassland,US,-110.1403,31.5615,1230,2003,2007,1851
+US-LS2,San Pedro River Lewis Springs Savanna,US,-110.1344,31.5659,1240,2003,2007,1851
+US-Los,Lost Creek,US,-89.9786,46.0827,480,2000,2025,1851
+US-MBP,Marcell Bog Lake Peatland,US,-93.4893,47.5051,416,2009,2024,1851
+US-MMS,Morgan Monroe State Forest,US,-86.4133,39.3232,275,1999,2023,1851
+US-MN1,"Morris: Corn-Soybean with Cover Crops, Strip Tillage",US,-96.1269,45.6168,339,2017,2024,1851
+US-MN2,"Morris: Corn-Soybean-Wheat with Cover Crops, Minimal Tillage",US,-96.1271,45.627,339,2017,2024,1851
+US-MN3,"Morris: Corn-Soybean, Conventional Tillage",US,-96.1265,45.6091,339,2020,2024,1851
+US-MOz,Missouri Ozark Site,US,-92.2,38.7441,219.4,2004,2021,1851
+US-Me3,Metolius-second young aged pine,US,-121.6078,44.3154,1005,2004,2009,1851
+US-Me6,Metolius Young Pine Burn,US,-121.6044,44.3232,998,2010,2025,1851
+US-Mo1,LTAR CMRB Field 1 (CMRB ASP),US,-92.1167,39.2298,260,2015,2024,1851
+US-Mo2,LTAR CMRB Tucker Prairie (CMRB TP),US,-91.9945,38.9488,275,2018,2024,1851
+US-Mo3,LTAR CMRB Field 3 (CMRB BAU),US,-92.1493,39.2322,261,2016,2023,1851
+US-Mpj,Mountainair Pinyon-Juniper Woodland,US,-106.2385,34.4382,2196,2008,2025,1851
+US-MtB,Mt Bigelow,US,-110.7256,32.416,2573,2009,2024,1851
+US-Myb,Mayberry Wetland,US,-121.765,38.0499,-4,2010,2025,1851
+US-NC1,NC_Clearcut,US,-76.7119,35.8118,5,2005,2012,1851
+US-NC2,NC_Loblolly Plantation,US,-76.6685,35.803,5,2005,2025,1851
+US-NC3,NC_Clearcut#3,US,-76.656,35.799,5,2013,2021,1851
+US-NC4,NC_AlligatorRiver,US,-75.9135,35.7817,1,2009,2025,1851
+US-NGB,NGEE Arctic Barrow,US,-156.6092,71.28,5.273,2012,2023,1851
+US-NGC,NGEE Arctic Council,US,-163.7002,64.8618,35,2017,2023,1851
+US-NR1,Niwot Ridge Forest (LTER NWT1),US,-105.547,40.0329,3050,1998,2025,1851
+US-NR3,Niwot Ridge Alpine (T-Van West),US,-105.5864,40.052,3504,2007,2024,1851
+US-Ne1,Mead - irrigated continuous maize site,US,-96.4766,41.1651,361,2001,2024,1851
+US-Ne2,Mead - irrigated maize-soybean rotation site,US,-96.4701,41.1649,362,2001,2024,1851
+US-Ne3,Mead - rainfed maize-soybean rotation site,US,-96.4397,41.1797,363,2001,2024,1851
+US-ONA,Florida pine flatwoods,US,-81.9509,27.3836,25,2016,2022,1851
+US-OWC,Old Woman Creek,US,-82.5124,41.3793,174,2015,2025,1851
+US-Oho,Oak Openings,US,-83.8438,41.5545,230,2004,2013,1851
+US-Prr,Poker Flat Research Range Black Spruce Forest,US,-147.4876,65.1237,210,2010,2022,1851
+US-RC1,Cook Agronomy Farm - No Till,US,-117.0777,46.7837,807,2011,2016,1851
+US-RC2,Cook Agronomy Farm - Conventional Till,US,-117.0807,46.7776,799,2012,2016,1851
+US-RC3,WSU Lind Dryland Research Station,US,-118.598,46.991,473,2012,2016,1851
+US-RC4,Moscow Mountain on-farm site,US,-116.949,46.758,817,2012,2016,1851
+US-Rls,RCEW Low Sagebrush,US,-116.7356,43.1439,1608,2014,2023,1851
+US-Rms,RCEW Mountain Big Sagebrush,US,-116.7486,43.0645,2111,2014,2023,1851
+US-Ro1,Rosemount- G21,US,-93.0898,44.7143,290,2004,2016,1851
+US-Ro2,Rosemount- C7,US,-93.0888,44.7288,292,2008,2016,1851
+US-Ro4,Rosemount Prairie,US,-93.0723,44.6781,274,2014,2025,1851
+US-Ro5,Rosemount I18_South,US,-93.0576,44.691,283,2017,2024,1851
+US-Ro6,Rosemount I18_North,US,-93.0578,44.6946,282,2017,2024,1851
+US-Rpf,Poker Flat Research Range: Succession from fire scar to deciduous forest,US,-147.429,65.1198,497,2008,2024,1851
+US-Rwe,RCEW Reynolds Mountain East,US,-116.7591,43.0653,2098,2003,2007,1851
+US-Rwf,RCEW Upper Sheep Prescibed Fire,US,-116.7231,43.1207,1878,2014,2023,1851
+US-Rws,Reynolds Creek Wyoming big sagebrush,US,-116.7132,43.1675,1425,2014,2023,1851
+US-SP1,Slashpine-Austin Cary- 65yrs nat regen,US,-82.2188,29.7381,50,2000,2020,1851
+US-SRC,Santa Rita Creosote,US,-110.8395,31.9083,950,2008,2014,1851
+US-SRG,Santa Rita Grassland,US,-110.8277,31.7894,1291,2008,2025,1851
+US-SRM,Santa Rita Mesquite,US,-110.8661,31.8214,1120,2004,2025,1851
+US-SRS,Santa Rita Savanna,US,-110.8508,31.8173,1169,2011,2018,1851
+US-SSH,Susquehanna Shale Hills Critical Zone Observatory,US,-77.9041,40.6658,310,2016,2021,1851
+US-Seg,Sevilleta grassland,US,-106.7003,34.3603,1596,2007,2025,1851
+US-Ses,Sevilleta shrubland,US,-106.7448,34.335,1604,2007,2025,1851
+US-Slt,Silas Little- New Jersey,US,-74.5956,39.9156,30,2005,2022,1851
+US-Sne,Sherman Island Restored Wetland,US,-121.7547,38.0369,-5,2016,2020,1851
+US-StJ,St Jones Reserve,US,-75.4372,39.0882,6.7,2015,2020,1851
+US-Sta,Saratoga,US,-106.8024,41.3966,2069,2005,2009,1851
+US-Syv,Sylvania Wilderness Area,US,-89.3459,46.2421,540,2001,2025,1851
+US-TKs,Toolik Shrub Tundra,US,-149.5769,68.6337,760,2018,2025,1851
+US-TaS,Taylor Slough/Panhandle,US,-80.6391,25.1908,3,2017,2023,1851
+US-Ton,Tonzi Ranch,US,-120.966,38.4309,177,2001,2025,1851
+US-Tw1,Twitchell Wetland West Pond,US,-121.6469,38.1074,-5,2011,2023,1851
+US-Tw3,Twitchell Alfalfa,US,-121.6469,38.1152,-4,2013,2018,1851
+US-Tw4,Twitchell East End Wetland,US,-121.6413,38.1027,-5,2013,2024,1851
+US-Twt,Twitchell Island,US,-121.6531,38.1087,-7,2009,2017,1851
+US-UC1,LTAR UCB (Upper Chesapeake Bay) EC1,US,-78.0056,40.7536,390,2019,2024,1851
+US-UC2,LTAR UCB (Upper Chesapeake Bay) EC2,US,-77.9998,40.7559,396,2019,2024,1851
+US-UMd,UMBS Disturbance,US,-84.6975,45.5625,239,2007,2025,1851
+US-Uaf,"University of Alaska, Fairbanks",US,-147.8555,64.8663,155,2003,2025,1851
+US-UiA,University of Illinois Switchgrass,US,-88.1961,40.0646,224,2008,2024,1851
+US-UiB,University of Illinois Miscanthus,US,-88.1984,40.0628,224,2008,2024,1851
+US-UiC,University of Illinois Maize-Soy,US,-88.1961,40.0628,224,2008,2024,1851
+US-UiD,University of Illinois Restored Native Prairie,US,-88.1985,40.0646,224,2008,2024,1851
+US-UiE,University of Illinois Sorghum-Soy,US,-88.2033,40.0629,217,2018,2024,1851
+US-UiF,University of Illinois Miscanthus 2,US,-88.2015,40.0665,220,2018,2023,1851
+US-UiG,University of Illinois Maize-Soy 2,US,-88.2009,40.0629,220,2018,2023,1851
+US-Var,Vaira Ranch- Ione,US,-120.9508,38.4133,129,2000,2025,1851
+US-Vcm,Valles Caldera Mixed Conifer,US,-106.5322,35.8885,3043,2007,2025,1851
+US-Vcp,Valles Caldera Ponderosa Pine,US,-106.5965,35.8641,2501,2007,2025,1851
+US-WCr,Willow Creek,US,-90.0795,45.8058,520,1999,2025,1851
+US-Whs,Walnut Gulch Lucky Hills Shrub,US,-110.0522,31.7438,1370,2007,2025,1851
+US-Wjs,Willard Juniper Savannah,US,-105.8617,34.4258,1931,2007,2025,1851
+US-Wkg,Walnut Gulch Kendall Grasslands,US,-109.9419,31.7365,1531,2004,2025,1851
+US-YK1,"Yukon-Kuskokwim Delta, Izaviknek-Kingaglia uplands, Burned 2015",US,-163.2228,61.2723,15,2019,2025,1851
+US-YK2,"Yukon-Kuskokwim Delta, Izaviknek-Kingaglia uplands, Unburned",US,-163.259,61.2548,15,2019,2025,1851
+US-xAB,NEON Abby Road (ABBY),US,-122.3303,45.7624,363,2019,2024,1851
+US-xAE,NEON Klemme Range Research Station (OAES),US,-99.0588,35.4106,516,2019,2024,1851
+US-xBA,NEON Barrow Environmental Observatory (BARR),US,-156.6194,71.2824,6,2019,2024,1851
+US-xBL,NEON Blandy Experimental Farm (BLAN),US,-78.0716,39.0603,183,2019,2024,1851
+US-xBN,NEON Caribou Creek - Poker Flats Watershed (BONA),US,-147.5026,65.154,263,2019,2024,1851
+US-xBR,NEON Bartlett Experimental Forest (BART),US,-71.2873,44.0639,232,2019,2024,1851
+US-xCL,NEON LBJ National Grassland (CLBJ),US,-97.57,33.4012,259,2019,2024,1851
+US-xCP,NEON Central Plains Experimental Range (CPER),US,-104.7456,40.8155,1654,2019,2024,1851
+US-xDC,NEON Dakota Coteau Field School (DCFS),US,-99.1066,47.1617,559,2019,2024,1851
+US-xDJ,NEON Delta Junction (DEJU),US,-145.7514,63.8811,529,2019,2024,1851
+US-xDL,NEON Dead Lake (DELA),US,-87.8039,32.5417,22,2019,2024,1851
+US-xDS,NEON Disney Wilderness Preserve (DSNY),US,-81.4362,28.125,15,2019,2024,1851
+US-xGR,"NEON Great Smoky Mountains National Park, Twin Creeks (GRSM)",US,-83.5019,35.689,579,2019,2024,1851
+US-xHA,NEON Harvard Forest (HARV),US,-72.1727,42.5369,351,2019,2024,1851
+US-xHE,NEON Healy (HEAL),US,-149.2133,63.8757,705,2019,2024,1851
+US-xJE,NEON Jones Ecological Research Center (JERC),US,-84.4686,31.1948,44,2019,2024,1851
+US-xJR,NEON Jornada LTER (JORN),US,-106.8425,32.5907,1329,2019,2024,1851
+US-xKA,NEON Konza Prairie Biological Station - Relocatable (KONA),US,-96.6129,39.1104,1329,2019,2024,1851
+US-xKZ,NEON Konza Prairie Biological Station (KONZ),US,-96.5631,39.1008,381,2019,2024,1851
+US-xLE,NEON Lenoir Landing (LENO),US,-88.1612,31.8539,20,2019,2024,1851
+US-xMB,NEON Moab (MOAB),US,-109.3883,38.2483,1767,2019,2024,1851
+US-xML,NEON Mountain Lake Biological Station (MLBS),US,-80.5248,37.3783,1126,2019,2024,1851
+US-xNG,NEON Northern Great Plains Research Laboratory (NOGP),US,-100.9154,46.7697,578,2019,2024,1851
+US-xNQ,NEON Onaqui-Ault (ONAQ),US,-112.4524,40.1776,1685,2019,2024,1851
+US-xNW,NEON Niwot Ridge Mountain Research Station (NIWO),US,-105.5824,40.0543,3513,2019,2024,1851
+US-xPU,NEON Pu'u Maka'ala Natural Area Reserve (PUUM),US,-155.3173,19.5531,1685,2019,2024,1851
+US-xRM,"NEON Rocky Mountain National Park, CASTNET (RMNP)",US,-105.5459,40.2759,2743,2019,2024,1851
+US-xRN,NEON Oak Ridge National Lab (ORNL),US,-84.2826,35.9641,334,2019,2024,1851
+US-xSB,NEON Ordway-Swisher Biological Station (OSBS),US,-81.9934,29.6893,45,2019,2024,1851
+US-xSC,NEON Smithsonian Conservation Biology Institute (SCBI),US,-78.1395,38.8929,361,2019,2024,1851
+US-xSE,NEON Smithsonian Environmental Research Center (SERC),US,-76.56,38.8901,15,2019,2024,1851
+US-xSJ,NEON San Joaquin Experimental Range (SJER),US,-119.7323,37.1088,368,2019,2024,1851
+US-xSL,"NEON North Sterling, CO (STER)",US,-103.0293,40.4619,1364,2019,2024,1851
+US-xSP,NEON Soaproot Saddle (SOAP),US,-119.2622,37.0334,1160,2019,2024,1851
+US-xSR,NEON Santa Rita Experimental Range (SRER),US,-110.8355,31.9107,983,2019,2024,1851
+US-xST,NEON Steigerwaldt Land Services (STEI),US,-89.5864,45.5089,481,2019,2024,1851
+US-xTA,NEON Talladega National Forest (TALL),US,-87.3933,32.9505,135,2019,2024,1851
+US-xTE,NEON Lower Teakettle (TEAK),US,-119.006,37.0058,2147,2019,2024,1851
+US-xTL,NEON Toolik (TOOL),US,-149.3705,68.6611,843,2019,2024,1851
+US-xTR,NEON Treehaven (TREE),US,-89.5857,45.4937,472,2019,2024,1851
+US-xUK,NEON The University of Kansas Field Station (UKFS),US,-95.1921,39.0404,335,2019,2024,1851
+US-xUN,NEON University of Notre Dame Environmental Research Center (UNDE),US,-89.5373,46.2339,518,2019,2024,1851
+US-xWD,NEON Woodworth (WOOD),US,-99.2414,47.1282,579,2019,2024,1851
+US-xWR,NEON Wind River Experimental Forest (WREF),US,-121.9519,45.8205,407,2019,2024,1851
+US-xYE,NEON Yellowstone Northern Range (Frog Rock) (YELL),US,-110.5391,44.9535,2116,2019,2024,1851
