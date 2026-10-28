@@ -238,6 +238,10 @@ def read_water_table_observations(
             out=np.full(values.shape[0], np.nan),
             where=counts > 0,
         )
+    # ELM history uses a no-leap calendar; never compare a 29 February
+    # observation against an adjacent simulated day.
+    result = result.loc[~((result["date"].dt.month == 2) &
+                          (result["date"].dt.day == 29))]
     if start_year is not None:
         result = result[result["date"].dt.year >= start_year]
     if end_year is not None:

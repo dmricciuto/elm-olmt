@@ -61,9 +61,10 @@ FIGURES = (
         "Annual moss NPP. The modeled value uses peatland moss PFT 18 and excludes the auxiliary fen.",
     ),
     (
-        "Heterotrophic respiration",
+        "Heterotrophic-derived CO2 efflux",
         "carbon_budget_hr_timeseries.png",
-        "Annual heterotrophic respiration, area-weighted across hollow and hummock.",
+        "Annual heterotrophic-derived CO2 efflux (ELM HR plus microbe-methane CO2 surface "
+        "flux), area-weighted across hollow and hummock; CH4 and root respiration are excluded.",
     ),
     (
         "Carbon-budget treatment response",
@@ -194,7 +195,7 @@ def build_report(arguments: argparse.Namespace) -> None:
     microbial_settings = []
     if arguments.decomp_depth_efolding is not None:
         microbial_settings.append(
-            f"{arguments.decomp_depth_efolding:.3g} m decomposition e-folding"
+            f"{arguments.decomp_depth_efolding:.3g} m peat decomposition e-folding"
         )
     if arguments.dom_solubilization_anoxic_fraction is not None:
         microbial_settings.append(

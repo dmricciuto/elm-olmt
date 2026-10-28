@@ -26,11 +26,16 @@ def _case_microbe_parameters(run_root: Path, case_prefix: str) -> dict[str, floa
         if not path.is_file():
             continue
         with Dataset(path) as parameters:
-            return {
+            settings = {
                 name: float(parameters.variables[name][...].item())
                 for name in names
                 if name in parameters.variables
             }
+            if "decomp_depth_efolding_peat" in parameters.variables:
+                settings["decomp_depth_efolding"] = float(
+                    parameters.variables["decomp_depth_efolding_peat"][...].item()
+                )
+            return settings
     return {}
 
 

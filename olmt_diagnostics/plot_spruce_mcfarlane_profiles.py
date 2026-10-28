@@ -202,11 +202,30 @@ def _root_carbon_by_topounit(
     return total if found else float("nan")
 
 
-def read_model_profiles(history_specification: str) -> tuple[dict, Path]:
+def read_model_profiles(
+    history_specification: str, *, require_complete_history: bool = False
+) -> tuple[dict, Path]:
     history_file = _final_history_file(history_specification)
     result: dict[str, dict[str, np.ndarray | float]] = {}
     with ExitStack() as stack:
         dataset = stack.enter_context(netCDF4.Dataset(history_file))
+        if require_complete_history:
+            required = (
+                *CARBON_POOLS,
+                *(_nitrogen_name(pool) for pool in CARBON_POOLS),
+                *("C14_" + pool for pool in CARBON_POOLS),
+                *ROOT_C_POOLS,
+            )
+            missing = [
+                name for name in required if _variable_name(dataset, name) is None
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"Incomplete McFarlane history in {history_file}: missing "
+                    + ", ".join(missing)
+                    + ". Add the corresponding _col or _pft variables to "
+                    "[postprocessing] in the OLMT configuration and rerun."
+                )
         geometry_file = _companion_history_file(history_file)
         geometry = (
             stack.enter_context(netCDF4.Dataset(geometry_file))
@@ -695,7 +714,9 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     arguments = parse_args()
-    model, history_file = read_model_profiles(arguments.history)
+    model, history_file = read_model_profiles(
+        arguments.history, require_complete_history=True
+    )
     observations = read_observations(arguments.observations)
     arguments.output_dir.mkdir(parents=True, exist_ok=True)
     figure = arguments.output_dir / "spruce_mcfarlane_profile_comparison.png"

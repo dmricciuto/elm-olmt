@@ -10,6 +10,7 @@ from olmt_diagnostics.spruce_carbon import (
     FIT_CASES,
     METRICS,
     _annual_column_flux,
+    _annual_hr_with_microbe_co2_flux,
     _annual_pft_flux,
     temperature_response,
 )
@@ -48,15 +49,21 @@ class SpruceCarbonDiagnosticsTest(unittest.TestCase):
             col_weights[:] = [0.5, 0.2, 0.3]
             hr = dataset.createVariable("HR", "f8", ("time", "column"))
             hr[:] = np.array([[0, 1, 2], [0, 1, 2]]) * 1e-6
+            co2 = dataset.createVariable("MM_SURFACE_CO2_FLUX", "f8", ("time", "column"))
+            co2[:] = np.array([[0, 0.5, 1], [0, 0.5, 1]]) * 1e-6
 
     def test_area_weighted_annual_pft_and_column_fluxes(self):
         with tempfile.TemporaryDirectory() as root:
             self.make_history(root)
             tree = _annual_pft_flux(Path(root), "AGNPP", (3, 5), 2016, 2016)
             hr = _annual_column_flux(Path(root), "HR", 2016, 2016)
+            hr_with_co2 = _annual_hr_with_microbe_co2_flux(Path(root), 2016, 2016)
         self.assertEqual(tree["model_days"].iloc[0], 2)
         self.assertAlmostEqual(tree["model_gC_m2_yr"].iloc[0], 0.10368)
         self.assertAlmostEqual(hr["model_gC_m2_yr"].iloc[0], 0.27648)
+        self.assertAlmostEqual(hr_with_co2["model_hr_gC_m2_yr"].iloc[0], 0.27648)
+        self.assertAlmostEqual(hr_with_co2["model_microbe_co2_gC_m2_yr"].iloc[0], 0.13824)
+        self.assertAlmostEqual(hr_with_co2["model_gC_m2_yr"].iloc[0], 0.41472)
 
     def test_temperature_response_uses_t0_through_t9(self):
         rows = []

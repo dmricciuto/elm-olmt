@@ -68,8 +68,9 @@ METRICS = {
         "observation_variable": "NPP_pftgroup_moss",
     },
     "hr": {
-        "label": "Heterotrophic respiration",
+        "label": "Heterotrophic-derived CO2 efflux",
         "model_variable": "HR",
+        "model_additional_variable": "MM_SURFACE_CO2_FLUX",
         "model_dimension": "column",
         "pft_indices": (),
         "observation_variable": "HR",
@@ -172,6 +173,28 @@ def _annual_column_flux(
     )
 
 
+def _annual_hr_with_microbe_co2_flux(
+    run_dir: Path, start_year: int, end_year: int
+) -> pd.DataFrame:
+    """Combine decomposition HR and emitted microbe-methane CO2, excluding CH4."""
+    hr = _annual_column_flux(run_dir, "HR", start_year, end_year)
+    microbe_co2 = _annual_column_flux(
+        run_dir, "MM_SURFACE_CO2_FLUX", start_year, end_year
+    )
+    if not hr["year"].equals(microbe_co2["year"]) or not hr["model_days"].equals(
+        microbe_co2["model_days"]
+    ):
+        raise RuntimeError(
+            f"HR and MM_SURFACE_CO2_FLUX have different annual time coverage in {run_dir}"
+        )
+    result = hr.rename(columns={"model_gC_m2_yr": "model_hr_gC_m2_yr"})
+    result["model_microbe_co2_gC_m2_yr"] = microbe_co2["model_gC_m2_yr"]
+    result["model_gC_m2_yr"] = (
+        result["model_hr_gC_m2_yr"] + result["model_microbe_co2_gC_m2_yr"]
+    )
+    return result
+
+
 def read_budget_observations(path: Path) -> pd.DataFrame:
     observations = pd.read_csv(path)
     observations["obs"] = pd.to_numeric(observations["obs"], errors="coerce")
@@ -205,9 +228,14 @@ def compare_carbon_budget(
                     definition["pft_indices"], start_year, end_year,
                 )
             else:
-                model = _annual_column_flux(
-                    runs[case], definition["model_variable"], start_year, end_year
-                )
+                if "model_additional_variable" in definition:
+                    model = _annual_hr_with_microbe_co2_flux(
+                        runs[case], start_year, end_year
+                    )
+                else:
+                    model = _annual_column_flux(
+                        runs[case], definition["model_variable"], start_year, end_year
+                    )
             obs_case = obs_metric[obs_metric["treatment"] == case][
                 ["year", "obs", "obs_err", "temperature_offset_C"]
             ]
@@ -224,6 +252,7 @@ def compare_carbon_budget(
     columns = [
         "metric", "metric_label", "case", "case_label", "warming_C", "year",
         "model_gC_m2_yr", "model_days", "obs", "obs_err",
+        "model_hr_gC_m2_yr", "model_microbe_co2_gC_m2_yr",
     ]
     return pd.concat(frames, ignore_index=True)[columns].sort_values(
         ["metric", "case", "year"]

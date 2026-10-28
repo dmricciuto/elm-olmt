@@ -226,7 +226,9 @@ def main() -> None:
             if args.smoke_test else
             _latest_mcfarlane_state(args.run_root, args.case_prefix)
         )
-        model, state_file = read_mcfarlane_model_profiles(str(state))
+        model, state_file = read_mcfarlane_model_profiles(
+            str(state), require_complete_history=not args.smoke_test
+        )
         observations = read_mcfarlane_observations(args.mcfarlane_obs_file)
         mcfarlane_dir = args.output_dir / "mcfarlane2018"
         mcfarlane_dir.mkdir(parents=True, exist_ok=True)

@@ -33,7 +33,7 @@ python3 tools/run_spruce_diagnostics.py \
 This writes a package manifest plus:
 
 - hollow water-table comparisons and thawed-period statistics;
-- tree and shrub AGNPP, woody BGNPP, moss NPP, and HR comparisons;
+- tree and shrub AGNPP, woody BGNPP, moss NPP, and corrected heterotrophic CO2 comparisons;
 - treatment intercept and slope comparisons for those carbon-budget terms;
 - hummock+hollow weighted DOC, acetate, and CH4 profiles; and
 - the four-panel McFarlane peat-density, C:N, radiocarbon, and stock figure.
@@ -74,7 +74,11 @@ The command writes:
 
 Add `--include-carbon-budget` to generate comparisons against the processed
 SPRUCE carbon-budget workbook. The standard configuration archives
-`AGNPP_pft`, `BGNPP_pft`, `NPP_pft`, and `HR_col`. Model values are expressed
+`AGNPP_pft`, `BGNPP_pft`, `NPP_pft`, `HR_col`, and `MM_SURFACE_CO2_FLUX_col`.
+The observed heterotrophic-respiration comparison uses model
+`HR + MM_SURFACE_CO2_FLUX` (no CH4 or root respiration). Both components are
+retained in the annual CSV. The microbe CO2 field is required; the diagnostic
+does not silently fall back to HR alone. Model values are expressed
 per hummock+hollow area; the unvegetated fen is excluded.
 
 The diagnostic maps tree AGNPP to PFTs 3+5, shrub AGNPP to PFT 14, combined
@@ -101,10 +105,14 @@ as a topounit-weighted bog mean. Observations are summarized from the 16 treed
 profiles and the two non-treed profiles used in the paper; their raw public
 data and citation are retained under `data/spruce/mcfarlane2018/`.
 
-Modeled peat C is the sum of the CWD, litter 1--3, SOM 1--4, DOM, bacteria,
-and fungi fields available on the selected history tape. Missing components
-are identified above the relevant subplot instead of being silently read from
-a restart. The sampled cores retained vascular plant material, but ELM's root
+Modeled peat C is the sum of CWD, litter 1--3, SOM 1--4, DOM, bacteria, and
+fungi. The standard McFarlane diagnostic requires vertically resolved C, N,
+and C14 fields for all eleven pools on the selected history tape, plus
+`FROOTC`, `LIVECROOTC`, and `DEADCROOTC` at PFT level. If any are absent, it
+fails instead of plotting a partial peat profile or substituting a restart.
+`SPRUCE_microbe_20260924.cfg` requests these fields and enables C14 with the
+historical ambient atmospheric forcing. The sampled cores retained vascular
+plant material, but ELM's root
 C is not layer resolved. When `FROOTC`, `LIVECROOTC`, and `DEADCROOTC` are on
 the history tape, the stock panel adds their whole-column total as a separate
 marker. The paper's reported 176 +/- 40 kg C m-2 stock excludes raised-hummock
