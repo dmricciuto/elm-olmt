@@ -1,0 +1,326 @@
+"""
+Pydantic Schema Models for FLUXNET Shuttle Library
+==================================================
+
+:module:: fluxnet_shuttle.models
+:synopsis: Pydantic models for FLUXNET dataset metadata and validation
+:moduleauthor: Valerie Hendrix <vchendrix@lbl.gov>
+:moduleauthor: Sy-Toan Ngo <sytoanngo@lbl.gov>
+:platform: Unix, Windows
+:created: 2025-10-09
+:updated: 2025-12-09
+
+.. currentmodule:: fluxnet_shuttle.models
+
+This module defines Pydantic models for data validation and serialization
+in the FLUXNET Shuttle Library. These models ensure type safety and provide
+automatic validation for FLUXNET dataset metadata and operations.
+
+Classes:
+    TeamMember: Team member information for a site
+    BadmSiteGeneralInfo: Site general information from BADM format
+    DataFluxnetProduct: FLUXNET product data information
+    FluxnetDatasetMetadata: Combined model for complete dataset metadata
+    PluginErrorDetail: Individual plugin error information
+    ErrorSummary: Summary of errors collected during operations
+
+The models are designed to work with the FLUXNET data format and provide
+validation for:
+    - Data hub and publisher information
+    - Site identifiers and temporal coverage
+    - Data versions and file metadata
+    - Download URLs with validation
+    - Error tracking and reporting
+
+Example:
+    >>> from fluxnet_shuttle.models.schema import FluxnetDatasetMetadata
+    >>> site_info = BadmSiteGeneralInfo(
+    ...     site_id="US-Ha1",
+    ...     site_name="Harvard Forest",
+    ...     data_hub="AmeriFlux",
+    ...     location_lat=42.5378,
+    ...     location_long=-72.1715,
+    ...     igbp="DBF",
+    ...     group_team_member=TeamMember(
+    ...         team_member_name="J. William Munger",
+    ...         team_member_email="<EMAIL>",
+    ...         team_member_role="PI"
+    ...     ),
+    ...     network=["AmeriFlux", "LTER", "Phenocam"]
+    ... )
+    >>> product_data = DataFluxnetProduct(
+    ...     first_year=2005,
+    ...     last_year=2025,
+    ...     download_link="https://amfcdn-dev.lbl.gov/data.zip",
+    ...     product_id="10.17190/AMF/1871137",
+    ...     product_citation="J. William Munger (2025), AmeriFlux FLUXNET citation ...",
+    ...     product_source_network="AMF",
+    ...     oneflux_code_version="1.3",
+    ...     fluxnet_product_name="AMF_US-Ha1_FLUXNET_..."
+    ... )
+    >>> metadata = FluxnetDatasetMetadata(
+    ...     site_info=site_info,
+    ...     product_data=product_data
+    ... )
+
+Note:
+    All models use Pydantic v2 syntax and are compatible with FastAPI
+    automatic API documentation generation.
+
+.. moduleauthor:: FLUXNET Shuttle Library Team
+"""
+
+import re
+from datetime import datetime
+from typing import List
+
+from pydantic import BaseModel, ConfigDict, Field, HttpUrl, field_validator, model_validator
+
+
+class TeamMember(BaseModel):
+    """
+    Pydantic model for team member information.
+
+    This model represents information about a team member associated with a site,
+    including their name, role, and contact email.
+
+    Attributes:
+        team_member_name (str): Team member name (First/Given Last/Family)
+        team_member_role (str): Team member role (e.g., PI, Researcher, Data Manager)
+        team_member_email (str): Team member email address
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    team_member_name: str = Field(
+        ...,
+        description="Team member name (First/Given Last/Family)",
+        min_length=1,
+        max_length=200,
+    )
+
+    team_member_role: str = Field(
+        default="",
+        description="Team member role (e.g., PI, Researcher, Data Manager)",
+        max_length=100,
+    )
+
+    team_member_email: str = Field(
+        default="",
+        description="Team member email address",
+        max_length=200,
+    )
+
+
+class BadmSiteGeneralInfo(BaseModel):
+    """
+    Pydantic model for BADM Site General Information.
+
+    This model represents the minimum required fields for site general information
+    in the BADM (Biological, Ancillary, Disturbance and Metadata) format.
+
+    Attributes:
+        site_id (str): Site identifier by country using first two chars or clusters
+        site_name (str): Site name
+        data_hub (str): Data hub name (e.g., AmeriFlux, ICOS, TERN)
+        location_lat (float): Site latitude in decimal degrees, datum WGS84 ellipsoid
+        location_long (float): Site longitude in decimal degrees, datum WGS84 ellipsoid
+        igbp (str): IGBP land cover type classification
+        network (List[str]): Network affiliation(s) of the site
+        group_team_member (List[TeamMember]): List of team member information for this site
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    site_id: str = Field(
+        ...,
+        description="Site identifier by country using first two chars or clusters",
+        min_length=1,
+        max_length=20,
+    )
+
+    site_name: str = Field(
+        ...,
+        description="Site name",
+        min_length=1,
+        max_length=200,
+    )
+
+    # data_hub is not part of the BADM Standard but including in the BADM SGI model"
+    data_hub: str = Field(
+        ...,
+        description="Data hub name (e.g., AmeriFlux, ICOS, TERN)",
+        min_length=1,
+        max_length=50,
+    )
+
+    location_lat: float = Field(
+        ..., description="Site latitude in decimal degrees, datum WGS84 ellipsoid", ge=-90.0, le=90.0
+    )
+
+    location_long: float = Field(
+        ..., description="Site longitude in decimal degrees, datum WGS84 ellipsoid", ge=-180.0, le=180.0
+    )
+
+    igbp: str = Field(
+        ...,
+        description="IGBP land cover type classification",
+        min_length=1,
+        max_length=10,
+    )
+
+    network: List[str] = Field(
+        default_factory=list,
+        description="Network affiliation(s) of the site",
+    )
+
+    group_team_member: List[TeamMember] = Field(
+        default_factory=list,
+        description="List of team member information for this site",
+    )
+
+    @field_validator("site_id")
+    @classmethod
+    def validate_site_id_format(cls: type, v: str) -> str:
+        """Validate that site_id follows the country code pattern."""
+        if not re.match(r"^[A-Z_]+-[A-Za-z0-9]+$", v):
+            raise ValueError("site_id must follow format: XX-YYYY where XX is country code")
+        return v
+
+
+class DataFluxnetProduct(BaseModel):
+    """
+    Pydantic model for FLUXNET Product Data Information.
+
+    This model represents the minimum required fields for FLUXNET data products,
+    including temporal coverage and download information.
+
+    Attributes:
+        first_year (int): First year of data coverage (YYYY format)
+        last_year (int): Last year of data coverage (YYYY format)
+        download_link (HttpUrl): URL for downloading the data product
+        product_citation (str): Citation for the data product
+        product_id (str): Product identifier (e.g., hashtag, DOI, PID)
+        oneflux_code_version (str): ONEFlux processing code used, extracted from fluxnet_product_name
+            (major.minor version designation only)
+        product_source_network (str): Source network identifier extracted from fluxnet_product_name (e.g., AMF, ICOSETC)
+        fluxnet_product_name (str): Name of the FLUXNET data product file
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    first_year: int = Field(..., description="First year of data coverage in YYYY format", ge=1900, le=2100)
+
+    last_year: int = Field(..., description="Last year of data coverage in YYYY format", ge=1900, le=2100)
+
+    download_link: HttpUrl = Field(..., description="URL for downloading the data product")
+
+    product_citation: str = Field(..., description="Citation for the data product")
+
+    product_id: str = Field(..., description="Product identifier (e.g., hashtag, DOI, PID)")
+
+    oneflux_code_version: str = Field(
+        ...,
+        description=(
+            "ONEFlux processing code used, extracted from fluxnet_product_name "
+            "(major.minor version designation only)"
+        ),
+    )
+
+    product_source_network: str = Field(
+        ..., description="Source network identifier extracted from fluxnet_product_name (e.g., AMF, ICOSETC)"
+    )
+
+    fluxnet_product_name: str = Field(
+        ..., description="Name of the FLUXNET data product file", min_length=1, max_length=255
+    )
+
+    @model_validator(mode="after")
+    def validate_year_range(self) -> "DataFluxnetProduct":
+        """Validate that last_year is not before first_year."""
+        if self.last_year < self.first_year:
+            raise ValueError("last_year must be greater than or equal to first_year")
+        return self
+
+
+class FluxnetDatasetMetadata(BaseModel):
+    """
+    Combined model for complete FLUXNET dataset metadata.
+
+    This model combines both site general information and product data
+    to represent a complete FLUXNET dataset entry.
+
+    Attributes:
+        site_info (BadmSiteGeneralInfo): Site general information
+        product_data (DataFluxnetProduct): Product data information
+    """
+
+    model_config = ConfigDict(
+        str_strip_whitespace=True,
+        validate_assignment=True,
+        extra="allow",  # Allow additional fields for extensibility
+    )
+
+    site_info: BadmSiteGeneralInfo = Field(..., description="BADM Site general information")
+
+    product_data: DataFluxnetProduct = Field(..., description="FLUXNET product data information")
+
+
+class PluginErrorDetail(BaseModel):
+    """
+    Pydantic model for individual plugin error details.
+
+    This model represents an error that occurred during plugin execution,
+    including context about which data hub/plugin encountered the error.
+
+    Attributes:
+        data_hub (str): Data hub/plugin name where the error occurred
+        operation (str): Operation being performed when the error occurred
+        error (str): Error message or description
+        error_type (str): Exception class name (e.g. "TimeoutError", "PluginError")
+        timestamp (str): ISO format timestamp when the error occurred
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    data_hub: str = Field(..., description="Data hub/plugin name where the error occurred", min_length=1)
+
+    operation: str = Field(..., description="Operation being performed when the error occurred", min_length=1)
+
+    error: str = Field(..., description="Error message or description", min_length=1)
+
+    error_type: str = Field(..., description="Exception class name (e.g. 'TimeoutError', 'PluginError')", min_length=1)
+
+    timestamp: str = Field(..., description="ISO format timestamp when the error occurred")
+
+    @field_validator("timestamp")
+    @classmethod
+    def validate_timestamp_format(cls: type, v: str) -> str:
+        """Validate that timestamp is in ISO format."""
+        try:
+            datetime.fromisoformat(v)
+        except ValueError as e:
+            raise ValueError(f"timestamp must be in ISO format: {e}") from e
+        return v
+
+
+class ErrorSummary(BaseModel):
+    """
+    Pydantic model for error summary information.
+
+    This model represents a summary of errors collected during FLUXNET Shuttle
+    operations, including total counts and detailed error information.
+
+    Attributes:
+        total_errors (int): Total number of errors encountered
+        total_results (int): Total number of successful results retrieved
+        errors (List[PluginErrorDetail]): List of detailed error information
+    """
+
+    model_config = ConfigDict(str_strip_whitespace=True, validate_assignment=True, extra="forbid")
+
+    total_errors: int = Field(..., description="Total number of errors encountered", ge=0)
+
+    total_results: int = Field(..., description="Total number of successful results retrieved", ge=0)
+
+    errors: List[PluginErrorDetail] = Field(..., description="List of detailed error information")
